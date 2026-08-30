@@ -1,0 +1,16 @@
+{
+  "name": "@edu/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "dependencies": {
+    "@edu/kernel": "workspace:*",
+    "zod": "^3.24.1"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  }
+}

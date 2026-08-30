@@ -1,0 +1,21 @@
+<!doctype html>
+<!--
+  `lang` and `dir` are set to the Arabic defaults in the served HTML rather than
+  being applied by JavaScript after hydration. Doing it here avoids a
+  left-to-right flash before the app boots, and keeps the document correct for
+  assistive technology even if the bundle fails to load.
+
+  They are updated at runtime by `applyDocumentLocale` when the user switches
+  language.
+-->
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>منصة التعلم</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

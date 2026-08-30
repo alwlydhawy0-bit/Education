@@ -1,0 +1,49 @@
+name: CodeQL
+
+# Static application security testing (SAST).
+#
+# Complements the checks in ci.yml: those enforce OUR rules (dependency
+# direction, secrets, advisories); CodeQL looks for the classes of bug no
+# project-specific rule anticipates — injection, unsafe deserialization,
+# tainted paths reaching a sink.
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly, so newly published queries run against unchanged code. Most
+    # findings on a mature codebase arrive this way, not from a new commit.
+    - cron: '17 3 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      security-events: write
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ['javascript-typescript']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          queries: security-extended
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:${{ matrix.language }}'

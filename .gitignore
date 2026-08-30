@@ -1,0 +1,20 @@
+node_modules/
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Secrets — never commit real environment files.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+!**/testdata/**/*.key
+
+.DS_Store
+.vscode/
+.idea/
+*.log
+.vitest/
+.eslintcache

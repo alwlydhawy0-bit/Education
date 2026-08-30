@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A stuck job must not hold the queue, and a superseded run must not keep
+# burning minutes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege by default. A job that needs more asks for it explicitly.
+permissions:
+  contents: read
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  # ---------------------------------------------------------------------
+  # Fast feedback: formatting, lint, types, and the checks that need no
+  # database. Split out so a formatting mistake fails in under a minute.
+  # ---------------------------------------------------------------------
+  static:
+    name: Static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - name: Install dependencies
+        # --frozen-lockfile makes CI fail rather than silently resolving a
+        # different dependency tree than the one that was reviewed.
+        run: pnpm install --frozen-lockfile
+
+      - name: Check formatting
+        run: pnpm run format
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Unit tests
+        run: pnpm exec vitest run --project unit
+
+      - name: Architecture fitness tests
+        # Enforces the dependency rules in docs/architecture/dependency-rules.md.
+        # A violation here is an architecture regression, not a style nit.
+        run: pnpm exec vitest run --project architecture
+
+  # ---------------------------------------------------------------------
+  # Supply chain and secrets. Kept in its own job so that its result is
+  # legible at a glance in the checks list.
+  # ---------------------------------------------------------------------
+  supply-chain:
+    name: Supply chain and secrets
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Full history so the secret scan can be extended to diffs later.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Secret scan
+        run: pnpm run security:secrets
+
+      - name: Dependency audit and lockfile checks
+        run: pnpm run security:deps
+
+  # ---------------------------------------------------------------------
+  # Database-backed suites. These are the ones that actually prove the
+  # authorization boundaries, so they run against a real PostgreSQL with the
+  # same non-superuser role the production server uses.
+  # ---------------------------------------------------------------------
+  database:
+    name: Integration and security tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres_ci_pw
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '5432'
+      PGPASSWORD: postgres_ci_pw
+      TEST_MIGRATOR_URL: postgres://edu_migrator:mig_ci_pw@127.0.0.1:5432/edu_test # secret-scan-allow: ephemeral CI service-container credentials, not a real environment
+      TEST_APP_URL: postgres://edu_app:app_ci_pw@127.0.0.1:5432/edu_test # secret-scan-allow: ephemeral CI service-container credentials, not a real environment
+      TEST_SUPERUSER_URL: postgres://postgres:postgres_ci_pw@127.0.0.1:5432/edu_test # secret-scan-allow: ephemeral CI service-container credentials, not a real environment
+      TEST_APP_NORLS_URL: postgres://edu_app_norls:norls_ci_pw@127.0.0.1:5432/edu_test # secret-scan-allow: ephemeral CI service-container credentials, not a real environment
+      TEST_APP_PASSWORD: app_ci_pw
+      TEST_MIGRATOR_PASSWORD: mig_ci_pw
+      TEST_NORLS_PASSWORD: norls_ci_pw
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install the PostgreSQL client
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends postgresql-client
+
+      - name: Provision the test database
+        run: tools/ci/setup-test-db.sh
+
+      - name: Integration tests (schema, constraints, RLS)
+        run: pnpm exec vitest run --project integration
+
+      # Kept as its own step so the checks list shows explicitly whether the
+      # security boundaries passed — a green "tests" tick that hides a skipped
+      # security suite is exactly the failure mode this guards against.
+      - name: Security tests (IDOR/BOLA, session, CSRF, audit)
+        run: pnpm exec vitest run --project security

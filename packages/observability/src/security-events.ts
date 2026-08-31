@@ -50,6 +50,32 @@ export const SecurityEventType = {
   USER_STATUS_CHANGED: 'user.status_changed',
 
   /**
+   * Structural changes to organizations and classes.
+   *
+   * These are recorded because the class graph IS the authorization graph:
+   * teacher-to-student access is derived from shared class membership, so a
+   * roster change silently changes who can read a child's shared work. An
+   * investigator asking "why could this teacher see that?" needs the history.
+   */
+  ORGANIZATION_CREATED: 'organization.created',
+  ORGANIZATION_UPDATED: 'organization.updated',
+  CLASS_CREATED: 'class.created',
+  CLASS_UPDATED: 'class.updated',
+  CLASS_ARCHIVED: 'class.archived',
+  CLASS_MEMBER_ADDED: 'class.member_added',
+  CLASS_MEMBER_REMOVED: 'class.member_removed',
+  TEACHER_ASSIGNED: 'class.teacher_assigned',
+  TEACHER_UNASSIGNED: 'class.teacher_unassigned',
+
+  /**
+   * Guardian-link lifecycle. Verification is the moment a claim becomes access
+   * to a minor's work, so it is the single most consequential event here.
+   */
+  GUARDIAN_LINK_CREATED: 'guardian_link.created',
+  GUARDIAN_LINK_VERIFIED: 'guardian_link.verified',
+  GUARDIAN_LINK_REVOKED: 'guardian_link.revoked',
+
+  /**
    * Emitted on every authorization denial. A burst of these from one actor
    * across many resource ids is the primary IDOR/BOLA probing signal.
    */

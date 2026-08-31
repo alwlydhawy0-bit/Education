@@ -21,7 +21,8 @@ direction: `platform` does not import `identity`.
 
 ### `relationships` — **[BUILT]**
 
-Owns `guardian_links`, `teacher_assignments`.
+Owns `classes`, `class_memberships`, `teacher_assignments`,
+`guardian_relationships`.
 
 These tables are **authorization inputs**, not descriptive data — a wrong row
 silently widens who can read a child's work. That is why their constraints are
@@ -30,7 +31,22 @@ link must record _when_; an `ended` assignment must record _when_).
 
 Exposes `RelationshipReader.loadSnapshot(tx, actorId)`, returning only
 **verified** guardianships and **active** assignments, so no caller can forget to
-filter.
+filter. Since Task 004 it also exposes `ClassesService` and `GuardiansService`
+for the management APIs (`docs/api/relationships.md`).
+
+Two invariants hold across all four tables and are enforced in the database, not
+only in code:
+
+- **The parties of a relationship are immutable.** A `BEFORE UPDATE` trigger
+  (migration 0014) rejects any change to `class_id`, `user_id`, `teacher_id`,
+  `guardian_id` or `child_id`, and to a class's `organization_id`. RLS can say
+  who may update a row but not which columns may change, so without the trigger
+  an actor permitted to update a row they participate in could re-point it at
+  somebody else and inherit its status.
+- **Detachment is a status change, never a `DELETE`.** The roster history is the
+  audit trail for who could read whose work, and when. Ended rows are immutable;
+  re-attaching creates a new row, and the unique indexes cover **active** rows
+  only (migration 0015).
 
 **Teacher-to-student is derived, not stored** — the actor has an active
 assignment to an active class in which the student has an active membership. The
@@ -38,13 +54,33 @@ join lives here and only here, so ending any one of the three revokes access
 immediately and no caller can check two conditions and forget the third. See
 [ADR 0008](./adr/0008-rbac-scopes.md).
 
+### `users` — **[BUILT]**
+
+Owns `profiles`, and the administrative read/write surface over `users` that
+`identity` does not provide (listing, reading, suspension, role grants).
+
+**[OPEN]** `users` and `identity` therefore both query `users`. Splitting the
+authentication path from the administrative path was deliberate — the former is
+pre-authentication and definer-bounded, the latter is fully authorized — but it
+means the "one module owns each table" rule is honoured at the level of
+_columns and operations_ here rather than of the table. If a third writer
+appears, extract a shared owner instead of adding one.
+
+### `organizations` — **[BUILT]**
+
+Owns `organizations`. Deliberately thin: create, read, list, rename. It is
+separate from `relationships` because the tenancy root has a different authority
+model — only a **platform operator** (global `security_admin`) may create one,
+and every other domain treats an organization id as a value it was given, never
+one it may choose.
+
 ### `notebook` — **[BUILT]**
 
 Owns `notes`. The worked example of the protected-resource pattern:
 `owner_id` + `organization_id` + `visibility` + `state`. Future owned resources
 (projects, submissions, portfolios, files) follow the same shape.
 
-Consumes a `RelationshipSnapshot`. It never queries `guardian_links` or
+Consumes a `RelationshipSnapshot`. It never queries `guardian_relationships` or
 `teacher_assignments`.
 
 ### `platform` — **[BUILT]**, not a domain
@@ -58,7 +94,7 @@ password hashing, token generation. Owns `audit_log` (append-only).
 `assessments` · `mastery` · `experiments` · `projects` · `portfolio` · `files` ·
 `knowledge-base` · `ai-gateway` · `ai-tutor` · `ai-assistant` ·
 `recommendations` · `community` · `moderation` · `notifications` · `analytics` ·
-`administration` · `organizations`.
+`administration`.
 
 None exist. They are listed so their boundaries are considered before code is
 written, not after.
@@ -76,6 +112,14 @@ written, not after.
    - **[OPEN]** No flow keeps this correct across an organization transfer,
      because no transfer flow exists. When one is built it must update existing
      notes in the same transaction, or the column must become a lookup.
+   - **[OPEN]** A second instance arrived with Task 004: the roster queries in
+     `relationships` join `users` for `display_name`, so a roster row can be
+     rendered without a second round trip. The join is read-only, limited to
+     that one column, and runs under the caller's own RLS — a name the caller
+     could not otherwise see is not returned. It is still a reach into another
+     domain's table, and the standing rule is that it does not grow: any further
+     field belongs behind a `users` contract, and the roster should move to one
+     if a second column is ever needed.
 4. **Foreign keys may cross domains.** A schema-level reference to `users(id)` is
    fine; a _query_ into another domain's tables is not. Referential integrity is
    the database's job.
@@ -88,8 +132,10 @@ written, not after.
 
 A domain can be extracted into its own service when its tables are touched only
 by it, its contract is explicit, it has no imports from sibling modules, and its
-tests do not depend on another domain's internals. All three current domains meet
-this today — enforced by `tests/architecture/dependency-rules.test.ts`, not by
+tests do not depend on another domain's internals. `notebook` and
+`organizations` meet this cleanly today; `relationships` meets it except for the
+`display_name` join noted above, and `identity`/`users` share the `users` table.
+Both exceptions are recorded rather than papered over — enforced by `tests/architecture/dependency-rules.test.ts`, not by
 inspection.
 
 **No domain should be extracted until scale, reliability, or team structure

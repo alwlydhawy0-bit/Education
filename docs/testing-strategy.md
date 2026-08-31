@@ -62,18 +62,42 @@ assignment, verified guardian, pending guardian, every privileged role, an actor
 holding _every_ role at once, suspended and unverified actors, and archived and
 deleted states.
 
-**Architecture** — the seven dependency rules, by scanning imports in source.
+Task 004 added the roster decision table: the roster as a whole
+(`class_membership:list`) versus one member's row (`:read`), including the two
+degenerate forms — a list aimed at a single member, and a row-scoped action with
+no member named — because that distinction is what VULN-013 turned on.
+
+**Architecture** — the nine dependency rules, by scanning imports in source,
+plus the rule that every declared security-event type has an emitter.
 
 **Integration** — RLS by attack (read/update/delete/forge by exact id, unfiltered
 `SELECT *`, no actor set, pool-reuse leakage), privilege boundaries (`user_roles`
-writes denied, `audit_log` reads denied), and 21 constraint tests asserting the
+writes denied, `audit_log` reads denied), and constraint tests asserting the
 database refuses states that would break authorization invariants.
+
+`rls-relationship-writes.test.ts` (Task 004) is the write-side counterpart: 18
+statements run as `edu_app` with no application code in the path, asserting the
+database refuses a teacher self-assigning, a student self-enrolling, a school
+administrator creating an organization or reaching into another one, a class
+moving tenant, a relationship's parties being re-pointed, and an ended
+membership being reinstated.
 
 **Security** — end-to-end IDOR/BOLA, the existence-oracle test, mass assignment,
 authentication requirements, immediate revocation, CSRF including a missing
 Origin and a near-miss Origin, cookie flags, token-hash-only storage, login
 enumeration resistance, security headers, audit trail contents, rate limiting,
-and body size limits.
+and body size limits. Task 004 added 47 cases over the relationship and class
+management surface, written from the scenarios the brief names by hand rather
+than from the implementation.
+
+**The two gates are tested with the other removed.** This is the claim that
+would be easiest to state and hardest to have earned, so it has a test on each
+side: `tests/integration/rls-relationship-writes.test.ts` proves the database
+refuses alone, and `tests/security/layered-defense.test.ts` runs the whole
+application against a `BYPASSRLS` role and proves the policy engine refuses
+alone. A boundary that appears only in one of them is a boundary with one gate —
+that is how VULN-016 was found, and the fix is verified in the second file, not
+the first.
 
 ## Test data
 
@@ -88,7 +112,8 @@ Every other test builds the app in-process via `buildApp`. That is fast and
 precise, but it never exercises `main.ts`, never resolves modules the way Node
 does at runtime, and never binds a socket.
 
-Task 001 shipped an API that could not start (VULN-004) and all 208 tests passed
+Task 001 shipped an API that could not start (VULN-004) and all 208 tests of the
+day passed
 anyway, because Vitest resolved its imports through a plugin the real runtime
 does not have. `tests/integration/boot.test.ts` spawns the server as a real
 process and asserts it binds, serves `/health`, enforces authentication, and

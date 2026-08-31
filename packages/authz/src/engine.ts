@@ -5,6 +5,9 @@ import { profilePolicy } from './policies/profile.policy.ts';
 import { roleGrantPolicy } from './policies/role-grant.policy.ts';
 import { classMembershipPolicy } from './policies/class-membership.policy.ts';
 import { guardianRelationshipPolicy } from './policies/guardian-relationship.policy.ts';
+import { organizationPolicy } from './policies/organization.policy.ts';
+import { classPolicy } from './policies/class.policy.ts';
+import { teacherAssignmentPolicy } from './policies/teacher-assignment.policy.ts';
 import {
   resourceKindForAction,
   type Action,
@@ -47,6 +50,9 @@ const DEFAULT_POLICIES: Readonly<Record<ResourceKind, PolicyFn>> = Object.freeze
   user: userPolicy as unknown as PolicyFn,
   profile: profilePolicy as unknown as PolicyFn,
   role_grant: roleGrantPolicy as unknown as PolicyFn,
+  organization: organizationPolicy as unknown as PolicyFn,
+  class: classPolicy as unknown as PolicyFn,
+  teacher_assignment: teacherAssignmentPolicy as unknown as PolicyFn,
   class_membership: classMembershipPolicy as unknown as PolicyFn,
   guardian_relationship: guardianRelationshipPolicy as unknown as PolicyFn,
 });

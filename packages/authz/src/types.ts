@@ -108,6 +108,20 @@ export function hasPermission(actor: Actor, permission: PermissionName): boolean
 }
 
 /**
+ * A PLATFORM operator: `security_admin` held at GLOBAL scope.
+ *
+ * Distinct from a school's security administrator, whose grant is
+ * organization-scoped. Only a platform operator may create organizations, and
+ * the grant cannot be made through the API at all — migration 0013 refuses to
+ * assign any privileged role globally, so it is an out-of-band operator action.
+ */
+export function isPlatformOperator(actor: Actor): boolean {
+  return actor.grants.some(
+    (grant) => grant.role === Role.SECURITY_ADMIN && grant.scopeType === 'global',
+  );
+}
+
+/**
  * Relationship edges relevant to the current decision, loaded from the database
  * by the caller immediately before the decision is made.
  *
@@ -149,7 +163,15 @@ export interface AuthorizationContext {
 // A resource passed to the engine is always the SERVER's copy of the record.
 
 export type ResourceKind =
-  'note' | 'user' | 'profile' | 'role_grant' | 'class_membership' | 'guardian_relationship';
+  | 'note'
+  | 'user'
+  | 'profile'
+  | 'role_grant'
+  | 'organization'
+  | 'class'
+  | 'teacher_assignment'
+  | 'class_membership'
+  | 'guardian_relationship';
 
 export interface BaseResource {
   readonly kind: ResourceKind;
@@ -197,11 +219,41 @@ export interface RoleGrantResource extends BaseResource {
   readonly scopeId: string | null;
 }
 
+export interface OrganizationResource extends BaseResource {
+  readonly kind: 'organization';
+}
+
+export type ClassState = 'active' | 'archived';
+
+export interface ClassResource extends BaseResource {
+  readonly kind: 'class';
+  readonly organizationId: string;
+  readonly state: ClassState;
+}
+
+export interface TeacherAssignmentResource extends BaseResource {
+  readonly kind: 'teacher_assignment';
+  readonly classId: string;
+  readonly classOrganizationId: string | null;
+  readonly teacherId: string;
+  readonly state: 'active' | 'ended';
+}
+
 export interface ClassMembershipResource extends BaseResource {
   readonly kind: 'class_membership';
   readonly classId: string;
   readonly classOrganizationId: string | null;
-  readonly memberUserId: string;
+  /**
+   * The member this row is about, or `null` when the resource is the class
+   * ROSTER as a whole rather than one person's row.
+   *
+   * The distinction matters: "may I see my own membership?" and "may I
+   * enumerate everyone in this class?" are different questions, and answering
+   * the second with the first is how a student ends up reading the roster.
+   * Only `class_membership:list` accepts `null`; every other action requires a
+   * named member and denies without one.
+   */
+  readonly memberUserId: string | null;
   readonly state: 'active' | 'ended';
 }
 
@@ -209,6 +261,16 @@ export interface GuardianRelationshipResource extends BaseResource {
   readonly kind: 'guardian_relationship';
   readonly guardianId: string;
   readonly childId: string;
+  /**
+   * The organization the CHILD belongs to, or `null` when it is unknown or the
+   * child has none.
+   *
+   * Present so the policy can confine an administrator to their own school
+   * without asking the database. RLS confines them the same way
+   * (`app_user_organization(child_id) = app_actor_organization()`); carrying it
+   * here is what stops that confinement from being RLS's alone.
+   */
+  readonly childOrganizationId: string | null;
   readonly state: 'pending' | 'verified' | 'revoked';
 }
 
@@ -217,6 +279,9 @@ export type Resource =
   | UserResource
   | ProfileResource
   | RoleGrantResource
+  | OrganizationResource
+  | ClassResource
+  | TeacherAssignmentResource
   | ClassMembershipResource
   | GuardianRelationshipResource;
 
@@ -243,12 +308,35 @@ export const ROLE_GRANT_ACTIONS = [
   'role_grant:list',
 ] as const;
 
+export const ORGANIZATION_ACTIONS = [
+  'organization:create',
+  'organization:read',
+  'organization:update',
+  'organization:list',
+] as const;
+
+export const CLASS_ACTIONS = [
+  'class:create',
+  'class:read',
+  'class:update',
+  'class:archive',
+  'class:list',
+] as const;
+
+export const TEACHER_ASSIGNMENT_ACTIONS = [
+  'teacher_assignment:create',
+  'teacher_assignment:read',
+  'teacher_assignment:remove',
+] as const;
+
 export const CLASS_MEMBERSHIP_ACTIONS = [
   'class_membership:read',
+  'class_membership:list',
   'class_membership:manage',
 ] as const;
 
 export const GUARDIAN_RELATIONSHIP_ACTIONS = [
+  'guardian_relationship:create',
   'guardian_relationship:read',
   'guardian_relationship:verify',
   'guardian_relationship:revoke',
@@ -257,6 +345,9 @@ export const GUARDIAN_RELATIONSHIP_ACTIONS = [
 export type NoteAction = (typeof NOTE_ACTIONS)[number];
 export type UserAction = (typeof USER_ACTIONS)[number];
 export type ProfileAction = (typeof PROFILE_ACTIONS)[number];
+export type OrganizationAction = (typeof ORGANIZATION_ACTIONS)[number];
+export type ClassAction = (typeof CLASS_ACTIONS)[number];
+export type TeacherAssignmentAction = (typeof TEACHER_ASSIGNMENT_ACTIONS)[number];
 export type RoleGrantAction = (typeof ROLE_GRANT_ACTIONS)[number];
 export type ClassMembershipAction = (typeof CLASS_MEMBERSHIP_ACTIONS)[number];
 export type GuardianRelationshipAction = (typeof GUARDIAN_RELATIONSHIP_ACTIONS)[number];
@@ -266,6 +357,9 @@ export type Action =
   | UserAction
   | ProfileAction
   | RoleGrantAction
+  | OrganizationAction
+  | ClassAction
+  | TeacherAssignmentAction
   | ClassMembershipAction
   | GuardianRelationshipAction;
 
@@ -274,6 +368,9 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...USER_ACTIONS,
   ...PROFILE_ACTIONS,
   ...ROLE_GRANT_ACTIONS,
+  ...ORGANIZATION_ACTIONS,
+  ...CLASS_ACTIONS,
+  ...TEACHER_ASSIGNMENT_ACTIONS,
   ...CLASS_MEMBERSHIP_ACTIONS,
   ...GUARDIAN_RELATIONSHIP_ACTIONS,
 ];

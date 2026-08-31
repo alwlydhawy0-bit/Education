@@ -30,11 +30,57 @@ export function guardianRelationshipPolicy(
   const isChild = relationship.childId === actor.id;
   const isParticipant = isGuardian || isChild;
 
+  /**
+   * An administrator, of the CHILD'S OWN school.
+   *
+   * The organization test is not decoration. Without it this policy would allow
+   * an administrator of any school to read, verify or revoke any link, and the
+   * only thing refusing them would be RLS — one gate where the design claims
+   * two. An actor with no organization, or a child whose school is unknown,
+   * matches nothing.
+   */
+  const isAdminOfChildsOrganization =
+    (actor.roles.includes(Role.ADMIN) || actor.roles.includes(Role.SECURITY_ADMIN)) &&
+    actor.organizationId !== null &&
+    relationship.childOrganizationId !== null &&
+    relationship.childOrganizationId === actor.organizationId;
+
+  if (action === 'guardian_relationship:create') {
+    // A new claim is always PENDING and grants nothing. Creating one already
+    // verified is refused here and independently by the RLS insert policy.
+    if (relationship.state !== 'pending') {
+      return deny(action, relationship.id, 'guardian_relationship.must_start_pending', 'reveal');
+    }
+    // A guardian may only ever claim a relationship ABOUT THEMSELVES. Claiming
+    // one on somebody else's behalf would let an actor manufacture a link
+    // between two accounts they do not control.
+    if (isChild) {
+      return deny(
+        action,
+        relationship.id,
+        'guardian_relationship.cannot_claim_own_guardian',
+        'reveal',
+      );
+    }
+    if (isGuardian && actor.roles.includes(Role.GUARDIAN)) {
+      return allow(action, relationship.id, 'guardian_relationship.self_claim_pending');
+    }
+    if (isAdminOfChildsOrganization) {
+      return allow(action, relationship.id, 'guardian_relationship.created_by_admin');
+    }
+    return deny(
+      action,
+      relationship.id,
+      'guardian_relationship.create_requires_guardian_or_admin',
+      'hide',
+    );
+  }
+
   if (action === 'guardian_relationship:read') {
     if (isParticipant) {
       return allow(action, relationship.id, 'guardian_relationship.participant');
     }
-    if (actor.roles.includes(Role.ADMIN) || actor.roles.includes(Role.SECURITY_ADMIN)) {
+    if (isAdminOfChildsOrganization) {
       return allow(action, relationship.id, 'guardian_relationship.admin');
     }
     return deny(action, relationship.id, 'guardian_relationship.not_a_participant', 'hide');
@@ -58,7 +104,7 @@ export function guardianRelationshipPolicy(
         'reveal',
       );
     }
-    if (actor.roles.includes(Role.ADMIN) || actor.roles.includes(Role.SECURITY_ADMIN)) {
+    if (isAdminOfChildsOrganization) {
       return allow(action, relationship.id, 'guardian_relationship.verified_by_admin');
     }
     return deny(
@@ -78,7 +124,7 @@ export function guardianRelationshipPolicy(
     if (isParticipant) {
       return allow(action, relationship.id, 'guardian_relationship.participant_may_revoke');
     }
-    if (actor.roles.includes(Role.ADMIN) || actor.roles.includes(Role.SECURITY_ADMIN)) {
+    if (isAdminOfChildsOrganization) {
       return allow(action, relationship.id, 'guardian_relationship.revoked_by_admin');
     }
   }

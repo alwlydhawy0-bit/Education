@@ -7,17 +7,17 @@ of the documentation — it states what was **not** done.
 ## The headline
 
 **This system is not proven secure, and no such claim is made anywhere in this
-repository.** 208 automated tests passed against a real PostgreSQL database.
+repository.** 607 automated tests passed against a real PostgreSQL database.
 That establishes that specific, enumerated properties held at a point in time. It
 does not establish the absence of vulnerabilities.
 
 ## What was actually verified
 
-**Updated for Task 002.** The counts and the "not verified" list below reflect
-the current state, not Task 001's.
+**Updated for Task 004.** The counts and the "not verified" list below reflect
+the current state.
 
-- 477 tests executed and passing: 227 unit, 51 architecture, 79 integration,
-  120 security.
+- 607 tests executed and passing: 270 unit, 65 architecture, 97 integration,
+  175 security.
 - Migrations applied cleanly from empty to full schema, repeatedly.
 - RLS enforced against a real non-superuser role — verified by attack, not by
   reading the policy.
@@ -76,12 +76,11 @@ the current state, not Task 001's.
   configures delivery.
 - **No MFA**, no password change while logged in, no session listing, no
   device-management UI.
-- **No endpoints for managing classes, class membership, or guardian
-  relationships.** The tables, the policies and the RLS exist and are tested;
-  the write APIs do not. Those relationships can currently only be created by an
-  operator with database access.
-- **`organizations` has no management API.** Organizations can only be created
-  directly in the database.
+- ~~**No endpoints for managing classes, class membership, or guardian
+  relationships.**~~ Built in Task 004; see `docs/api/relationships.md`.
+- ~~**`organizations` has no management API.**~~ Built in Task 004. Creating one
+  still requires a **platform operator**, and that role is still only grantable
+  directly in the database — deliberately.
 - **Account lockout is a fixed window**, not exponential backoff, and locks on a
   per-account basis only. An attacker spreading attempts across many accounts is
   bounded only by the per-IP rate limiter, which is per-process.
@@ -92,6 +91,45 @@ the current state, not Task 001's.
   authorization: the caller must authorize first. The service does, and a test
   covers it, but the function itself would return any user's grants if called
   directly by application code.
+
+## Added in Task 004
+
+- **The management APIs were never driven by a human through a UI.** There is no
+  frontend for any of the organization, class, roster or guardian-link
+  endpoints. They _were_ driven over real HTTP against a booted server — 22
+  checks covering the §3 scenarios, with the server log then searched for
+  passwords, session tokens and database credentials (none present) — but no
+  browser has ever touched them.
+- **Guardian verification has no external check.** An administrator verifying a
+  claim is asserting a family relationship the platform cannot corroborate
+  against anything. A compromised or careless school administrator can create a
+  false verified link within their own school, and nothing technical prevents it
+  (RISK-GUARD-01).
+- **A school administrator is unbounded within their school.** They may create
+  and archive any class, assign any teacher, enrol or remove any student, and
+  verify or revoke any family link. That is the intended authority, but there is
+  no smaller unit of trust and no second-person control on any of it
+  (RISK-ORGADMIN-01).
+- **The teacher roster is readable by anyone who can read the class**, students
+  included. Deliberate, but it is the one place on this surface where a
+  relationship list is not administratively gated.
+- **`relationships` joins `users` for `display_name`.** A documented, bounded
+  exception to the no-cross-domain-joins rule
+  (`docs/architecture/domain-boundaries.md`). It is read-only, one column, and
+  runs under the caller's own RLS — but it is a reach into another domain's
+  table, and it should move behind a contract if a second column is ever needed.
+- **No bulk enrolment, import, invitation, or join-code path exists.** Every
+  roster change is one authenticated request per person, which is correct but
+  will not survive a real school's onboarding without a batch surface designed
+  to the same rules.
+- **Listings are offset-paginated and unbounded in total size.** A class with
+  thousands of members returns them in pages, but nothing caps how many pages a
+  caller may walk, and no cursor stability is guaranteed across writes.
+- **`app_class_organization` and `app_user_organization` disclose one fact
+  each** — which organization a class or user id belongs to — to any
+  authenticated caller who can guess an id. Judged not sensitive and required to
+  break the RLS policy recursion (VULN-012), but it is a real, if small,
+  disclosure and it is not hidden.
 
 ## Added in Task 002
 

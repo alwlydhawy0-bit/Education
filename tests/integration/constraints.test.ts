@@ -158,7 +158,7 @@ describe('relationship integrity', () => {
     ).rejects.toThrow(/teacher_assignments_ended_consistency_ck/);
   });
 
-  it('rejects a duplicate teacher assignment to the same class', async () => {
+  it('rejects a second ACTIVE teacher assignment, but allows one after unassignment', async () => {
     const org = await createOrganization('S');
     const t = await createUser({ email: 't-dup@test.local', organizationId: org });
     const classId = await createClass(org);
@@ -168,7 +168,16 @@ describe('relationship integrity', () => {
         classId,
       ]);
     await insert();
-    await expect(insert()).rejects.toThrow(/teacher_assignments_pair_uk/);
+    // Since 0015 the unique index covers ACTIVE rows only, so a teacher cannot
+    // hold two live assignments to one class...
+    await expect(insert()).rejects.toThrow(/teacher_assignments_active_uk/);
+
+    // ...but a reassignment after unassignment is a new row, not an error.
+    await db.query(
+      `UPDATE teacher_assignments SET status = 'ended', ended_at = now() WHERE class_id = $1`,
+      [classId],
+    );
+    await expect(insert()).resolves.toBeDefined();
   });
 
   it('rejects an "ended" class membership with no end timestamp', async () => {
@@ -192,14 +201,23 @@ describe('relationship integrity', () => {
     ).rejects.toThrow(/classes_archived_consistency_ck/);
   });
 
-  it('rejects a duplicate class membership', async () => {
+  it('rejects a second ACTIVE class membership, but allows one after removal', async () => {
     const org = await createOrganization('S');
     const s = await createUser({ email: 's-dup@test.local', organizationId: org });
     const classId = await createClass(org);
     const insert = () =>
       db.query(`INSERT INTO class_memberships (class_id, user_id) VALUES ($1,$2)`, [classId, s.id]);
     await insert();
-    await expect(insert()).rejects.toThrow(/class_memberships_pair_uk/);
+    // Nobody is on a roster twice at once...
+    await expect(insert()).rejects.toThrow(/class_memberships_active_uk/);
+
+    // ...but history may repeat: a removed student can be re-enrolled, and the
+    // earlier spell keeps its own row (migration 0015).
+    await db.query(
+      `UPDATE class_memberships SET status = 'ended', ended_at = now() WHERE class_id = $1`,
+      [classId],
+    );
+    await expect(insert()).resolves.toBeDefined();
   });
 });
 

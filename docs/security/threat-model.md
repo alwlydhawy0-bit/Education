@@ -135,8 +135,67 @@ through `withActor`/`withoutActor`.
   **self-verification refused for every role**; only a `verified` link grants
   access, and a verified row must record when it was verified; either
   participant may revoke.
-- **Residual risk:** no endpoint creates or verifies these yet, so the policy is
-  tested but the workflow around it is unbuilt.
+- **Update (Task 004):** the workflow now exists — `POST /guardian-links`,
+  `/verify`, `/revoke`. A claim is always created `pending` and grants nothing;
+  the guardian is taken from the session; **both participants are refused
+  verification** (`403`); only an administrator **of the child's own
+  organization** may verify, enforced in the policy and in RLS independently
+  ([VULN-016](vulnerability-log.md)); either participant may revoke without
+  approval. `POST /guardian-links` answers `202` regardless of whether the child
+  exists, so it is not an existence oracle for the guardian role.
+- **Verification:** 16 cases in `tests/security/relationship-management.test.ts`,
+  the cross-school case again in `tests/security/layered-defense.test.ts` with
+  RLS disabled, and the write-side policies in
+  `tests/integration/rls-relationship-writes.test.ts` with the application out
+  of the path.
+- **Residual risk:** verification depends entirely on an administrator
+  recognising a genuine family relationship. The platform has no way to check
+  that claim against anything external, so a compromised or careless school
+  administrator can still create a false verified link within their own school.
+  Nothing here mitigates that; it is a process control, not a technical one.
+
+### T3d — Self-granted teaching relationships (added in Task 004)
+
+- **Attack surface:** `POST /classes/:id/teachers`, `POST /classes`,
+  `POST /classes/:id/members`.
+- **Why it matters:** teacher-to-student access is **derived** from a shared
+  active class (ADR 0008). Any actor able to create their own assignment, or to
+  create a class and enrol students into it, would be granting themselves access
+  to those students' shared work.
+- **Mitigations [BUILT]:** no teacher may assign anybody to any class, including
+  themselves — refused by `teacherAssignmentPolicy` and, independently, by an
+  RLS policy requiring `app_actor_is_org_admin()`; an administrator assigning
+  _themselves_ is refused (`403`); classes are administrator-only to create and
+  reshape; a class cannot move between organizations (trigger, migration 0014);
+  the parties of an assignment or membership are immutable (trigger); removal is
+  a status change, so ending an assignment or membership revokes derived access
+  immediately.
+- **Verification:** `tests/security/relationship-management.test.ts` (the named
+  §3 scenarios), `tests/integration/rls-relationship-writes.test.ts` (the
+  database refusing on its own), `tests/security/layered-defense.test.ts` (the
+  application refusing with RLS off).
+- **Residual risk:** an administrator of a school can still assign any teacher
+  in that school to any class in it. That is the intended authority; the
+  boundary is the organization, and there is no smaller unit of trust in the
+  model today.
+
+### T3e — Roster enumeration (added in Task 004)
+
+- **Attack surface:** `GET /classes/:id/members`, `GET /classes/:id/teachers`.
+- **Why it matters:** a class roster is a list of children, and being able to
+  read the class is not a reason to be handed one.
+- **Mitigations [BUILT]:** a distinct `class_membership:list` action, refused to
+  everyone but a teacher of the class and an administrator of its organization,
+  and refused outright if aimed at a single member so it cannot substitute for
+  the row-scoped read. An enrolled student gets `404`.
+- **Verification:** `relationship-management.test.ts`, `layered-defense.test.ts`
+  and five unit cases. Found as [VULN-013](vulnerability-log.md) — the first
+  implementation authorized the caller's own membership row and then returned
+  everyone's.
+- **Residual risk:** the **teacher** roster (`GET /classes/:id/teachers`) is
+  readable by anyone who can read the class, students included. That is a
+  deliberate choice — knowing who teaches your class is not sensitive — but it
+  is a choice, not an oversight, and it is the one asymmetry on this surface.
 
 ### T3 — Account takeover
 
@@ -252,16 +311,18 @@ ranking, counts, and latency. Semantic similarity must never widen access.
 
 ## 5. Risk register
 
-| ID                 | Risk                                                  | Severity                        | Status                                                 |
-| ------------------ | ----------------------------------------------------- | ------------------------------- | ------------------------------------------------------ |
-| RISK-ENUM-01       | Registration discloses whether an email is registered | Medium                          | Accepted; rate-limited; needs an email pipeline to fix |
-| RISK-UPLOAD-01     | No malware scanning                                   | High                            | Surface does not exist yet                             |
-| RISK-RAG-01        | Retrieval could bypass authorization                  | Critical                        | Design only                                            |
-| RISK-MFA-01        | No second factor                                      | Medium                          | Open                                                   |
-| RISK-RATE-01       | Rate limiting is per-process                          | Medium                          | Open; needs shared state at >1 replica                 |
-| RISK-ORG-01        | `notes.organization_id` may go stale on transfer      | Medium                          | Open; no transfer flow exists                          |
-| RISK-AUDIT-01      | Audit writes are best-effort                          | Low now, High once grades exist | Accepted for auth events only                          |
-| RISK-BREAKGLASS-01 | No audited emergency access path                      | Low                             | Deliberate                                             |
+| ID                 | Risk                                                                                                              | Severity                        | Status                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------- |
+| RISK-ENUM-01       | Registration discloses whether an email is registered                                                             | Medium                          | Accepted; rate-limited; needs an email pipeline to fix                |
+| RISK-UPLOAD-01     | No malware scanning                                                                                               | High                            | Surface does not exist yet                                            |
+| RISK-RAG-01        | Retrieval could bypass authorization                                                                              | Critical                        | Design only                                                           |
+| RISK-MFA-01        | No second factor                                                                                                  | Medium                          | Open                                                                  |
+| RISK-RATE-01       | Rate limiting is per-process                                                                                      | Medium                          | Open; needs shared state at >1 replica                                |
+| RISK-ORG-01        | `notes.organization_id` may go stale on transfer                                                                  | Medium                          | Open; no transfer flow exists                                         |
+| RISK-AUDIT-01      | Audit writes are best-effort                                                                                      | Low now, High once grades exist | Accepted for auth events only                                         |
+| RISK-BREAKGLASS-01 | No audited emergency access path                                                                                  | Low                             | Deliberate                                                            |
+| RISK-GUARD-01      | Guardian verification relies on an administrator's judgement; nothing checks the claim against an external source | Medium                          | Accepted; process control, no technical mitigation                    |
+| RISK-ORGADMIN-01   | A school administrator has full authority over every class, roster and family link in their school                | Medium                          | Accepted; the organization is the smallest unit of trust in the model |
 
 ## 6. What was NOT threat-modelled
 

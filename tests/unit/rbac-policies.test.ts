@@ -294,6 +294,7 @@ describe('guardianRelationshipPolicy', () => {
       id: 'rel-1',
       guardianId: SELF,
       childId: CHILD,
+      childOrganizationId: ORG_A,
       state: 'pending',
       ...over,
     }) as never;
@@ -331,6 +332,30 @@ describe('guardianRelationshipPolicy', () => {
     expect(engine.decide(ctx(admin), 'guardian_relationship:verify', relationship()).effect).toBe(
       'allow',
     );
+  });
+
+  it('refuses an administrator of ANOTHER school, on every action', () => {
+    // The policy must confine an administrator on its own. If it did not, RLS
+    // would be the only thing standing between a school's administrator and
+    // every family link on the platform.
+    const foreignAdmin = actor({ id: OTHER, roles: [Role.ADMIN], organizationId: ORG_B });
+    for (const action of [
+      'guardian_relationship:read',
+      'guardian_relationship:verify',
+      'guardian_relationship:revoke',
+    ] as const) {
+      expect(engine.decide(ctx(foreignAdmin), action, relationship()).effect).toBe('deny');
+    }
+    // ...and equally when the child's school is simply unknown.
+    expect(
+      engine.decide(
+        ctx(admin),
+        'guardian_relationship:verify',
+        relationship({
+          childOrganizationId: null,
+        }),
+      ).effect,
+    ).toBe('deny');
   });
 
   it('refuses verifying anything that is not pending', () => {
@@ -404,6 +429,70 @@ describe('classMembershipPolicy', () => {
   it('lets the member read their own membership', () => {
     const member = actor({ id: OTHER, roles: [Role.STUDENT] });
     expect(engine.decide(ctx(member), 'class_membership:read', membership()).effect).toBe('allow');
+  });
+
+  // --- The roster as a whole, not one row -------------------------------
+  // `class_membership:list` exists precisely so that "I am in this class"
+  // cannot answer "who else is in this class?". The roster resource carries
+  // `memberUserId: null`.
+  const roster = (over: Record<string, unknown> = {}) =>
+    ({
+      kind: 'class_membership',
+      id: CLASS_A,
+      classId: CLASS_A,
+      classOrganizationId: ORG_A,
+      memberUserId: null,
+      state: 'active',
+      ...over,
+    }) as never;
+
+  it('REFUSES an enrolled student the roster, though they may read their own row', () => {
+    const student = actor({ id: OTHER, roles: [Role.STUDENT] });
+    const enrolled = ctx(student, rel({ memberOfClasses: [CLASS_A] }));
+    expect(engine.decide(enrolled, 'class_membership:read', membership()).effect).toBe('allow');
+    expect(engine.decide(enrolled, 'class_membership:list', roster()).effect).toBe('deny');
+  });
+
+  it('lets a teacher of the class and an admin of its organization enumerate it', () => {
+    const teacher = actor({ id: SELF, roles: [Role.TEACHER] });
+    expect(
+      engine.decide(
+        ctx(teacher, rel({ teachesClasses: [CLASS_A] })),
+        'class_membership:list',
+        roster(),
+      ).effect,
+    ).toBe('allow');
+
+    const admin = actor({ id: SELF, roles: [Role.ADMIN], organizationId: ORG_A });
+    expect(engine.decide(ctx(admin), 'class_membership:list', roster()).effect).toBe('allow');
+  });
+
+  it('refuses an admin of ANOTHER organization the roster', () => {
+    const admin = actor({ id: SELF, roles: [Role.ADMIN], organizationId: ORG_B });
+    expect(engine.decide(ctx(admin), 'class_membership:list', roster()).effect).toBe('deny');
+  });
+
+  it('refuses a roster read aimed at one member, so it cannot stand in for :read', () => {
+    // Without this, a member could pass `:list` by naming themselves and get
+    // back the whole roster.
+    const student = actor({ id: OTHER, roles: [Role.STUDENT] });
+    const decision = engine.decide(
+      ctx(student, rel({ memberOfClasses: [CLASS_A] })),
+      'class_membership:list',
+      roster({ memberUserId: OTHER }),
+    );
+    expect(decision.effect).toBe('deny');
+    expect(decision.reason).toBe('class_membership.list_is_not_row_scoped');
+  });
+
+  it('denies every row-scoped action when no member is named', () => {
+    const teacher = actor({ id: SELF, roles: [Role.TEACHER] });
+    const teaching = ctx(teacher, rel({ teachesClasses: [CLASS_A] }));
+    for (const action of ['class_membership:read', 'class_membership:manage'] as const) {
+      const decision = engine.decide(teaching, action, roster());
+      expect(decision.effect).toBe('deny');
+      expect(decision.reason).toBe('class_membership.member_required');
+    }
   });
 
   it('treats an ended membership as immutable history', () => {

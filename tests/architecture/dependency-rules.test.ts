@@ -235,6 +235,30 @@ describe('rule 6 — protected resources are returned guarded', () => {
     expect(source).toMatch(/findById\s*\([^)]*\)\s*:\s*Promise<Guarded<[^>]+>\s*\|\s*null>/);
   });
 
+  it('every repository that loads a protected resource by id returns it guarded', () => {
+    // Enumerated, not discovered: a new protected resource must be added here
+    // deliberately, which is the point at which somebody asks whether its
+    // by-id loader is guarded.
+    const loaders: ReadonlyArray<readonly [string, string]> = [
+      ['notebook/notebook.repository.ts', 'findById'],
+      ['users/users.repository.ts', 'findUserById'],
+      ['users/users.repository.ts', 'findProfileByUserId'],
+      ['organizations/organizations.repository.ts', 'findById'],
+      ['relationships/classes.repository.ts', 'findById'],
+      ['relationships/classes.repository.ts', 'findAssignment'],
+      ['relationships/guardians.repository.ts', 'findById'],
+    ];
+    const violations: string[] = [];
+    for (const [file, method] of loaders) {
+      const source = readFileSync(join(ROOT, 'apps/api/src/modules', file), 'utf8');
+      const pattern = new RegExp(
+        `${method}\\s*\\([^)]*\\)\\s*:\\s*Promise<Guarded<[^>]+>\\s*\\|\\s*null>`,
+      );
+      if (!pattern.test(source)) violations.push(`${file}#${method}`);
+    }
+    expect(violations).toEqual([]);
+  });
+
   it('the notebook service unwraps only with a decision', () => {
     const source = readFileSync(
       join(ROOT, 'apps/api/src/modules/notebook/notebook.service.ts'),

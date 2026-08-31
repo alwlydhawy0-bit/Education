@@ -8,3 +8,6 @@ export { profilePolicy } from './policies/profile.policy.ts';
 export { roleGrantPolicy } from './policies/role-grant.policy.ts';
 export { classMembershipPolicy } from './policies/class-membership.policy.ts';
 export { guardianRelationshipPolicy } from './policies/guardian-relationship.policy.ts';
+export { organizationPolicy } from './policies/organization.policy.ts';
+export { classPolicy } from './policies/class.policy.ts';
+export { teacherAssignmentPolicy } from './policies/teacher-assignment.policy.ts';

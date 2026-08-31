@@ -1,7 +1,7 @@
 # Dependency Rules
 
 Brief §31. These rules are **enforced by tests**, not by convention:
-`tests/architecture/dependency-rules.test.ts` (16 assertions).
+`tests/architecture/dependency-rules.test.ts` (18 assertions).
 
 ## The direction
 
@@ -70,7 +70,13 @@ bypass — an actor may only come from a validated session.
 ### 6. Protected repositories return `Guarded<T>`
 
 A by-id loader for a protected resource must declare
-`Promise<Guarded<T> | null>`.
+`Promise<Guarded<T> | null>`, and the service must unwrap only with a decision.
+
+The loaders are **enumerated** in the test rather than discovered, so adding a
+protected resource means adding a line — which is the moment somebody asks
+whether the new loader is guarded. Covered today: `notebook`, `users` (user and
+profile), `organizations`, `relationships` (classes and teacher assignments),
+and guardian links.
 
 ### 7. Only `platform/db.ts` constructs a connection pool
 

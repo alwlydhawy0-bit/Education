@@ -2,7 +2,14 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
 import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.ts';
-import { closeSeedDb, truncateAll } from '../setup/fixtures.ts';
+import {
+  closeSeedDb,
+  createOrganization,
+  createUser,
+  linkGuardian,
+  truncateAll,
+} from '../setup/fixtures.ts';
+import { hashPassword } from '../../apps/api/src/platform/security/passwords.ts';
 
 /**
  * Layer isolation: does the APPLICATION authorization layer stand on its own?
@@ -153,5 +160,214 @@ describe('application-layer authorization, with RLS disabled', () => {
       headers: { cookie: attacker.cookie },
     });
     expect(listed.json<{ items: unknown[] }>().items).toEqual([]);
+  });
+});
+
+// =========================================================================
+/**
+ * The same question for the Task 004 surface: organizations, classes, rosters
+ * and guardian links.
+ *
+ * These endpoints lean on RLS heavily — every listing is scoped by it — so it
+ * would be easy for the application layer to be quietly redundant here. With
+ * RLS off, every row is visible to the database client, and any refusal below
+ * therefore came from the policy engine and `Guarded` alone.
+ */
+describe('relationship management authorization, with RLS disabled', () => {
+  async function seedAndLogin(
+    email: string,
+    roles: readonly string[] | undefined,
+    organizationId: string | null,
+  ): Promise<{ id: string; cookie: string }> {
+    const user = await createUser({
+      email,
+      ...(roles ? { roles } : {}),
+      organizationId,
+      passwordHash: await hashPassword(PASSWORD),
+    });
+    const loggedIn = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: writeHeaders,
+      payload: { email, password: PASSWORD },
+    });
+    expect(loggedIn.statusCode).toBe(204);
+    return {
+      id: user.id,
+      cookie: `edu_session=${sessionCookieFrom(loggedIn.headers['set-cookie'])}`,
+    };
+  }
+
+  /** A school with an admin, a teacher, a student and one class. */
+  async function school(prefix: string) {
+    const organizationId = await createOrganization(`School ${prefix}`);
+    const admin = await seedAndLogin(`${prefix}-nrls-admin@test.local`, ['admin'], organizationId);
+    const teacher = await seedAndLogin(
+      `${prefix}-nrls-teacher@test.local`,
+      ['teacher'],
+      organizationId,
+    );
+    const student = await seedAndLogin(
+      `${prefix}-nrls-student@test.local`,
+      undefined,
+      organizationId,
+    );
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/classes',
+      headers: { ...writeHeaders, cookie: admin.cookie },
+      payload: { name: `${prefix} Physics` },
+    });
+    expect(created.statusCode).toBe(201);
+    return { organizationId, admin, teacher, student, classId: created.json<{ id: string }>().id };
+  }
+
+  it('still refuses a teacher assigning themselves to a class', async () => {
+    const a = await school('x');
+    const attack = await app.inject({
+      method: 'POST',
+      url: `/api/v1/classes/${a.classId}/teachers`,
+      headers: { ...writeHeaders, cookie: a.teacher.cookie },
+      payload: { teacherId: a.teacher.id },
+    });
+    expect(attack.statusCode).toBe(404);
+  });
+
+  it('still refuses an administrator reaching into another organization', async () => {
+    const a = await school('y');
+    const b = await school('z');
+    const attack = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/classes/${a.classId}`,
+      headers: { ...writeHeaders, cookie: b.admin.cookie },
+      payload: { name: 'Owned' },
+    });
+    expect(attack.statusCode).toBe(404);
+  });
+
+  it('still refuses an enrolled student the class roster', async () => {
+    const a = await school('r');
+    const enrolled = await app.inject({
+      method: 'POST',
+      url: `/api/v1/classes/${a.classId}/members`,
+      headers: { ...writeHeaders, cookie: a.admin.cookie },
+      payload: { userId: a.student.id },
+    });
+    expect(enrolled.statusCode).toBe(201);
+
+    const attack = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${a.classId}/members`,
+      headers: { cookie: a.student.cookie },
+    });
+    expect(attack.statusCode).toBe(404);
+  });
+
+  it('still refuses a guardian verifying their own claim', async () => {
+    const a = await school('g');
+    const guardian = await seedAndLogin(
+      'g-nrls-guardian@test.local',
+      ['guardian'],
+      a.organizationId,
+    );
+    const linkId = await linkGuardian(guardian.id, a.student.id, 'pending');
+
+    const attack = await app.inject({
+      method: 'POST',
+      url: `/api/v1/guardian-links/${linkId}/verify`,
+      headers: { origin: 'http://localhost:5173', cookie: guardian.cookie },
+    });
+    expect(attack.statusCode).toBe(403);
+  });
+
+  it('still excludes other schools from an organization listing', async () => {
+    const a = await school('l');
+    await school('m');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v1/organizations',
+      headers: { cookie: a.student.cookie },
+    });
+    expect(listed.json<{ items: { id: string }[] }>().items.map((o) => o.id)).toEqual([
+      a.organizationId,
+    ]);
+  });
+
+  it('still excludes classes the actor is unrelated to from a class listing', async () => {
+    const a = await school('n');
+    const b = await school('o');
+    await app.inject({
+      method: 'POST',
+      url: `/api/v1/classes/${a.classId}/members`,
+      headers: { ...writeHeaders, cookie: a.admin.cookie },
+      payload: { userId: a.student.id },
+    });
+
+    // The student sees the one class they are enrolled in — not school B's, and
+    // not any other class in their own school.
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/classes',
+      headers: { ...writeHeaders, cookie: a.admin.cookie },
+      payload: { name: 'Another class in the same school' },
+    });
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v1/classes',
+      headers: { cookie: a.student.cookie },
+    });
+    expect(listed.json<{ items: { id: string }[] }>().items.map((c) => c.id)).toEqual([a.classId]);
+    expect(listed.body).not.toContain(b.classId);
+  });
+
+  it('still refuses an administrator of ANOTHER school verifying a claim', async () => {
+    // With RLS off, the database hides nothing — so if this passes, the
+    // organization confinement on guardian links is genuinely in the policy.
+    const a = await school('c');
+    const b = await school('d');
+    const guardian = await seedAndLogin(
+      'c-nrls-guardian@test.local',
+      ['guardian'],
+      a.organizationId,
+    );
+    const linkId = await linkGuardian(guardian.id, a.student.id, 'pending');
+
+    const attack = await app.inject({
+      method: 'POST',
+      url: `/api/v1/guardian-links/${linkId}/verify`,
+      headers: { origin: 'http://localhost:5173', cookie: b.admin.cookie },
+    });
+    expect(attack.statusCode).toBe(404);
+
+    // The administrator of the child's OWN school still may.
+    const allowed = await app.inject({
+      method: 'POST',
+      url: `/api/v1/guardian-links/${linkId}/verify`,
+      headers: { origin: 'http://localhost:5173', cookie: a.admin.cookie },
+    });
+    expect(allowed.statusCode).toBe(200);
+  });
+
+  it('still hides another guardian’s links from a listing and from action', async () => {
+    const a = await school('h');
+    const guardianA = await seedAndLogin('h-nrls-g1@test.local', ['guardian'], a.organizationId);
+    const guardianB = await seedAndLogin('h-nrls-g2@test.local', ['guardian'], a.organizationId);
+    const linkId = await linkGuardian(guardianA.id, a.student.id, 'verified');
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v1/guardian-links',
+      headers: { cookie: guardianB.cookie },
+    });
+    expect(listed.json<{ items: unknown[] }>().items).toEqual([]);
+
+    const attack = await app.inject({
+      method: 'POST',
+      url: `/api/v1/guardian-links/${linkId}/revoke`,
+      headers: { origin: 'http://localhost:5173', cookie: guardianB.cookie },
+    });
+    expect(attack.statusCode).toBe(404);
   });
 });

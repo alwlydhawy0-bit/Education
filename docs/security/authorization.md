@@ -178,6 +178,44 @@ Revocation is the opposite: it only ever removes access, so **either participant
 may revoke** — a student must always be able to cut off an adult without asking
 permission.
 
+### Relationship and class management (Task 004)
+
+Three rules on this surface are worth stating as rules, not as endpoint notes,
+because each one protects a relationship that is itself an authorization input.
+
+**A teacher may not assign anybody to a class, themselves included.**
+Teacher-to-student access is _derived_ from a shared active class, so an actor
+able to create their own assignment could grant themselves access to any
+student's shared work. Assignment is an administrator's act, in their own
+organization only. An administrator assigning _themselves_ is refused too
+(`403`), which is the same escalation by a different door.
+
+**Being in a class does not let you enumerate it.** `class_membership:list` is a
+separate action from `class_membership:read`, its resource is the roster as a
+whole (`memberUserId: null`), and it refuses to be aimed at a single member so
+it cannot stand in for the row-scoped action. An enrolled student reads the
+class and their own membership; the list of classmates needs a teacher or
+administrator grant. The reverse also holds — every row-scoped action denies
+when no member is named. See [VULN-013](vulnerability-log.md).
+
+**Every administrator branch names an organization.** `classPolicy`,
+`classMembershipPolicy`, `teacherAssignmentPolicy` and
+`guardianRelationshipPolicy` all compare the resource's organization against the
+actor's own, and treat `null` on either side as no match. RLS enforces the same
+confinement independently. Where a policy omitted it, the tenancy boundary
+silently became RLS's alone — see [VULN-016](vulnerability-log.md).
+
+**A listing runs the policy over every row RLS returns.** RLS scopes the result
+set; the service then filters it with the authoritative policy and keeps only
+the allows. The filter is a no-op whenever RLS is working — which is exactly why
+it belongs there, since without it the highest-volume read paths would be the
+ones standing on a single gate. See [VULN-017](vulnerability-log.md).
+
+A **platform operator** — `security_admin` at `global` scope — is the one actor
+above organization scope, and exists only to create organizations. It cannot be
+granted through the API at any privilege level (migration 0013), so the
+escalation path to it is not reachable over HTTP.
+
 ### Profiles
 
 Several roles can read a profile they have a relationship with. **Nobody may

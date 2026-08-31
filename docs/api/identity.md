@@ -165,5 +165,8 @@ knows the object exists, such as their own suspended account.
 Email delivery (the port exists; nothing sends). Login is **not** blocked on an
 unverified address by default — `REQUIRE_VERIFIED_EMAIL_FOR_LOGIN` exists and is
 tested, but enabling it without a mail provider would lock every user out. MFA,
-password change while logged in, session listing, guardian-relationship and class
-management endpoints, and organization management.
+password change while logged in, and session listing.
+
+Organizations, classes, rosters and guardian links **are** now implemented; they
+are documented separately in
+[the relationship & class management API](relationships.md).

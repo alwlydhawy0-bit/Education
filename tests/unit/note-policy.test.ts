@@ -79,12 +79,14 @@ const teacherOfStudent: RelationshipSnapshot = {
   teacherOf: [STUDENT],
   teachesClasses: [],
   memberOfClasses: [],
+  coursesViaClasses: [],
 };
 const guardianOfStudent: RelationshipSnapshot = {
   guardianOf: [STUDENT],
   teacherOf: [],
   teachesClasses: [],
   memberOfClasses: [],
+  coursesViaClasses: [],
 };
 
 describe('notePolicy — owner', () => {

@@ -73,6 +73,10 @@ matrix across all four content kinds rather than written out per level. The
 policy is one function registered four times; testing it four times is what
 catches a level being wired to the wrong rule.
 
+Task 006 added the assignment decision table, and reworked the content table
+around the narrowing: most "a learner can read this" cases now need an
+enrolled context rather than an empty one, which is itself the assertion.
+
 **Architecture** — the nine dependency rules, by scanning imports in source,
 plus the rule that every declared security-event type has an emitter.
 
@@ -80,6 +84,13 @@ plus the rule that every declared security-event type has an emitter.
 `SELECT *`, no actor set, pool-reuse leakage), privilege boundaries (`user_roles`
 writes denied, `audit_log` reads denied), and constraint tests asserting the
 database refuses states that would break authorization invariants.
+
+`rls-class-courses.test.ts` (Task 006) covers the narrowing and the assignment
+edge: 27 checks over who may assign, cross-tenant refusal, the lifecycle, and
+instant revocation on all three triggers. Three of them FORCE rows the database
+normally refuses — by disabling the scope trigger for the insert — because a
+read-path defence that is only ever reached through a write-path trigger has
+not actually been tested.
 
 `rls-content.test.ts` (Task 005) does the same for the content tree: 32 checks
 covering draft and archived visibility, the whole-chain published rule, the
@@ -107,6 +118,10 @@ and `curriculum-adversarial.test.ts` for the ones it does not — re-filing a
 course to escape its scope, crossing a parent-child relationship, reaching the
 lifecycle through a PATCH body, and bounds that turn out to be unreachable.
 Both defects that suite found are recorded in the vulnerability log.
+
+Task 006 added 61 more across `class-courses.test.ts` and the layered-defence
+suite, including the four revocation paths asserted on the SAME live session —
+a revocation that takes effect at next login is not a revocation.
 
 **The two gates are tested with the other removed.** This is the claim that
 would be easiest to state and hardest to have earned, so it has a test on each

@@ -7,17 +7,17 @@ of the documentation — it states what was **not** done.
 ## The headline
 
 **This system is not proven secure, and no such claim is made anywhere in this
-repository.** 869 automated tests passed against a real PostgreSQL database.
+repository.** 987 automated tests passed against a real PostgreSQL database.
 That establishes that specific, enumerated properties held at a point in time. It
 does not establish the absence of vulnerabilities.
 
 ## What was actually verified
 
-**Updated for Task 005.** The counts and the "not verified" list below reflect
+**Updated for Task 006.** The counts and the "not verified" list below reflect
 the current state.
 
-- 869 tests executed and passing: 414 unit, 73 architecture, 129 integration,
-  253 security.
+- 987 tests executed and passing: 459 unit, 76 architecture, 156 integration,
+  296 security.
 - Migrations applied cleanly from empty to full schema, repeatedly.
 - RLS enforced against a real non-superuser role — verified by attack, not by
   reading the policy.
@@ -25,6 +25,11 @@ the current state.
   role with `BYPASSRLS`.
 - Secret scan and dependency audit executed; the audit found two real advisories
   (vite high, vitest critical), which were fixed by upgrading, not exempted.
+- **The class–course assignment surface was driven over HTTP against a booted
+  server** — 39 checks covering the narrowing, every refused assignment shape,
+  the syllabus and learner endpoints, and instant revocation on four different
+  triggers — with the server log then searched for passwords, session tokens,
+  database credentials and content titles. None were present.
 - **The curriculum surface was driven over HTTP against a booted server** — 36
   checks covering authoring, content-safety rejection, server-assigned ordering,
   reordering, the publish and archive workflow, the whole-chain visibility rule
@@ -97,6 +102,39 @@ the current state.
   authorization: the caller must authorize first. The service does, and a test
   covers it, but the function itself would return any user's grants if called
   directly by application code.
+
+## Added in Task 006
+
+- **The unit of assignment is the CLASS.** Everybody in a class sees the same
+  courses. There is no per-learner assignment, no differentiation, and no way to
+  give one child different material (RISK-ASSIGN-02).
+- **`startsOn` and `dueOn` gate nothing.** They are stored and returned, and
+  that is all. A date that silently controlled visibility would be an
+  authorization rule hiding in a calendar field, depending on a clock this
+  system does not treat as a gate — so they are deliberately inert, and a client
+  must not read them as access control.
+- **Reachability is recomputed on every request and never cached.** That is what
+  makes revocation instant, and it costs a query per request. It has not been
+  measured at any scale (RISK-ASSIGN-03).
+- **A teacher of a class may assign any published course in their school**
+  without a second person involved. The content was reviewed to be published, so
+  this is choosing among approved material rather than introducing new material
+  — but it is still one person's decision (RISK-ASSIGN-01).
+- **`app_actor_teaches_course` is currently redundant.** Every teacher also
+  holds `content:author`, which already covers the published catalog, so the
+  teacher route into a course changes nothing today. It is kept because it is
+  the correct expression of the rule the task specifies and would carry a
+  teacher if that role mapping ever changed; the RLS suite isolates it with an
+  actor holding no content permission, which is the only way to show it works.
+- **Guardians see no course content.** A guardian is not a class member and
+  holds no content permission, so the narrowing removed the blanket published
+  access they previously had. Guardian access to a child's coursework was never
+  built and is not built now; this is a real reduction in what the API would
+  return for them, recorded rather than glossed.
+- **No notification** when a course is assigned or withdrawn. A class's syllabus
+  can change under them silently.
+- **Nothing records whether anybody studied anything.** An assignment says a
+  class studies a course. Progress, completion and grading do not exist.
 
 ## Added in Task 005
 

@@ -6,8 +6,21 @@ import {
   CONTENT_PUBLISH_PERMISSION,
   type AuthorizationContext,
   type ContentAction,
-  type ContentNodeResource,
+  type CourseResource,
+  type CourseUnitResource,
+  type CurriculumResource,
+  type LessonResource,
 } from '../types.ts';
+
+/**
+ * Any node of the content tree.
+ *
+ * Spelled as the union rather than as the shared base, so that `kind` narrows
+ * and `courseId` is readable where it exists without a cast. A cast here would
+ * be a cast on the value the ANCESTRY check depends on, which is the last place
+ * to be persuading the type system of something.
+ */
+type ContentNode = CurriculumResource | CourseResource | CourseUnitResource | LessonResource;
 
 /**
  * Policy for every node of the educational content tree — curricula, courses,
@@ -30,13 +43,25 @@ import {
  *
  * Getting that order backwards would turn "this draft exists" into an oracle:
  * a 403 on a draft in another school confirms the id names something real.
+ *
+ * READING HAS A THIRD REQUIREMENT (Task 006). Published content reaches a
+ * LEARNER only when it is assigned to a class they are in. That test runs
+ * INSIDE the scope branch, after the catalog check, so it can only ever remove
+ * content from the set the catalog already permitted — an assignment can never
+ * carry a learner across an organization boundary.
+ *
+ * The requirement is on LEARNERS, not on staff. Somebody holding a content
+ * permission still browses the published catalog freely, because choosing what
+ * to assign to a class means reading the candidates first. Applying the
+ * narrowing to them made the assignment endpoint unusable, which is how that
+ * distinction was found rather than reasoned to.
  */
 export function contentPolicy(
   ctx: AuthorizationContext,
   action: ContentAction,
-  content: ContentNodeResource,
+  content: ContentNode,
 ): Decision {
-  const { actor } = ctx;
+  const { actor, relationships } = ctx;
   const verb = action.slice(action.indexOf(':') + 1);
 
   // A platform operator administers the whole platform, global catalog
@@ -58,6 +83,21 @@ export function contentPolicy(
   // the specific one.
   const isEditorHere = isOwnOrganization && (mayAuthor || mayPublish);
 
+  /**
+   * Editorial standing ANYWHERE, not just in this catalog.
+   *
+   * This is what separates a learner from staff for the Task 006 narrowing. An
+   * administrator has to be able to BROWSE the published global catalog in
+   * order to choose what to assign to a class — a person who cannot see a
+   * course cannot assign it — and a teacher has to be able to read the course
+   * they are about to teach before a class exists for it.
+   *
+   * It grants nothing beyond what publication already made public: this branch
+   * is only ever reached for content that is published AND in a catalog the
+   * actor's organization can see. The learner narrowing is unaffected.
+   */
+  const isContentStaff = mayAuthor || mayPublish;
+
   // --- Axis 1: scope ----------------------------------------------------
   // The global catalog is readable by everyone once published, and writable by
   // nobody but a platform operator (who returned above). A school's content is
@@ -66,14 +106,42 @@ export function contentPolicy(
     content.status === 'published' && content.ancestorsPublished && (isGlobal || isOwnOrganization);
 
   if (verb === 'read' || verb === 'list') {
-    if (publishedAndVisible) {
-      return allow(action, content.id, 'content.published_in_visible_catalog');
+    // A LEARNER additionally needs the content to reach them through a class.
+    //
+    // `courseOf` is the course this node belongs to — itself, for a course; its
+    // parent, for a unit or a lesson. A CURRICULUM has none, and is
+    // deliberately exempt: the subject catalog names subjects, not content, and
+    // gating it behind an assignment would mean a learner could not see that
+    // their school teaches mathematics until somebody assigned them a maths
+    // course.
+    const courseOf =
+      content.kind === 'course'
+        ? content.id
+        : content.kind === 'course_unit' || content.kind === 'lesson'
+          ? content.courseId
+          : null;
+
+    const reachesThroughAClass =
+      courseOf === null || relationships.coursesViaClasses.includes(courseOf);
+
+    if (publishedAndVisible && (reachesThroughAClass || isContentStaff)) {
+      return allow(
+        action,
+        content.id,
+        reachesThroughAClass
+          ? 'content.published_and_assigned_to_my_class'
+          : 'content.published_and_actor_is_content_staff',
+      );
     }
     if (isEditorHere) {
+      // Editorial standing is not a learner relationship: an author reads their
+      // school's content because they maintain it, not because they study it,
+      // so no assignment is required of them.
       return allow(action, content.id, 'content.editor_of_organization');
     }
     // Covers every remaining case with one answer: another school's content, a
-    // draft, an archived item, and content whose ancestor is unpublished. A
+    // draft, an archived item, content whose ancestor is unpublished, and
+    // published content nobody has assigned to a class this actor is in. A
     // learner cannot tell these apart, which is the point.
     return deny(action, content.id, 'content.not_visible', 'hide');
   }

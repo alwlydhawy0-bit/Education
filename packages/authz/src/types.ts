@@ -145,6 +145,22 @@ export interface RelationshipSnapshot {
   readonly teachesClasses: readonly string[];
   /** Class ids the actor is an active member of. */
   readonly memberOfClasses: readonly string[];
+  /**
+   * Course ids the actor reaches THROUGH A CLASS — actively assigned to an
+   * active class they are actively enrolled in or actively teach.
+   *
+   * DERIVED, like `teacherOf`, and derived from four statuses at once: the
+   * assignment, the class, the membership or teacher assignment, and (for a
+   * learner) the course's own publication. Breaking any one of them revokes
+   * access on the next request, because the edge is recomputed per request and
+   * never cached.
+   *
+   * This is what NARROWS content visibility from "everything published in my
+   * school" to "what my class is actually studying". It can only remove
+   * content from the set the catalog rules already permitted — the tenancy
+   * check still runs first and still decides.
+   */
+  readonly coursesViaClasses: readonly string[];
 }
 
 export const EMPTY_RELATIONSHIPS: RelationshipSnapshot = Object.freeze({
@@ -152,6 +168,7 @@ export const EMPTY_RELATIONSHIPS: RelationshipSnapshot = Object.freeze({
   teacherOf: Object.freeze([]) as readonly string[],
   teachesClasses: Object.freeze([]) as readonly string[],
   memberOfClasses: Object.freeze([]) as readonly string[],
+  coursesViaClasses: Object.freeze([]) as readonly string[],
 });
 
 export interface AuthorizationContext {
@@ -176,7 +193,8 @@ export type ResourceKind =
   | 'curriculum'
   | 'course'
   | 'course_unit'
-  | 'lesson';
+  | 'lesson'
+  | 'class_course_assignment';
 
 export interface BaseResource {
   readonly kind: ResourceKind;
@@ -347,6 +365,26 @@ export interface LessonResource extends ContentNodeResource {
   readonly courseId: string;
 }
 
+/**
+ * A course assigned to a class: the edge that decides which learners a piece of
+ * published content actually reaches.
+ *
+ * Both organizations are carried, and both are needed. `classOrganizationId` is
+ * never null — a class always belongs to a school. `courseOrganizationId` IS
+ * null for the global catalog, which is the one case where the two may legally
+ * differ.
+ */
+export interface ClassCourseAssignmentResource extends BaseResource {
+  readonly kind: 'class_course_assignment';
+  readonly classId: string;
+  readonly classOrganizationId: string | null;
+  readonly courseId: string;
+  readonly courseOrganizationId: string | null;
+  readonly courseStatus: ContentStatus;
+  readonly classIsActive: boolean;
+  readonly state: 'active' | 'inactive' | 'archived';
+}
+
 export type Resource =
   | NoteResource
   | UserResource
@@ -361,7 +399,8 @@ export type Resource =
   | CurriculumResource
   | CourseResource
   | CourseUnitResource
-  | LessonResource;
+  | LessonResource
+  | ClassCourseAssignmentResource;
 
 // --- Actions -------------------------------------------------------------
 // An action is `<resourceKind>:<verb>`. The engine enforces that the prefix
@@ -452,6 +491,15 @@ export type EducationLevelAction = (typeof EDUCATION_LEVEL_ACTIONS)[number];
 /** The verb of any content action, with the resource prefix removed. */
 export type ContentAction = CurriculumAction | CourseAction | CourseUnitAction | LessonAction;
 
+export const CLASS_COURSE_ASSIGNMENT_ACTIONS = [
+  'class_course_assignment:create',
+  'class_course_assignment:read',
+  'class_course_assignment:list',
+  'class_course_assignment:remove',
+] as const;
+
+export type ClassCourseAssignmentAction = (typeof CLASS_COURSE_ASSIGNMENT_ACTIONS)[number];
+
 export type NoteAction = (typeof NOTE_ACTIONS)[number];
 export type UserAction = (typeof USER_ACTIONS)[number];
 export type ProfileAction = (typeof PROFILE_ACTIONS)[number];
@@ -473,7 +521,8 @@ export type Action =
   | ClassMembershipAction
   | GuardianRelationshipAction
   | EducationLevelAction
-  | ContentAction;
+  | ContentAction
+  | ClassCourseAssignmentAction;
 
 export const ALL_ACTIONS: readonly Action[] = [
   ...NOTE_ACTIONS,
@@ -490,6 +539,7 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...COURSE_ACTIONS,
   ...COURSE_UNIT_ACTIONS,
   ...LESSON_ACTIONS,
+  ...CLASS_COURSE_ASSIGNMENT_ACTIONS,
 ];
 
 /** The two permissions that split authoring from publishing. See ADR 0009. */

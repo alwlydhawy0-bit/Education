@@ -45,6 +45,20 @@ function actor(
 
 const ctx = (a: Actor): AuthorizationContext => ({ actor: a, relationships: EMPTY_RELATIONSHIPS });
 
+/**
+ * A context where the actor reaches the course through a class (Task 006).
+ *
+ * Since 0017 a LEARNER sees published content only when it is assigned to a
+ * class they are in, so most "a student can read this" cases now need this
+ * context rather than the empty one. `COURSE` is the id every content node in
+ * this file belongs to.
+ */
+const COURSE = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+const enrolledCtx = (a: Actor): AuthorizationContext => ({
+  actor: a,
+  relationships: { ...EMPTY_RELATIONSHIPS, coursesViaClasses: [COURSE] },
+});
+
 /** An author writes drafts. A reviewer publishes them. Neither is the other. */
 const author = actor({ roles: [Role.CONTENT_AUTHOR], permissions: [CONTENT_AUTHOR_PERMISSION] });
 const teacher = actor({ roles: [Role.TEACHER], permissions: [CONTENT_AUTHOR_PERMISSION] });
@@ -80,9 +94,9 @@ const node = (
     organizationId: ORG_A,
     status: 'draft' as ContentStatus,
     ancestorsPublished: true,
-    ...(kind === 'course' ? { curriculumId: 'c', levelId: 'l' } : {}),
-    ...(kind === 'course_unit' ? { courseId: 'c' } : {}),
-    ...(kind === 'lesson' ? { unitId: 'u', courseId: 'c' } : {}),
+    ...(kind === 'course' ? { id: COURSE, curriculumId: 'c', levelId: 'l' } : {}),
+    ...(kind === 'course_unit' ? { courseId: COURSE } : {}),
+    ...(kind === 'lesson' ? { unitId: 'u', courseId: COURSE } : {}),
     ...over,
   }) as never;
 
@@ -90,21 +104,65 @@ const KINDS = ['curriculum', 'course', 'course_unit', 'lesson'] as const;
 
 // =========================================================================
 describe('contentPolicy — reading', () => {
-  it.each(KINDS)('lets any actor read PUBLISHED %s in their own school', (kind) => {
+  it.each(KINDS)('lets an ENROLLED learner read PUBLISHED %s in their own school', (kind) => {
     expect(
-      engine.decide(ctx(student), `${kind}:read`, node(kind, { status: 'published' })).effect,
+      engine.decide(enrolledCtx(student), `${kind}:read`, node(kind, { status: 'published' }))
+        .effect,
     ).toBe('allow');
   });
 
-  it.each(KINDS)('lets any actor read PUBLISHED %s in the GLOBAL catalog', (kind) => {
+  it.each(KINDS)('lets an ENROLLED learner read PUBLISHED %s in the GLOBAL catalog', (kind) => {
     expect(
       engine.decide(
-        ctx(student),
+        enrolledCtx(student),
         `${kind}:read`,
         node(kind, { status: 'published', organizationId: null }),
       ).effect,
     ).toBe('allow');
   });
+
+  // --- The Task 006 narrowing -------------------------------------------
+  // Published is no longer enough for a learner. Curricula are the deliberate
+  // exception: the subject catalog names subjects, not content.
+  it.each(['course', 'course_unit', 'lesson'] as const)(
+    'HIDES a published %s from a learner whose class was not assigned it',
+    (kind) => {
+      const decision = engine.decide(
+        ctx(student),
+        `${kind}:read`,
+        node(kind, { status: 'published' }),
+      );
+      expect(decision.effect).toBe('deny');
+      expect(decision.effect === 'deny' && decision.reason).toBe('content.not_visible');
+      // `hide`, not `reveal`: "assigned to somebody else's class" and "does not
+      // exist" must be indistinguishable.
+      expect(decision.effect === 'deny' && decision.disclosure).toBe('hide');
+    },
+  );
+
+  it('still shows a published CURRICULUM without any assignment', () => {
+    // The catalog stays browsable. A learner may know their school teaches
+    // mathematics before anybody assigns them a maths course.
+    expect(
+      engine.decide(ctx(student), 'curriculum:read', node('curriculum', { status: 'published' }))
+        .effect,
+    ).toBe('allow');
+  });
+
+  it.each(['course', 'course_unit', 'lesson'] as const)(
+    'REFUSES an assignment to a %s in ANOTHER school, so it cannot widen',
+    (kind) => {
+      // The reachability edge is present, but the catalog check runs first and
+      // still refuses. An assignment can only ever narrow.
+      expect(
+        engine.decide(
+          enrolledCtx(student),
+          `${kind}:read`,
+          node(kind, { status: 'published', organizationId: ORG_B }),
+        ).effect,
+      ).toBe('deny');
+    },
+  );
 
   it.each(KINDS)('HIDES a draft %s from a student', (kind) => {
     const decision = engine.decide(ctx(student), `${kind}:read`, node(kind));
@@ -136,6 +194,16 @@ describe('contentPolicy — reading', () => {
 
   it.each(KINDS)('lets an author of the same school read a draft %s', (kind) => {
     expect(engine.decide(ctx(author), `${kind}:read`, node(kind)).effect).toBe('allow');
+  });
+
+  it.each(KINDS)('lets an editor read PUBLISHED %s with NO class attachment', (kind) => {
+    // Editorial standing is not a learner relationship: an author reads their
+    // school's content because they maintain it, not because they study it.
+    for (const editor of [author, teacher, reviewer, admin]) {
+      expect(
+        engine.decide(ctx(editor), `${kind}:read`, node(kind, { status: 'published' })).effect,
+      ).toBe('allow');
+    }
   });
 
   it.each(KINDS)('lets a REVIEWER read a draft %s — they must, to review it', (kind) => {
@@ -370,10 +438,60 @@ describe('contentPolicy — the global catalog', () => {
     }
   });
 
-  it.each(KINDS)('still lets an admin READ published global %s', (kind) => {
+  it.each(['course', 'course_unit', 'lesson'] as const)(
+    'HIDES published global %s from a LEARNER with no class attachment to it',
+    (kind) => {
+      // The narrowing reaches the global catalog too: publication makes content
+      // available to a school, not to every child in it.
+      expect(
+        engine.decide(
+          ctx(student),
+          `${kind}:read`,
+          node(kind, { organizationId: null, status: 'published' }),
+        ).effect,
+      ).toBe('deny');
+    },
+  );
+
+  it.each(['course', 'course_unit', 'lesson'] as const)(
+    'still lets CONTENT STAFF browse published global %s with no assignment',
+    (kind) => {
+      // Staff must be able to see the shared catalog in order to choose what to
+      // assign — a person who cannot read a course cannot assign it. This
+      // grants nothing publication had not already made public to their school.
+      for (const staff of [author, teacher, reviewer, admin]) {
+        const decision = engine.decide(
+          ctx(staff),
+          `${kind}:read`,
+          node(kind, { organizationId: null, status: 'published' }),
+        );
+        expect(decision.effect).toBe('allow');
+        expect(decision.effect === 'allow' && decision.reason).toBe(
+          'content.published_and_actor_is_content_staff',
+        );
+      }
+    },
+  );
+
+  it.each(['course', 'course_unit', 'lesson'] as const)(
+    'does NOT let content staff read another school’s published %s',
+    (kind) => {
+      // The catalog check still runs first. Staff standing widens nothing
+      // across a tenancy boundary.
+      expect(
+        engine.decide(
+          ctx(author),
+          `${kind}:read`,
+          node(kind, { organizationId: ORG_B, status: 'published' }),
+        ).effect,
+      ).toBe('deny');
+    },
+  );
+
+  it.each(KINDS)('still lets an ENROLLED admin READ published global %s', (kind) => {
     expect(
       engine.decide(
-        ctx(admin),
+        enrolledCtx(admin),
         `${kind}:read`,
         node(kind, { organizationId: null, status: 'published' }),
       ).effect,

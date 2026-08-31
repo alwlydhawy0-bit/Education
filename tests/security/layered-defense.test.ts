@@ -3,7 +3,10 @@ import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
 import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.ts';
 import {
+  addClassMember,
+  assignCourseToClass,
   closeSeedDb,
+  createClass,
   createCourse,
   createCurriculum,
   createEducationLevel,
@@ -585,5 +588,235 @@ describe('curriculum authorization, with RLS disabled', () => {
       headers: { origin: 'http://localhost:5173', cookie: c.authorA.cookie },
     });
     expect(response.statusCode).toBe(403);
+  });
+});
+
+// =========================================================================
+/**
+ * The Task 006 narrowing, with RLS disabled.
+ *
+ * This boundary leans on the database harder than any before it: the
+ * course-through-a-class edge is four status checks deep, and all four are
+ * expressed as RLS. With RLS off every row is visible to the database client,
+ * so anything refused below was refused by `contentPolicy` reading
+ * `coursesViaClasses` — which the snapshot loader still computes correctly,
+ * because it is ordinary SQL rather than a policy.
+ */
+describe('class-scoped content access, with RLS disabled', () => {
+  async function seedAndLogin(
+    email: string,
+    roles: readonly string[] | undefined,
+    organizationId: string | null,
+  ): Promise<{ id: string; cookie: string }> {
+    const user = await createUser({
+      email,
+      ...(roles ? { roles } : {}),
+      organizationId,
+      passwordHash: await hashPassword(PASSWORD),
+    });
+    const loggedIn = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: writeHeaders,
+      payload: { email, password: PASSWORD },
+    });
+    expect(loggedIn.statusCode).toBe(204);
+    return {
+      id: user.id,
+      cookie: `edu_session=${sessionCookieFrom(loggedIn.headers['set-cookie'])}`,
+    };
+  }
+
+  /** One school, one class, one enrolled learner, two published courses. */
+  async function world() {
+    const orgA = await createOrganization('Narrow School A');
+    const orgB = await createOrganization('Narrow School B');
+    const levelId = await createEducationLevel();
+
+    const student = await seedAndLogin('nrls-narrow-student@test.local', undefined, orgA);
+    const outsider = await seedAndLogin('nrls-narrow-outsider@test.local', undefined, orgA);
+    const studentB = await seedAndLogin('nrls-narrow-student-b@test.local', undefined, orgB);
+    const admin = await seedAndLogin('nrls-narrow-admin@test.local', ['admin'], orgA);
+
+    const classId = await createClass(orgA, 'Narrow Class');
+    await addClassMember(classId, student.id);
+
+    const curriculumA = await createCurriculum({
+      organizationId: orgA,
+      code: 'math',
+      status: 'published',
+    });
+    const mk = async (organizationId: string | null, curriculumId: string, title: string) => {
+      const course = await createCourse({
+        organizationId,
+        curriculumId,
+        levelId,
+        title,
+        status: 'published',
+      });
+      const unit = await createUnit({ courseId: course, title: `${title} U`, status: 'published' });
+      const lesson = await createLesson({
+        unitId: unit,
+        title: `${title} L`,
+        status: 'published',
+      });
+      return { course, unit, lesson };
+    };
+
+    return {
+      orgA,
+      orgB,
+      levelId,
+      classId,
+      student,
+      outsider,
+      studentB,
+      admin,
+      curriculumA,
+      assigned: await mk(orgA, curriculumA, 'Assigned'),
+      unassigned: await mk(orgA, curriculumA, 'Unassigned'),
+    };
+  }
+
+  it('still hides a PUBLISHED course the learner’s class was not assigned', async () => {
+    const w = await world();
+    await assignCourseToClass({ classId: w.classId, courseId: w.assigned.course });
+
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/v1/courses/${w.assigned.course}`,
+          headers: { cookie: w.student.cookie },
+        })
+      ).statusCode,
+    ).toBe(200);
+
+    const refused = await app.inject({
+      method: 'GET',
+      url: `/api/v1/courses/${w.unassigned.course}`,
+      headers: { cookie: w.student.cookie },
+    });
+    expect(refused.statusCode).toBe(404);
+    expect(refused.body).not.toContain('Unassigned');
+  });
+
+  it('still hides the units and lessons of an unassigned course', async () => {
+    const w = await world();
+    for (const url of [
+      `/api/v1/units/${w.unassigned.unit}`,
+      `/api/v1/lessons/${w.unassigned.lesson}`,
+    ]) {
+      const response = await app.inject({
+        method: 'GET',
+        url,
+        headers: { cookie: w.student.cookie },
+      });
+      expect(response.statusCode).toBe(404);
+      expect(response.body).not.toContain('Unassigned');
+    }
+  });
+
+  it('still hides everything from a learner in NO class', async () => {
+    const w = await world();
+    await assignCourseToClass({ classId: w.classId, courseId: w.assigned.course });
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v1/courses',
+      headers: { cookie: w.outsider.cookie },
+    });
+    expect(listed.json<{ items: unknown[] }>().items).toEqual([]);
+  });
+
+  it('still revokes the moment the membership ends', async () => {
+    const w = await world();
+    await assignCourseToClass({ classId: w.classId, courseId: w.assigned.course });
+    expect(
+      (
+        await app.inject({
+          method: 'DELETE',
+          url: `/api/v1/classes/${w.classId}/members/${w.student.id}`,
+          headers: { origin: 'http://localhost:5173', cookie: w.admin.cookie },
+        })
+      ).statusCode,
+    ).toBe(204);
+
+    // Same live session, next request.
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/v1/courses/${w.assigned.course}`,
+          headers: { cookie: w.student.cookie },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: '/api/v1/me/courses',
+          headers: { cookie: w.student.cookie },
+        })
+      ).json<{ items: unknown[] }>().items,
+    ).toEqual([]);
+  });
+
+  it('still refuses a cross-school assignment', async () => {
+    const w = await world();
+    const curriculumB = await createCurriculum({
+      organizationId: w.orgB,
+      code: 'math',
+      status: 'published',
+    });
+    const courseB = await createCourse({
+      organizationId: w.orgB,
+      curriculumId: curriculumB,
+      levelId: w.levelId,
+      title: 'School B Course',
+      status: 'published',
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/classes/${w.classId}/courses`,
+      headers: { ...writeHeaders, cookie: w.admin.cookie },
+      payload: { courseId: courseB },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still keeps one learner’s /me/courses out of another’s', async () => {
+    const w = await world();
+    await assignCourseToClass({ classId: w.classId, courseId: w.assigned.course });
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v1/me/courses',
+      headers: { cookie: w.studentB.cookie },
+    });
+    expect(listed.json<{ items: unknown[] }>().items).toEqual([]);
+  });
+
+  it('still refuses a learner assigning or withdrawing', async () => {
+    const w = await world();
+    await assignCourseToClass({ classId: w.classId, courseId: w.assigned.course });
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/classes/${w.classId}/courses`,
+          headers: { ...writeHeaders, cookie: w.student.cookie },
+          payload: { courseId: w.unassigned.course },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({
+          method: 'DELETE',
+          url: `/api/v1/classes/${w.classId}/courses/${w.assigned.course}`,
+          headers: { origin: 'http://localhost:5173', cookie: w.student.cookie },
+        })
+      ).statusCode,
+    ).toBe(404);
   });
 });

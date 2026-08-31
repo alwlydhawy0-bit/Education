@@ -171,4 +171,5 @@ Organizations, classes, rosters and guardian links **are** now implemented; they
 are documented separately in
 [the relationship & class management API](relationships.md). Curricula, courses,
 units and lessons are in
-[the curriculum & course API](curriculum.md).
+[the curriculum & course API](curriculum.md), and course-to-class assignment in
+[the class–course assignment API](class-courses.md).

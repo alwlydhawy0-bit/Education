@@ -74,6 +74,27 @@ model — only a **platform operator** (global `security_admin`) may create one,
 and every other domain treats an organization id as a value it was given, never
 one it may choose.
 
+### `class-courses` — **[BUILT]**
+
+Owns `class_course_assignments`: the edge from the class graph to the content
+tree, and therefore the answer to "which learners does this lesson reach?".
+
+It is a module of its own rather than part of either neighbour, because it
+belongs to neither: `relationships` owns classes and would have to reach into
+`courses` to validate an assignment, and `curriculum` owns courses and would
+have to reach into `classes`. A separate owner for the edge keeps both of them
+free of the other's tables.
+
+The invariants live in the database. A course may only be assigned to a class in
+its own organization or from the global catalog; only a **published** course may
+be assigned; the parties are immutable; and at most one assignment per (class,
+course) may be active at a time — a **deferrable partial exclusion constraint**,
+the only form PostgreSQL offers that is both partial and deferrable.
+
+`relationships` consumes it: `coursesViaClasses` in the relationship snapshot is
+the union of the learner and teacher routes into a course, computed in one query
+so no caller can check three of the four statuses and forget the fourth.
+
 ### `curriculum` — **[BUILT]**
 
 Owns `education_levels`, `curricula`, `courses`, `course_units`, `lessons`.
@@ -153,8 +174,8 @@ written, not after.
 
 A domain can be extracted into its own service when its tables are touched only
 by it, its contract is explicit, it has no imports from sibling modules, and its
-tests do not depend on another domain's internals. `notebook`, `curriculum` and
-`organizations` meet this cleanly today; `relationships` meets it except for the
+tests do not depend on another domain's internals. `notebook`, `curriculum`,
+`class-courses` and `organizations` meet this cleanly today; `relationships` meets it except for the
 `display_name` join noted above, and `identity`/`users` share the `users` table.
 Both exceptions are recorded rather than papered over — enforced by `tests/architecture/dependency-rules.test.ts`, not by
 inspection.

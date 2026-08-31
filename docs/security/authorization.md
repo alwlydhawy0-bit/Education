@@ -244,6 +244,35 @@ same at every level of the tree; four copies would be four places for it to
 drift, and the drift would be invisible because each copy would have its own
 tests.
 
+### Class-scoped content access (Task 006)
+
+The narrowing that turned "published to my school" into "assigned to my class".
+
+**A learner reaches published content only through a class.** The course must be
+actively assigned to an active class in which they hold an active membership.
+Four statuses, any one of which breaks the chain — and because the edge is
+recomputed per request rather than cached, breaking any of them revokes access
+on the very next call.
+
+**It narrows, it never widens.** The class-reachability test runs INSIDE the
+catalog branch, after the tenancy and publication checks. An assignment can only
+remove content from the set those checks already permitted; it cannot carry a
+learner across an organization boundary, reveal a draft, or revive an archived
+course. That is asserted directly rather than reasoned about: the RLS suite
+forces rows the database normally refuses into existence and checks the read
+path refuses them anyway.
+
+**The requirement is on learners, not on staff.** Anyone holding a content
+permission still browses the published catalog, because choosing what to assign
+means reading the candidates first. Applying the narrowing to them made the
+assignment endpoint unusable, which is how the distinction was found rather than
+reasoned to — see [VULN-023](vulnerability-log.md).
+
+**Assigning is roster-level authority**, not content authority: a teacher of
+that class, or an administrator of its organization. Choosing among published
+courses is running a class; deciding what content exists is not, and a teacher
+still may not do it.
+
 ### Profiles
 
 Several roles can read a profile they have a relationship with. **Nobody may

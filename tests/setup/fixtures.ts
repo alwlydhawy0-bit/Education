@@ -40,7 +40,8 @@ export async function truncateAll(): Promise<void> {
   // created by migration 0007 — truncating them would leave registration unable
   // to grant the default role.
   await db.query(
-    `TRUNCATE notes, guardian_relationships, teacher_assignments, class_memberships,
+    `TRUNCATE notes, guardian_relationships, teacher_assignments, class_course_assignments,
+              class_memberships,
               classes, lessons, course_units, courses, curricula, education_levels,
               sessions, user_roles, email_verifications, password_reset_tokens,
               profiles, audit_log, users, organizations
@@ -387,5 +388,80 @@ export async function createLesson(options: {
   );
   const id = rows[0]?.id;
   if (!id) throw new Error('Failed to seed lesson');
+  return id;
+}
+
+/**
+ * Assigns a course to a class — the edge a learner reaches content through.
+ *
+ * Seeded as superuser, so a test can construct states the application role
+ * could not: an assignment to an archived class, one naming a draft course, one
+ * crossing schools. Those are exactly what the negative tests need.
+ */
+export async function assignCourseToClass(options: {
+  classId: string;
+  courseId: string;
+  assignedBy?: string | null;
+  status?: 'active' | 'inactive' | 'archived';
+  startsOn?: string | null;
+  dueOn?: string | null;
+  /**
+   * Constructs a row the database would otherwise REFUSE — a cross-school
+   * pairing, or one naming a draft course — by disabling the scope trigger for
+   * the insert.
+   *
+   * This exists for exactly one purpose: proving the READ path defends itself.
+   * The write-side trigger makes these rows impossible, which is excellent and
+   * also means the read policies' own catalog checks would never be exercised.
+   * A defence that is only ever reached through another defence has not been
+   * tested. Never used outside a test that says so in its name.
+   */
+  force?: boolean;
+}): Promise<string> {
+  const db = await seedDb();
+  const status = options.status ?? 'active';
+  if (options.force) {
+    await db.query(
+      'ALTER TABLE class_course_assignments DISABLE TRIGGER class_course_assignments_scope',
+    );
+  }
+  try {
+    return await insertAssignment(db, options, status);
+  } finally {
+    if (options.force) {
+      await db.query(
+        'ALTER TABLE class_course_assignments ENABLE TRIGGER class_course_assignments_scope',
+      );
+    }
+  }
+}
+
+async function insertAssignment(
+  db: pg.Client,
+  options: {
+    classId: string;
+    courseId: string;
+    assignedBy?: string | null;
+    startsOn?: string | null;
+    dueOn?: string | null;
+  },
+  status: 'active' | 'inactive' | 'archived',
+): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO class_course_assignments
+       (class_id, course_id, assigned_by, status, ended_at, starts_on, due_on)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [
+      options.classId,
+      options.courseId,
+      options.assignedBy ?? null,
+      status,
+      status === 'active' ? null : new Date(),
+      options.startsOn ?? null,
+      options.dueOn ?? null,
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed course assignment');
   return id;
 }

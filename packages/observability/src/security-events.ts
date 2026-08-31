@@ -76,6 +76,18 @@ export const SecurityEventType = {
   GUARDIAN_LINK_REVOKED: 'guardian_link.revoked',
 
   /**
+   * Course-to-class assignment.
+   *
+   * This edge decides which learners a piece of published content reaches, so
+   * it belongs in the same category as a roster change rather than in a
+   * scheduling log: assigning a course widens what a class can see, and
+   * withdrawing one revokes it instantly. "Why could that student read this
+   * lesson?" has to be answerable from the audit trail alone.
+   */
+  COURSE_ASSIGNED_TO_CLASS: 'class.course_assigned',
+  COURSE_WITHDRAWN_FROM_CLASS: 'class.course_withdrawn',
+
+  /**
    * Educational content lifecycle.
    *
    * PUBLISHING is the event that matters here: it is the moment material

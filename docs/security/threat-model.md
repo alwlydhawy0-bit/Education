@@ -253,6 +253,65 @@ through `withActor`/`withoutActor`.
   second person in the loop (RISK-CONTENT-02). That is a staffing fact the
   platform cannot fix; the audit trail records who did it either way.
 
+### T3i — Content reaching learners it was never meant for (added in Task 006)
+
+- **Attack surface:** every `GET` on `/courses`, `/units`, `/lessons`, plus
+  `/me/courses` and `/classes/:id/courses`.
+- **Why it matters:** publication made content available to a whole school. That
+  is the right unit for "may this school use it" and the wrong one for "should
+  this child be studying it": a Grade 12 course was reachable by a Grade 7
+  learner, and there was no expressible way to say otherwise.
+- **Mitigations [BUILT]:** a learner reaches published content only through an
+  ACTIVE assignment to an ACTIVE class in which they hold an ACTIVE membership;
+  the edge is recomputed per request, never cached; the test runs inside the
+  catalog branch so it can only narrow; the same rule is expressed independently
+  in RLS and in `contentPolicy`.
+- **Verification:** `tests/security/class-courses.test.ts` (end to end),
+  `tests/integration/rls-class-courses.test.ts` (the database alone — including
+  forcing rows the write path refuses, to prove the READ path defends itself),
+  `tests/security/layered-defense.test.ts` (the application alone, with RLS off;
+  verified to fail when the class check is removed).
+- **Residual risk:** the unit of assignment is the CLASS. Everybody in a class
+  sees the same courses; there is no per-learner assignment and no way to give
+  one child different material (RISK-ASSIGN-02).
+
+### T3j — Cross-tenant assignment (added in Task 006)
+
+- **Attack surface:** `POST /classes/:id/courses`.
+- **Why it matters:** an assignment is the one operation that names a class and
+  a course together, so it is the natural place to try to bridge two schools —
+  and a successful bridge would hand a whole class another school's private
+  content in one request.
+- **Mitigations [BUILT]:** the policy refuses both directions (another school's
+  class, another school's course) with `hide`, and a database TRIGGER refuses
+  the pairing structurally — the trigger is not an RLS policy, so it binds the
+  table owner and the superuser too, and the test suite asserts exactly that.
+  Only a GLOBAL course may legally cross, which is the shared catalog behaving
+  as designed.
+- **Verification:** `class-courses.test.ts`, `rls-class-courses.test.ts`,
+  `class-course-assignment-policy.test.ts`, and 39 live HTTP checks.
+- **Residual risk:** none identified for the bridging case itself. The trigger
+  makes the row impossible rather than merely refused, which is the strongest
+  form available.
+
+### T3k — Stale access after revocation (added in Task 006)
+
+- **Attack surface:** a live session held by a learner who has just been removed
+  from a class, or whose class has just lost a course.
+- **Why it matters:** a revocation that takes effect "at next login" is not a
+  revocation. Removing a child from a class has to stop their access to that
+  class's material immediately, or the control is theatre.
+- **Mitigations [BUILT]:** nothing is cached. `coursesViaClasses` is recomputed
+  from the database on every request as part of the relationship snapshot, and
+  RLS re-evaluates the same four statuses on every query. Withdrawing the
+  assignment, ending the membership, archiving the class and archiving the
+  course each break the chain on the very next call.
+- **Verification:** four end-to-end cases asserting the next request on the SAME
+  live session returns 404, and the same again with RLS disabled.
+- **Residual risk:** revocation costs a per-request query. That is the price of
+  not caching, and it is the right trade here; it is also untested at scale
+  (RISK-ASSIGN-03).
+
 ### T3 — Account takeover
 
 - **Mitigations [BUILT]:** Argon2id with pinned OWASP parameters; login rate
@@ -382,6 +441,9 @@ ranking, counts, and latency. Semantic similarity must never widen access.
 | RISK-CONTENT-01    | Lesson bodies are stored verbatim; escaping is the renderer's job, and no renderer exists yet to audit            | Medium                          | Open; HTML is refused as a format, which bounds but does not remove it |
 | RISK-CONTENT-02    | A single account holding both content roles publishes with no second person involved                              | Medium                          | Accepted; recorded in the audit trail                                  |
 | RISK-CONTENT-03    | Any editor in a school can read every draft in that school                                                        | Low                             | Accepted; no smaller unit of trust exists                              |
+| RISK-ASSIGN-01     | A teacher of a class may assign any published course in their school without a second person                      | Low                             | Accepted; the content itself was already reviewed to be published      |
+| RISK-ASSIGN-02     | The unit of assignment is the class; no per-learner differentiation exists                                        | Low                             | Accepted; deliberate scope                                             |
+| RISK-ASSIGN-03     | Reachability is recomputed per request and never cached; untested at scale                                        | Low                             | Open; correctness chosen over throughput                               |
 
 ## 6. What was NOT threat-modelled
 

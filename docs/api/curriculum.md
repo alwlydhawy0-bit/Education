@@ -51,9 +51,15 @@ can author global content and would otherwise be unable to publish it.
 
 ## Who sees what
 
+**Since Task 006 a learner also needs the course to be assigned to a class they
+are in** — see [the class–course assignment API](class-courses.md). For a
+learner the table below is the CATALOG rule: necessary, not sufficient. Staff
+holding a content permission are exempt from the assignment requirement, because
+choosing what to assign means reading the candidates first.
+
 | Actor                   | Published, own school | Published, global | Draft / archived, own school | Anything, another school |
 | ----------------------- | --------------------- | ----------------- | ---------------------------- | ------------------------ |
-| Student, guardian       | ✅                    | ✅                | ❌ 404                       | ❌ 404                   |
+| Student, guardian       | ✅ if assigned        | ✅ if assigned    | ❌ 404                       | ❌ 404                   |
 | Teacher, content author | ✅                    | ✅                | ✅                           | ❌ 404                   |
 | Reviewer                | ✅                    | ✅                | ✅ (must, to review)         | ❌ 404                   |
 | Admin                   | ✅                    | ✅                | ✅                           | ❌ 404                   |
@@ -192,5 +198,6 @@ beyond the permission split — no submit-for-review state, no reviewer comments
 no approval record beyond the audit event. Localisation of a single lesson into
 multiple languages. Media or file attachments. Prerequisites, dependencies, or
 any ordering constraint between courses. Copying or forking global content into
-a school. Bulk import. Learner-facing progress, mastery or enrolment — a course
-is not yet connected to a class.
+a school. Bulk import. Learner-facing progress and mastery. (A course IS now
+connected to a class — Task 006 — but nothing records whether anybody studied
+it.)

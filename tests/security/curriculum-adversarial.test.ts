@@ -7,7 +7,10 @@ import {
   type TestApp,
 } from '../setup/app.ts';
 import {
+  addClassMember,
+  assignCourseToClass,
   closeSeedDb,
+  createClass,
   createEducationLevel,
   createOrganization,
   createUser,
@@ -108,6 +111,14 @@ async function authorWithCourse(prefix: string) {
     curriculumId: id(curriculum),
     courseId: id(course),
   };
+}
+
+/** A class with one learner in it, studying the given course. */
+async function classStudying(organizationId: string, courseId: string, studentId: string) {
+  const classId = await createClass(organizationId, 'Study Class');
+  await addClassMember(classId, studentId);
+  await assignCourseToClass({ classId, courseId });
+  return classId;
 }
 
 // =========================================================================
@@ -337,6 +348,7 @@ describe('publishing a child does not publish its parents', () => {
     await post(`/api/v1/curricula/${a.curriculumId}/publish`, a.reviewer.cookie);
     await post(`/api/v1/courses/${a.courseId}/publish`, a.reviewer.cookie);
     await post(`/api/v1/units/${id(unit)}/publish`, a.reviewer.cookie);
+    await classStudying(a.organizationId, a.courseId, student.id);
     expect((await get(`/api/v1/units/${id(unit)}`, student.cookie)).statusCode).toBe(200);
 
     // Archiving the course retracts everything under it in one act.

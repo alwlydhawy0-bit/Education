@@ -2,7 +2,10 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDatabase, type Database } from '../../apps/api/src/platform/db.ts';
 import { TEST_APP_URL } from '../setup/env.ts';
 import {
+  addClassMember,
+  assignCourseToClass,
   closeSeedDb,
+  createClass,
   createCourse,
   createCurriculum,
   createEducationLevel,
@@ -109,10 +112,20 @@ async function world() {
     status: 'draft',
   });
 
+  // Task 006: a learner reaches content only through a class, so the world now
+  // has one per school with its student enrolled. Nothing is assigned yet —
+  // each test assigns exactly what it means to test.
+  const classA = await createClass(orgA, 'Class A');
+  const classB = await createClass(orgB, 'Class B');
+  await addClassMember(classA, studentA.id);
+  await addClassMember(classB, studentB.id);
+
   return {
     orgA,
     orgB,
     level,
+    classA,
+    classB,
     authorA,
     teacherA,
     reviewerA,
@@ -173,7 +186,8 @@ describe('RLS — content visibility', () => {
     });
     const unit = await createUnit({ courseId: draftCourse, status: 'published' });
     expect(await visible(w.studentA.id, 'course_units')).not.toContain(unit);
-    // ...and the author, who may see drafts, does see it.
+    // ...and the author, who may see drafts, does see it — editorial standing
+    // is not a learner relationship and needs no assignment.
     expect(await visible(w.authorA.id, 'course_units')).toContain(unit);
   });
 
@@ -200,6 +214,11 @@ describe('RLS — content visibility', () => {
     });
     const unit = await createUnit({ courseId: course, status: 'published' });
     const lesson = await createLesson({ unitId: unit, status: 'published' });
+    // Published throughout is NOT enough since 0017: the course has to be
+    // assigned to a class the learner is in.
+    expect(await visible(w.studentA.id, 'lessons')).toEqual([]);
+
+    await assignCourseToClass({ classId: w.classA, courseId: course });
     expect(await visible(w.studentA.id, 'lessons')).toEqual([lesson]);
   });
 
@@ -213,6 +232,7 @@ describe('RLS — content visibility', () => {
     });
     const unit = await createUnit({ courseId: course, status: 'published' });
     const lesson = await createLesson({ unitId: unit, status: 'published' });
+    await assignCourseToClass({ classId: w.classB, courseId: course });
     expect(await visible(w.studentA.id, 'lessons')).not.toContain(lesson);
     expect(await visible(w.studentB.id, 'lessons')).toEqual([lesson]);
   });

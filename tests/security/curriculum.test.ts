@@ -9,7 +9,10 @@ import {
 } from '../setup/app.ts';
 import { TEST_SUPERUSER_URL } from '../setup/env.ts';
 import {
+  addClassMember,
+  assignCourseToClass,
   closeSeedDb,
+  createClass,
   createEducationLevel,
   createOrganization,
   createUser,
@@ -149,8 +152,16 @@ async function school(prefix: string, levelId: string) {
   });
   expect(course.statusCode).toBe(201);
 
+  // Task 006: a learner reaches published content only through a class. The
+  // school therefore has one, with the student enrolled — but NOTHING is
+  // assigned to it here. Each test assigns exactly what it means to test, so a
+  // missing assignment shows up as a failure rather than as silent visibility.
+  const classId = await createClass(organizationId, `Class ${prefix}`);
+  await addClassMember(classId, student.id);
+
   return {
     organizationId,
+    classId,
     author,
     teacher,
     reviewer,
@@ -160,6 +171,9 @@ async function school(prefix: string, levelId: string) {
     courseId: id(course),
   };
 }
+
+/** Puts a course in front of a class's learners. */
+const study = (classId: string, courseId: string) => assignCourseToClass({ classId, courseId });
 
 /** Publishes a whole chain, which is the only way a learner ever sees it. */
 async function publishChain(
@@ -476,6 +490,8 @@ describe('IDOR / BOLA — draft and archived content', () => {
       (await post(`/api/v1/lessons/${id(lesson)}/publish`, a.reviewer.cookie)).statusCode,
     ).toBe(200);
 
+    await study(a.classId, a.courseId);
+
     expect((await get(`/api/v1/courses/${a.courseId}`, a.student.cookie)).statusCode).toBe(200);
     expect((await get(`/api/v1/lessons/${id(lesson)}`, a.student.cookie)).statusCode).toBe(404);
   });
@@ -627,9 +643,13 @@ describe('IDOR / BOLA — the global catalog', () => {
 
     const a = await school('a', levelId);
     const b = await school('b', levelId);
-    for (const cookie of [a.student.cookie, b.student.cookie]) {
-      expect((await get(`/api/v1/courses/${g.courseId}`, cookie)).statusCode).toBe(200);
-      expect(ids(await get('/api/v1/courses', cookie))).toContain(g.courseId);
+    // A global course is readable by any school — once a class in that school
+    // is actually studying it. Publication alone stopped being enough in 0017.
+    for (const s of [a, b]) {
+      expect((await get(`/api/v1/courses/${g.courseId}`, s.student.cookie)).statusCode).toBe(404);
+      await study(s.classId, g.courseId);
+      expect((await get(`/api/v1/courses/${g.courseId}`, s.student.cookie)).statusCode).toBe(200);
+      expect(ids(await get('/api/v1/courses', s.student.cookie))).toContain(g.courseId);
     }
   });
 

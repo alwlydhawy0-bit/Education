@@ -171,7 +171,12 @@ export type ResourceKind =
   | 'class'
   | 'teacher_assignment'
   | 'class_membership'
-  | 'guardian_relationship';
+  | 'guardian_relationship'
+  | 'education_level'
+  | 'curriculum'
+  | 'course'
+  | 'course_unit'
+  | 'lesson';
 
 export interface BaseResource {
   readonly kind: ResourceKind;
@@ -274,6 +279,74 @@ export interface GuardianRelationshipResource extends BaseResource {
   readonly state: 'pending' | 'verified' | 'revoked';
 }
 
+/**
+ * The lifecycle every piece of educational content moves through, one way.
+ *
+ * `published` is the only state a learner may see. `draft` and `archived` are
+ * both editorial states, and both are HIDDEN (404) rather than refused (403)
+ * from anyone without editorial standing — a 403 would confirm that the id
+ * names real content.
+ */
+export type ContentStatus = 'draft' | 'published' | 'archived';
+
+/**
+ * Reference data: the grades and stages content is filed under.
+ *
+ * Global by construction — "Grade 7" means the same thing in every school, and
+ * letting each mint its own would fork the vocabulary that makes content
+ * shareable. There is no organization field to compare, so the resource carries
+ * no attributes at all.
+ */
+export interface EducationLevelResource extends BaseResource {
+  readonly kind: 'education_level';
+}
+
+/**
+ * Shared shape of every content node.
+ *
+ * `organizationId === null` means the GLOBAL catalog. That is not "no
+ * organization" in the way a user's null organization is — it is a distinct,
+ * deliberate ownership state with its own authority (a platform operator), and
+ * the policy treats it as such rather than as an absence.
+ */
+export interface ContentNodeResource extends BaseResource {
+  readonly organizationId: string | null;
+  readonly status: ContentStatus;
+  /**
+   * Whether every ancestor of this node is published.
+   *
+   * The tree is only as visible as its least-visible ancestor: a published
+   * lesson inside a draft unit is not a published lesson as far as a learner is
+   * concerned. Carrying the answer here — rather than having each policy walk
+   * the tree — is what keeps this package pure, and what stops one level of the
+   * hierarchy from being checked while another is forgotten.
+   *
+   * Always `true` for a curriculum and a course, which have no content ancestor.
+   */
+  readonly ancestorsPublished: boolean;
+}
+
+export interface CurriculumResource extends ContentNodeResource {
+  readonly kind: 'curriculum';
+}
+
+export interface CourseResource extends ContentNodeResource {
+  readonly kind: 'course';
+  readonly curriculumId: string;
+  readonly levelId: string;
+}
+
+export interface CourseUnitResource extends ContentNodeResource {
+  readonly kind: 'course_unit';
+  readonly courseId: string;
+}
+
+export interface LessonResource extends ContentNodeResource {
+  readonly kind: 'lesson';
+  readonly unitId: string;
+  readonly courseId: string;
+}
+
 export type Resource =
   | NoteResource
   | UserResource
@@ -283,7 +356,12 @@ export type Resource =
   | ClassResource
   | TeacherAssignmentResource
   | ClassMembershipResource
-  | GuardianRelationshipResource;
+  | GuardianRelationshipResource
+  | EducationLevelResource
+  | CurriculumResource
+  | CourseResource
+  | CourseUnitResource
+  | LessonResource;
 
 // --- Actions -------------------------------------------------------------
 // An action is `<resourceKind>:<verb>`. The engine enforces that the prefix
@@ -342,6 +420,38 @@ export const GUARDIAN_RELATIONSHIP_ACTIONS = [
   'guardian_relationship:revoke',
 ] as const;
 
+export const EDUCATION_LEVEL_ACTIONS = [
+  'education_level:read',
+  'education_level:list',
+  'education_level:create',
+  'education_level:update',
+] as const;
+
+/**
+ * The same seven verbs at every level of the content tree.
+ *
+ * `publish` and `archive` are separate from `update` deliberately: they are the
+ * editorial acts, gated on `content:publish`, while `update` is authoring and
+ * gated on `content:author`. Collapsing them into one verb is exactly how
+ * unreviewed material reaches a classroom.
+ */
+const CONTENT_VERBS = ['create', 'read', 'list', 'update', 'publish', 'archive', 'delete'] as const;
+type ContentVerb = (typeof CONTENT_VERBS)[number];
+
+export const CURRICULUM_ACTIONS = CONTENT_VERBS.map((v) => `curriculum:${v}` as const);
+export const COURSE_ACTIONS = CONTENT_VERBS.map((v) => `course:${v}` as const);
+export const COURSE_UNIT_ACTIONS = CONTENT_VERBS.map((v) => `course_unit:${v}` as const);
+export const LESSON_ACTIONS = CONTENT_VERBS.map((v) => `lesson:${v}` as const);
+
+export type CurriculumAction = `curriculum:${ContentVerb}`;
+export type CourseAction = `course:${ContentVerb}`;
+export type CourseUnitAction = `course_unit:${ContentVerb}`;
+export type LessonAction = `lesson:${ContentVerb}`;
+export type EducationLevelAction = (typeof EDUCATION_LEVEL_ACTIONS)[number];
+
+/** The verb of any content action, with the resource prefix removed. */
+export type ContentAction = CurriculumAction | CourseAction | CourseUnitAction | LessonAction;
+
 export type NoteAction = (typeof NOTE_ACTIONS)[number];
 export type UserAction = (typeof USER_ACTIONS)[number];
 export type ProfileAction = (typeof PROFILE_ACTIONS)[number];
@@ -361,7 +471,9 @@ export type Action =
   | ClassAction
   | TeacherAssignmentAction
   | ClassMembershipAction
-  | GuardianRelationshipAction;
+  | GuardianRelationshipAction
+  | EducationLevelAction
+  | ContentAction;
 
 export const ALL_ACTIONS: readonly Action[] = [
   ...NOTE_ACTIONS,
@@ -373,7 +485,16 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...TEACHER_ASSIGNMENT_ACTIONS,
   ...CLASS_MEMBERSHIP_ACTIONS,
   ...GUARDIAN_RELATIONSHIP_ACTIONS,
+  ...EDUCATION_LEVEL_ACTIONS,
+  ...CURRICULUM_ACTIONS,
+  ...COURSE_ACTIONS,
+  ...COURSE_UNIT_ACTIONS,
+  ...LESSON_ACTIONS,
 ];
+
+/** The two permissions that split authoring from publishing. See ADR 0009. */
+export const CONTENT_AUTHOR_PERMISSION = 'content:author';
+export const CONTENT_PUBLISH_PERMISSION = 'content:publish';
 
 /** Maps each action to the resource kind it may be evaluated against. */
 export function resourceKindForAction(action: Action): ResourceKind {

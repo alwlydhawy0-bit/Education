@@ -4,7 +4,12 @@ import pg from 'pg';
 import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.ts';
 import {
   closeSeedDb,
+  createCourse,
+  createCurriculum,
+  createEducationLevel,
+  createLesson,
   createOrganization,
+  createUnit,
   createUser,
   linkGuardian,
   truncateAll,
@@ -369,5 +374,216 @@ describe('relationship management authorization, with RLS disabled', () => {
       headers: { origin: 'http://localhost:5173', cookie: guardianB.cookie },
     });
     expect(attack.statusCode).toBe(404);
+  });
+});
+
+// =========================================================================
+/**
+ * The same question for the educational content tree.
+ *
+ * This surface leans on RLS harder than any before it: draft visibility, the
+ * global-versus-organization split and the whole-chain published rule are all
+ * expressed as database policies. With RLS off, every row is visible to the
+ * database client, so anything refused below was refused by `contentPolicy` and
+ * `Guarded` alone.
+ *
+ * Content is SEEDED here rather than built through the API, because the point
+ * is to hand the application rows it should refuse — including rows no
+ * authorized request could have produced.
+ */
+describe('curriculum authorization, with RLS disabled', () => {
+  async function seedAndLogin(
+    email: string,
+    roles: readonly string[] | undefined,
+    organizationId: string | null,
+  ): Promise<{ id: string; cookie: string }> {
+    const user = await createUser({
+      email,
+      ...(roles ? { roles } : {}),
+      organizationId,
+      passwordHash: await hashPassword(PASSWORD),
+    });
+    const loggedIn = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: writeHeaders,
+      payload: { email, password: PASSWORD },
+    });
+    expect(loggedIn.statusCode).toBe(204);
+    return {
+      id: user.id,
+      cookie: `edu_session=${sessionCookieFrom(loggedIn.headers['set-cookie'])}`,
+    };
+  }
+
+  /** Two schools and the global catalog, with content in every state. */
+  async function content() {
+    const orgA = await createOrganization('Content School A');
+    const orgB = await createOrganization('Content School B');
+    const levelId = await createEducationLevel();
+
+    const authorA = await seedAndLogin('nrls-author-a@test.local', ['content_author'], orgA);
+    const studentA = await seedAndLogin('nrls-student-a@test.local', undefined, orgA);
+    const adminA = await seedAndLogin('nrls-admin-a@test.local', ['admin'], orgA);
+    const authorB = await seedAndLogin('nrls-author-b@test.local', ['content_author'], orgB);
+
+    const curriculumA = await createCurriculum({
+      organizationId: orgA,
+      code: 'math',
+      status: 'published',
+    });
+    const draftCourseA = await createCourse({
+      organizationId: orgA,
+      curriculumId: curriculumA,
+      levelId,
+      title: 'Draft Algebra',
+      status: 'draft',
+    });
+    const curriculumB = await createCurriculum({
+      organizationId: orgB,
+      code: 'math',
+      status: 'published',
+    });
+    const publishedCourseB = await createCourse({
+      organizationId: orgB,
+      curriculumId: curriculumB,
+      levelId,
+      title: 'School B Algebra',
+      status: 'published',
+    });
+    const globalCurriculum = await createCurriculum({
+      organizationId: null,
+      code: 'national',
+      status: 'published',
+    });
+    const globalCourse = await createCourse({
+      organizationId: null,
+      curriculumId: globalCurriculum,
+      levelId,
+      title: 'National Algebra',
+      status: 'published',
+    });
+
+    return {
+      orgA,
+      levelId,
+      authorA,
+      studentA,
+      adminA,
+      authorB,
+      curriculumA,
+      draftCourseA,
+      publishedCourseB,
+      globalCourse,
+    };
+  }
+
+  it('still hides DRAFT content from a student', async () => {
+    const c = await content();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/courses/${c.draftCourseA}`,
+      headers: { cookie: c.studentA.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain('Draft Algebra');
+  });
+
+  it('still hides ARCHIVED content from a student', async () => {
+    const c = await content();
+    const archived = await createCourse({
+      organizationId: c.orgA,
+      curriculumId: c.curriculumA,
+      levelId: c.levelId,
+      title: 'Retired Algebra',
+      status: 'archived',
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/courses/${archived}`,
+      headers: { cookie: c.studentA.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain('Retired Algebra');
+  });
+
+  it('still hides another school’s published content, on read and in listings', async () => {
+    const c = await content();
+    const single = await app.inject({
+      method: 'GET',
+      url: `/api/v1/courses/${c.publishedCourseB}`,
+      headers: { cookie: c.studentA.cookie },
+    });
+    expect(single.statusCode).toBe(404);
+
+    const listed = await app.inject({
+      method: 'GET',
+      url: '/api/v1/courses',
+      headers: { cookie: c.studentA.cookie },
+    });
+    expect(listed.body).not.toContain('School B Algebra');
+  });
+
+  it('still refuses a school actor writing to the GLOBAL catalog', async () => {
+    const c = await content();
+    for (const cookie of [c.authorA.cookie, c.adminA.cookie]) {
+      const response = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/courses/${c.globalCourse}`,
+        headers: { ...writeHeaders, cookie },
+        payload: { title: 'owned' },
+      });
+      expect(response.statusCode).toBe(404);
+    }
+  });
+
+  it('still refuses an author of another school editing a course', async () => {
+    const c = await content();
+    const response = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/courses/${c.draftCourseA}`,
+      headers: { ...writeHeaders, cookie: c.authorB.cookie },
+      payload: { title: 'owned' },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still hides a published lesson whose ancestors are drafts', async () => {
+    const c = await content();
+    // The chain rule is expressed in RLS AND carried on the resource. With RLS
+    // off, only the second can be doing the work.
+    const unit = await createUnit({ courseId: c.draftCourseA, status: 'published' });
+    const lesson = await createLesson({
+      unitId: unit,
+      title: 'Leaked Lesson',
+      status: 'published',
+    });
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/lessons/${lesson}`,
+      headers: { cookie: c.studentA.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain('Leaked Lesson');
+  });
+
+  it('still refuses a student publishing content', async () => {
+    const c = await content();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/courses/${c.draftCourseA}/publish`,
+      headers: { origin: 'http://localhost:5173', cookie: c.studentA.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still refuses an AUTHOR publishing — the duty split is not RLS’s alone', async () => {
+    const c = await content();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/courses/${c.draftCourseA}/publish`,
+      headers: { origin: 'http://localhost:5173', cookie: c.authorA.cookie },
+    });
+    expect(response.statusCode).toBe(403);
   });
 });

@@ -67,6 +67,12 @@ Task 004 added the roster decision table: the roster as a whole
 degenerate forms — a list aimed at a single member, and a row-scoped action with
 no member named — because that distinction is what VULN-013 turned on.
 
+Task 005 added the content decision table, which is a product of four axes —
+catalog, lifecycle, permission and verb — so the cases are enumerated as a
+matrix across all four content kinds rather than written out per level. The
+policy is one function registered four times; testing it four times is what
+catches a level being wired to the wrong rule.
+
 **Architecture** — the nine dependency rules, by scanning imports in source,
 plus the rule that every declared security-event type has an emitter.
 
@@ -74,6 +80,12 @@ plus the rule that every declared security-event type has an emitter.
 `SELECT *`, no actor set, pool-reuse leakage), privilege boundaries (`user_roles`
 writes denied, `audit_log` reads denied), and constraint tests asserting the
 database refuses states that would break authorization invariants.
+
+`rls-content.test.ts` (Task 005) does the same for the content tree: 32 checks
+covering draft and archived visibility, the whole-chain published rule, the
+global-versus-organization split, the author/publisher duty split, and the
+lifecycle and ordering invariants — all as `edu_app`, with no application code
+in the path.
 
 `rls-relationship-writes.test.ts` (Task 004) is the write-side counterpart: 18
 statements run as `edu_app` with no application code in the path, asserting the
@@ -89,6 +101,12 @@ enumeration resistance, security headers, audit trail contents, rate limiting,
 and body size limits. Task 004 added 47 cases over the relationship and class
 management surface, written from the scenarios the brief names by hand rather
 than from the implementation.
+
+Task 005 added 70 more: `curriculum.test.ts` for the scenarios the brief names,
+and `curriculum-adversarial.test.ts` for the ones it does not — re-filing a
+course to escape its scope, crossing a parent-child relationship, reaching the
+lifecycle through a PATCH body, and bounds that turn out to be unreachable.
+Both defects that suite found are recorded in the vulnerability log.
 
 **The two gates are tested with the other removed.** This is the claim that
 would be easiest to state and hardest to have earned, so it has a test on each

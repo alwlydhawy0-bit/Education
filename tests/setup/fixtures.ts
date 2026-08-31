@@ -41,7 +41,8 @@ export async function truncateAll(): Promise<void> {
   // to grant the default role.
   await db.query(
     `TRUNCATE notes, guardian_relationships, teacher_assignments, class_memberships,
-              classes, sessions, user_roles, email_verifications, password_reset_tokens,
+              classes, lessons, course_units, courses, curricula, education_levels,
+              sessions, user_roles, email_verifications, password_reset_tokens,
               profiles, audit_log, users, organizations
      RESTART IDENTITY CASCADE`,
   );
@@ -220,4 +221,171 @@ export async function linkTeacherToStudent(options: {
   await assignTeacher(options.teacherId, classId, options.assignmentStatus ?? 'active');
   await addClassMember(classId, options.studentId, options.membershipStatus ?? 'active');
   return classId;
+}
+
+// ---------------------------------------------------------------------
+// Educational content
+// ---------------------------------------------------------------------
+// These seed rows AS SUPERUSER, which is the point: they can construct states
+// the application role could never reach — a published course, content in
+// another school — so that a negative test is testing the boundary rather than
+// the seeding path.
+
+export async function createEducationLevel(
+  code = 'grade_7',
+  options: {
+    name?: string;
+    stage?: 'primary' | 'middle' | 'secondary' | 'university';
+    grade?: number | null;
+    sortOrder?: number;
+  } = {},
+): Promise<string> {
+  const db = await seedDb();
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO education_levels (code, name, stage, grade, sort_order)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+    [
+      code,
+      options.name ?? 'Grade 7',
+      options.stage ?? 'middle',
+      options.grade ?? 7,
+      options.sortOrder ?? 0,
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed education level');
+  return id;
+}
+
+type ContentStatus = 'draft' | 'published' | 'archived';
+
+/** The lifecycle timestamps a status implies, matching the CHECK constraints. */
+function lifecycleStamps(status: ContentStatus): [Date | null, Date | null] {
+  if (status === 'published') return [new Date(), null];
+  if (status === 'archived') return [null, new Date()];
+  return [null, null];
+}
+
+export async function createCurriculum(options: {
+  organizationId: string | null;
+  code?: string;
+  name?: string;
+  status?: ContentStatus;
+  createdBy?: string | null;
+}): Promise<string> {
+  const db = await seedDb();
+  const status = options.status ?? 'draft';
+  const [publishedAt, archivedAt] = lifecycleStamps(status);
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO curricula (organization_id, code, name, status, published_at, archived_at, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+    [
+      options.organizationId,
+      options.code ?? 'math',
+      options.name ?? 'Mathematics',
+      status,
+      publishedAt,
+      archivedAt,
+      options.createdBy ?? null,
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed curriculum');
+  return id;
+}
+
+export async function createCourse(options: {
+  organizationId: string | null;
+  curriculumId: string;
+  levelId: string;
+  title?: string;
+  status?: ContentStatus;
+  createdBy?: string | null;
+}): Promise<string> {
+  const db = await seedDb();
+  const status = options.status ?? 'draft';
+  const [publishedAt, archivedAt] = lifecycleStamps(status);
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO courses (organization_id, curriculum_id, level_id, title, status,
+                          published_at, archived_at, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`,
+    [
+      options.organizationId,
+      options.curriculumId,
+      options.levelId,
+      options.title ?? 'Algebra',
+      status,
+      publishedAt,
+      archivedAt,
+      options.createdBy ?? null,
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed course');
+  return id;
+}
+
+export async function createUnit(options: {
+  courseId: string;
+  position?: number;
+  title?: string;
+  status?: ContentStatus;
+  createdBy?: string | null;
+}): Promise<string> {
+  const db = await seedDb();
+  const status = options.status ?? 'draft';
+  const [publishedAt, archivedAt] = lifecycleStamps(status);
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO course_units (course_id, position, title, status, published_at, archived_at, created_by)
+     VALUES ($1,
+             COALESCE($2, (SELECT COALESCE(MAX(position), 0) + 1 FROM course_units WHERE course_id = $1)),
+             $3, $4, $5, $6, $7)
+     RETURNING id`,
+    [
+      options.courseId,
+      options.position ?? null,
+      options.title ?? 'Unit',
+      status,
+      publishedAt,
+      archivedAt,
+      options.createdBy ?? null,
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed unit');
+  return id;
+}
+
+export async function createLesson(options: {
+  unitId: string;
+  position?: number;
+  title?: string;
+  contentBody?: string;
+  status?: ContentStatus;
+  createdBy?: string | null;
+}): Promise<string> {
+  const db = await seedDb();
+  const status = options.status ?? 'draft';
+  const [publishedAt, archivedAt] = lifecycleStamps(status);
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO lessons (unit_id, position, title, content_body, status,
+                          published_at, archived_at, created_by)
+     VALUES ($1,
+             COALESCE($2, (SELECT COALESCE(MAX(position), 0) + 1 FROM lessons WHERE unit_id = $1)),
+             $3, $4, $5, $6, $7, $8)
+     RETURNING id`,
+    [
+      options.unitId,
+      options.position ?? null,
+      options.title ?? 'Lesson',
+      options.contentBody ?? '',
+      status,
+      publishedAt,
+      archivedAt,
+      options.createdBy ?? null,
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed lesson');
+  return id;
 }

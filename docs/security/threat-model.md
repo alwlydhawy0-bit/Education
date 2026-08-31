@@ -197,6 +197,62 @@ through `withActor`/`withoutActor`.
   deliberate choice — knowing who teaches your class is not sensitive — but it
   is a choice, not an oversight, and it is the one asymmetry on this surface.
 
+### T3f — Unauthorized access to unpublished content (added in Task 005)
+
+- **Attack surface:** every `GET` on `/curricula`, `/courses`, `/units`,
+  `/lessons`, single and list.
+- **Why it matters:** a draft is work in progress — wrong answers, placeholder
+  text, material not yet reviewed. A learner reading it is a correctness problem
+  before it is a privacy one, and the platform's priority order puts scientific
+  integrity above convenience.
+- **Mitigations [BUILT]:** `published` is the only learner-visible state;
+  `draft` and `archived` both answer `404` rather than `403`, so the id is not
+  confirmed; a node is only as visible as its least-visible ancestor, computed
+  in SQL and carried on the resource; RLS expresses the same rule independently.
+- **Verification:** `tests/security/curriculum.test.ts` (draft, archived and
+  partial-chain reads), `tests/integration/rls-content.test.ts` (the database
+  alone), `tests/security/layered-defense.test.ts` (the application alone, with
+  RLS off — verified to fail when the chain check is removed).
+- **Residual risk:** an editor of a school can read every draft in that school.
+  There is no per-author or per-team confinement inside an organization, and no
+  such unit of trust exists in the model (RISK-CONTENT-03).
+
+### T3g — Cross-organization content leakage (added in Task 005)
+
+- **Attack surface:** the same routes, plus `POST /courses` (which names a
+  curriculum id) and the reorder endpoints (which name child ids).
+- **Mitigations [BUILT]:** organization content is invisible outside its school
+  at both gates; `organizationId` appears in no request body, so a cross-tenant
+  write is not expressible; a course may only be filed under a curriculum the
+  caller can **see** (application) and one in the global catalog or its own
+  school (database trigger); a reorder must name exactly the current set, so it
+  cannot reposition or probe an id from elsewhere.
+- **Verification:** `curriculum.test.ts` and `curriculum-adversarial.test.ts`,
+  plus the RLS-only and application-only suites.
+- **Residual risk:** `app_course_organization` and `app_curriculum_organization`
+  disclose one fact each — which catalog an id belongs to — to a caller who
+  guesses a valid id. Judged not sensitive, and required to keep the policy
+  graph acyclic.
+
+### T3h — Unreviewed material reaching a classroom (added in Task 005)
+
+- **Attack surface:** `POST …/publish`.
+- **Why it matters:** publishing is the moment content becomes visible to
+  children. A compromised teacher account that could also publish would put
+  arbitrary material in front of a class with no second person involved.
+- **Mitigations [BUILT]:** `content:author` and `content:publish` are separate
+  permissions (ADR 0009); a teacher and a content author hold only the first; a
+  reviewer holds only the second and cannot edit the text; the split is enforced
+  by the policy engine AND by a trigger that compares which columns changed;
+  `security_admin` holds neither; every publish emits `content.published` with
+  the actor.
+- **Verification:** `curriculum.test.ts` (author and teacher refused, reviewer
+  allowed), `rls-content.test.ts` (the same with no application code in the
+  path), `content-policies.test.ts` (the decision table).
+- **Residual risk:** a school with one administrator holding both roles has no
+  second person in the loop (RISK-CONTENT-02). That is a staffing fact the
+  platform cannot fix; the audit trail records who did it either way.
+
 ### T3 — Account takeover
 
 - **Mitigations [BUILT]:** Argon2id with pinned OWASP parameters; login rate
@@ -311,18 +367,21 @@ ranking, counts, and latency. Semantic similarity must never widen access.
 
 ## 5. Risk register
 
-| ID                 | Risk                                                                                                              | Severity                        | Status                                                                |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------- | --------------------------------------------------------------------- |
-| RISK-ENUM-01       | Registration discloses whether an email is registered                                                             | Medium                          | Accepted; rate-limited; needs an email pipeline to fix                |
-| RISK-UPLOAD-01     | No malware scanning                                                                                               | High                            | Surface does not exist yet                                            |
-| RISK-RAG-01        | Retrieval could bypass authorization                                                                              | Critical                        | Design only                                                           |
-| RISK-MFA-01        | No second factor                                                                                                  | Medium                          | Open                                                                  |
-| RISK-RATE-01       | Rate limiting is per-process                                                                                      | Medium                          | Open; needs shared state at >1 replica                                |
-| RISK-ORG-01        | `notes.organization_id` may go stale on transfer                                                                  | Medium                          | Open; no transfer flow exists                                         |
-| RISK-AUDIT-01      | Audit writes are best-effort                                                                                      | Low now, High once grades exist | Accepted for auth events only                                         |
-| RISK-BREAKGLASS-01 | No audited emergency access path                                                                                  | Low                             | Deliberate                                                            |
-| RISK-GUARD-01      | Guardian verification relies on an administrator's judgement; nothing checks the claim against an external source | Medium                          | Accepted; process control, no technical mitigation                    |
-| RISK-ORGADMIN-01   | A school administrator has full authority over every class, roster and family link in their school                | Medium                          | Accepted; the organization is the smallest unit of trust in the model |
+| ID                 | Risk                                                                                                              | Severity                        | Status                                                                 |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------- |
+| RISK-ENUM-01       | Registration discloses whether an email is registered                                                             | Medium                          | Accepted; rate-limited; needs an email pipeline to fix                 |
+| RISK-UPLOAD-01     | No malware scanning                                                                                               | High                            | Surface does not exist yet                                             |
+| RISK-RAG-01        | Retrieval could bypass authorization                                                                              | Critical                        | Design only                                                            |
+| RISK-MFA-01        | No second factor                                                                                                  | Medium                          | Open                                                                   |
+| RISK-RATE-01       | Rate limiting is per-process                                                                                      | Medium                          | Open; needs shared state at >1 replica                                 |
+| RISK-ORG-01        | `notes.organization_id` may go stale on transfer                                                                  | Medium                          | Open; no transfer flow exists                                          |
+| RISK-AUDIT-01      | Audit writes are best-effort                                                                                      | Low now, High once grades exist | Accepted for auth events only                                          |
+| RISK-BREAKGLASS-01 | No audited emergency access path                                                                                  | Low                             | Deliberate                                                             |
+| RISK-GUARD-01      | Guardian verification relies on an administrator's judgement; nothing checks the claim against an external source | Medium                          | Accepted; process control, no technical mitigation                     |
+| RISK-ORGADMIN-01   | A school administrator has full authority over every class, roster and family link in their school                | Medium                          | Accepted; the organization is the smallest unit of trust in the model  |
+| RISK-CONTENT-01    | Lesson bodies are stored verbatim; escaping is the renderer's job, and no renderer exists yet to audit            | Medium                          | Open; HTML is refused as a format, which bounds but does not remove it |
+| RISK-CONTENT-02    | A single account holding both content roles publishes with no second person involved                              | Medium                          | Accepted; recorded in the audit trail                                  |
+| RISK-CONTENT-03    | Any editor in a school can read every draft in that school                                                        | Low                             | Accepted; no smaller unit of trust exists                              |
 
 ## 6. What was NOT threat-modelled
 

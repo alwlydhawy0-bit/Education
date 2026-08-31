@@ -74,6 +74,27 @@ model — only a **platform operator** (global `security_admin`) may create one,
 and every other domain treats an organization id as a value it was given, never
 one it may choose.
 
+### `curriculum` — **[BUILT]**
+
+Owns `education_levels`, `curricula`, `courses`, `course_units`, `lessons`.
+
+The platform's first **publishable** domain: its rows are shown to children, so
+the questions it answers are "who may see this?" and "who decided they should?".
+Three invariants are enforced in the database rather than only in code:
+
+- **Ownership is immutable.** `organization_id IS NULL` is the global catalog and
+  a non-null value is one school; a trigger refuses any move between them, since
+  every unit and lesson underneath would silently change tenant.
+- **The lifecycle is one-way** (`draft → published → archived`), and the trigger
+  that enforces it also enforces the author/publisher split by comparing which
+  columns changed — something a row-level policy cannot see.
+- **Ordering is a deferrable unique constraint** per parent, so a whole sequence
+  can be rewritten in one transaction while a partial ordering can never commit.
+
+It reads no other domain's tables. It stores `organization_id` on `curricula` and
+`courses` — denormalized from the session at write time, for the same reason as
+`notes.organization_id`, and pinned immutable so it cannot go stale.
+
 ### `notebook` — **[BUILT]**
 
 Owns `notes`. The worked example of the protected-resource pattern:
@@ -90,7 +111,7 @@ password hashing, token generation. Owns `audit_log` (append-only).
 
 ## Planned domains — **[DESIGNED]**, boundaries only
 
-`curriculum` (courses, modules, lessons) · `learning-paths` · `activities` ·
+`learning-paths` · `activities` ·
 `assessments` · `mastery` · `experiments` · `projects` · `portfolio` · `files` ·
 `knowledge-base` · `ai-gateway` · `ai-tutor` · `ai-assistant` ·
 `recommendations` · `community` · `moderation` · `notifications` · `analytics` ·
@@ -132,7 +153,7 @@ written, not after.
 
 A domain can be extracted into its own service when its tables are touched only
 by it, its contract is explicit, it has no imports from sibling modules, and its
-tests do not depend on another domain's internals. `notebook` and
+tests do not depend on another domain's internals. `notebook`, `curriculum` and
 `organizations` meet this cleanly today; `relationships` meets it except for the
 `display_name` join noted above, and `identity`/`users` share the `users` table.
 Both exceptions are recorded rather than papered over — enforced by `tests/architecture/dependency-rules.test.ts`, not by

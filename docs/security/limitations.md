@@ -7,17 +7,17 @@ of the documentation — it states what was **not** done.
 ## The headline
 
 **This system is not proven secure, and no such claim is made anywhere in this
-repository.** 607 automated tests passed against a real PostgreSQL database.
+repository.** 869 automated tests passed against a real PostgreSQL database.
 That establishes that specific, enumerated properties held at a point in time. It
 does not establish the absence of vulnerabilities.
 
 ## What was actually verified
 
-**Updated for Task 004.** The counts and the "not verified" list below reflect
+**Updated for Task 005.** The counts and the "not verified" list below reflect
 the current state.
 
-- 607 tests executed and passing: 270 unit, 65 architecture, 97 integration,
-  175 security.
+- 869 tests executed and passing: 414 unit, 73 architecture, 129 integration,
+  253 security.
 - Migrations applied cleanly from empty to full schema, repeatedly.
 - RLS enforced against a real non-superuser role — verified by attack, not by
   reading the policy.
@@ -25,6 +25,12 @@ the current state.
   role with `BYPASSRLS`.
 - Secret scan and dependency audit executed; the audit found two real advisories
   (vite high, vitest critical), which were fixed by upgrading, not exempted.
+- **The curriculum surface was driven over HTTP against a booted server** — 36
+  checks covering authoring, content-safety rejection, server-assigned ordering,
+  reordering, the publish and archive workflow, the whole-chain visibility rule
+  and cross-organization refusal — with the server log then searched for
+  passwords, session tokens, database credentials and lesson content. None were
+  present.
 - **The API was booted as a real process** and driven over HTTP with curl:
   security headers, register, login, note creation, a rejected sort-injection
   attempt, a 401 on a protected route and a 403 on a missing Origin. The server
@@ -91,6 +97,40 @@ the current state.
   authorization: the caller must authorize first. The service does, and a test
   covers it, but the function itself would return any user's grants if called
   directly by application code.
+
+## Added in Task 005
+
+- **Lesson bodies are stored verbatim and nothing renders them.** HTML is
+  refused as a content format and `https://` is the only accepted URL scheme, so
+  the stored-XSS surface is bounded — but a body may still contain
+  script-looking text, and **the renderer that must escape it does not exist
+  yet**. Nothing in this repository has been audited for output encoding
+  (RISK-CONTENT-01).
+- **No content versioning.** An edit overwrites. There is no revision history,
+  no diff, and no way to answer "what did this lesson say last term?" beyond the
+  archived/published status and the audit events.
+- **No review workflow beyond the permission split.** There is no
+  submit-for-review state, no reviewer comment, and no approval record other
+  than the `content.published` audit event. A school with one account holding
+  both content roles publishes with no second person involved (RISK-CONTENT-02).
+- **Any editor in a school can read every draft in that school.** No per-author
+  or per-team confinement exists inside an organization (RISK-CONTENT-03).
+- **A course is not connected to a class.** Nothing links published content to
+  the learners who should study it; visibility is organization-wide, not
+  class-scoped. That link is the learning engine's, and it is not built.
+- **No localisation of a single lesson.** A lesson has one title and one body.
+  An Arabic-first platform that also serves English will need a translation
+  model, and this schema does not have one.
+- **No media, files, or attachments.** `externalUrl` points elsewhere and
+  nothing validates what is there.
+- **`app_course_organization` and `app_curriculum_organization` each disclose
+  one fact** — which catalog an id belongs to — to any authenticated caller who
+  guesses a valid id. Judged not sensitive and required to break the policy
+  recursion, but it is a real, if small, disclosure.
+- **Listings are offset-paginated** with the same limits as every other list; a
+  course with thousands of lessons is walkable but has no cursor stability.
+- **Reordering loads the whole sequence.** A course with 500 units rewrites 500
+  rows in one statement. Correct, and untested above that bound.
 
 ## Added in Task 004
 

@@ -169,4 +169,6 @@ password change while logged in, and session listing.
 
 Organizations, classes, rosters and guardian links **are** now implemented; they
 are documented separately in
-[the relationship & class management API](relationships.md).
+[the relationship & class management API](relationships.md). Curricula, courses,
+units and lessons are in
+[the curriculum & course API](curriculum.md).

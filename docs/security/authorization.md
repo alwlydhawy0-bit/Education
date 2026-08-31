@@ -216,6 +216,34 @@ above organization scope, and exists only to create organizations. It cannot be
 granted through the API at any privilege level (migration 0013), so the
 escalation path to it is not reachable over HTTP.
 
+### Educational content (Task 005)
+
+Content is the first domain that is **published to children**, and that changes
+what the authorization question is. Three rules carry it.
+
+**Two axes, evaluated in that order.** First SCOPE — may this actor see this
+catalog at all? A failure is `hide` (404). Then STATE — is the content in a
+state that permits this action? A failure is `reveal` (403), because by then the
+actor can already see the object. Reversing the order would turn "this draft
+exists" into an oracle: a 403 on another school's draft confirms the id is real.
+
+**A node is only as visible as its least-visible ancestor.** A published lesson
+inside a draft unit is not student-visible. The whole-chain answer is computed in
+SQL and carried on the resource as `ancestorsPublished`, so the pure policy never
+walks the tree and the two gates cannot disagree about where the chain breaks.
+
+**Authoring and publishing are different permissions** — `content:author` and
+`content:publish`. See [ADR 0009](../architecture/adr/0009-content-lifecycle-and-duty-split.md).
+Enforcing this needed the two gates to be phrased differently rather than
+mirrored: the row-level policy admits either authority (it cannot see which
+columns moved), and a trigger compares the row's non-lifecycle columns to decide
+which permission the change actually required.
+
+One policy function serves all four content kinds. The rule genuinely is the
+same at every level of the tree; four copies would be four places for it to
+drift, and the drift would be invisible because each copy would have its own
+tests.
+
 ### Profiles
 
 Several roles can read a profile they have a relationship with. **Nobody may

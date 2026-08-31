@@ -11,3 +11,5 @@ export { guardianRelationshipPolicy } from './policies/guardian-relationship.pol
 export { organizationPolicy } from './policies/organization.policy.ts';
 export { classPolicy } from './policies/class.policy.ts';
 export { teacherAssignmentPolicy } from './policies/teacher-assignment.policy.ts';
+export { contentPolicy } from './policies/content.policy.ts';
+export { educationLevelPolicy } from './policies/education-level.policy.ts';

@@ -8,6 +8,8 @@ import { guardianRelationshipPolicy } from './policies/guardian-relationship.pol
 import { organizationPolicy } from './policies/organization.policy.ts';
 import { classPolicy } from './policies/class.policy.ts';
 import { teacherAssignmentPolicy } from './policies/teacher-assignment.policy.ts';
+import { contentPolicy } from './policies/content.policy.ts';
+import { educationLevelPolicy } from './policies/education-level.policy.ts';
 import {
   resourceKindForAction,
   type Action,
@@ -55,6 +57,14 @@ const DEFAULT_POLICIES: Readonly<Record<ResourceKind, PolicyFn>> = Object.freeze
   teacher_assignment: teacherAssignmentPolicy as unknown as PolicyFn,
   class_membership: classMembershipPolicy as unknown as PolicyFn,
   guardian_relationship: guardianRelationshipPolicy as unknown as PolicyFn,
+  education_level: educationLevelPolicy as unknown as PolicyFn,
+  // One policy, registered four times. The rule is identical at every level of
+  // the content tree; four copies would be four places for it to drift, and the
+  // drift would be invisible because each copy has its own tests.
+  curriculum: contentPolicy as unknown as PolicyFn,
+  course: contentPolicy as unknown as PolicyFn,
+  course_unit: contentPolicy as unknown as PolicyFn,
+  lesson: contentPolicy as unknown as PolicyFn,
 });
 
 export function createPolicyEngine(

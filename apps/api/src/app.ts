@@ -31,6 +31,9 @@ import { classesRepository } from './modules/relationships/classes.repository.ts
 import { createClassesService } from './modules/relationships/classes.service.ts';
 import { guardiansRepository } from './modules/relationships/guardians.repository.ts';
 import { createGuardiansService } from './modules/relationships/guardians.service.ts';
+import { curriculumRepository } from './modules/curriculum/curriculum.repository.ts';
+import { createCurriculumService } from './modules/curriculum/curriculum.service.ts';
+import { registerCurriculumRoutes } from './modules/curriculum/curriculum.routes.ts';
 import { registerRelationshipRoutes } from './modules/relationships/relationships.routes.ts';
 
 /**
@@ -224,6 +227,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     securityEvents,
   });
 
+  const curriculum = createCurriculumService({
+    db,
+    repository: curriculumRepository,
+    engine,
+    securityEvents,
+  });
+
   const notebook = createNotebookService({
     db,
     repository: notebookRepository,
@@ -257,6 +267,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerUsersRoutes(app, users);
   registerOrganizationRoutes(app, organizations);
   registerRelationshipRoutes(app, classes, guardians);
+  registerCurriculumRoutes(app, curriculum);
 
   return { app, db };
 }

@@ -76,6 +76,26 @@ export const SecurityEventType = {
   GUARDIAN_LINK_REVOKED: 'guardian_link.revoked',
 
   /**
+   * Educational content lifecycle.
+   *
+   * PUBLISHING is the event that matters here: it is the moment material
+   * becomes visible to learners, and it is held behind a permission that
+   * authoring does not confer. "Who made this visible to children, and when?"
+   * has to be answerable from the audit trail alone.
+   *
+   * Deletion is recorded too, and is only ever possible for never-published
+   * drafts — so an absent CONTENT_DELETED for something learners saw is itself
+   * evidence that the archive path was used, as intended.
+   */
+  CONTENT_CREATED: 'content.created',
+  CONTENT_UPDATED: 'content.updated',
+  CONTENT_PUBLISHED: 'content.published',
+  CONTENT_ARCHIVED: 'content.archived',
+  CONTENT_DELETED: 'content.deleted',
+  CONTENT_REORDERED: 'content.reordered',
+  EDUCATION_LEVEL_CHANGED: 'content.education_level_changed',
+
+  /**
    * Emitted on every authorization denial. A burst of these from one actor
    * across many resource ids is the primary IDOR/BOLA probing signal.
    */

@@ -76,7 +76,7 @@ The loaders are **enumerated** in the test rather than discovered, so adding a
 protected resource means adding a line — which is the moment somebody asks
 whether the new loader is guarded. Covered today: `notebook`, `users` (user and
 profile), `organizations`, `relationships` (classes and teacher assignments),
-and guardian links.
+guardian links, and the four levels of the content tree.
 
 ### 7. Only `platform/db.ts` constructs a connection pool
 

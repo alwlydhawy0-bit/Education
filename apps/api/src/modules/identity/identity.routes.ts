@@ -5,8 +5,9 @@ import {
   loginRequestSchema,
   registerRequestSchema,
 } from '@edu/contracts';
-import { requireActor } from '../../platform/http/authentication.js';
-import type { IdentityService } from './identity.service.js';
+import { requireActor } from '../../platform/http/authentication.ts';
+import { RATE_LIMIT_POLICIES, routeLimit } from '../../platform/security/rate-limit.ts';
+import type { IdentityService } from './identity.service.ts';
 
 export interface IdentityRoutesDeps {
   readonly identity: IdentityService;
@@ -28,7 +29,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: IdentityRoute
   } as const;
 
   app.post('/api/v1/auth/register', {
-    config: { rateLimit: { max: 5, timeWindow: '15 minutes' } },
+    config: routeLimit(RATE_LIMIT_POLICIES.authRegister),
     handler: async (request, reply) => {
       const input = registerRequestSchema.parse(request.body);
       const { userId } = await identity.register(input, {
@@ -44,8 +45,8 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: IdentityRoute
 
   app.post('/api/v1/auth/login', {
     // Tighter than the global limit: this is the endpoint an attacker
-    // brute-forces. Keyed per IP by the global rate-limit plugin config.
-    config: { rateLimit: { max: 10, timeWindow: '15 minutes' } },
+    // brute-forces. The limit itself lives in the policy catalogue.
+    config: routeLimit(RATE_LIMIT_POLICIES.authLogin),
     handler: async (request, reply) => {
       const input = loginRequestSchema.parse(request.body);
       const { token, expiresAt } = await identity.login(input, {

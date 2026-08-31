@@ -1,5 +1,28 @@
 import { Guarded, type NoteResource } from '@edu/authz';
-import type { Tx } from '../../platform/db.js';
+import {
+  resolveSortColumn,
+  resolveSortDirection,
+  type ListNotesQuery,
+  type NoteSortField,
+} from '@edu/contracts';
+import type { Tx } from '../../platform/db.ts';
+
+/**
+ * Allow-listed sort fields mapped to literal SQL columns.
+ *
+ * This map is the reason a sort parameter cannot become SQL injection: the
+ * request supplies a KEY, and only a value from this table ever reaches the
+ * query. A parameter placeholder would not help here — an ORDER BY target is an
+ * identifier, not a value, so it cannot be bound.
+ *
+ * The Record is exhaustive over `NoteSortField`, so adding a sortable field to
+ * the contract without deciding its column is a compile error.
+ */
+const NOTE_SORT_COLUMNS: Readonly<Record<NoteSortField, string>> = {
+  updatedAt: 'updated_at',
+  createdAt: 'created_at',
+  title: 'title',
+};
 
 export interface NoteRecord {
   readonly id: string;
@@ -65,7 +88,7 @@ function toResource(row: NoteRow): NoteResource {
  */
 export interface NotebookRepository {
   findById(tx: Tx, id: string): Promise<Guarded<NoteRecord> | null>;
-  listOwn(tx: Tx, ownerId: string, limit: number): Promise<NoteRecord[]>;
+  listOwn(tx: Tx, ownerId: string, query: ListNotesQuery): Promise<NoteRecord[]>;
   insert(
     tx: Tx,
     input: {
@@ -96,13 +119,20 @@ export const notebookRepository: NotebookRepository = {
     return Guarded.of(toRecord(row), toResource(row));
   },
 
-  async listOwn(tx, ownerId, limit) {
+  async listOwn(tx, ownerId, query) {
+    // Both of these come from the exhaustive maps above, never from the request.
+    const sortColumn = resolveSortColumn(NOTE_SORT_COLUMNS, query.sort);
+    const sortDirection = resolveSortDirection(query.order);
+
     const { rows } = await tx.query<NoteRow>(
       `SELECT ${SELECT_COLUMNS} FROM notes
-        WHERE owner_id = $1 AND state <> 'deleted'
-        ORDER BY updated_at DESC
-        LIMIT $2`,
-      [ownerId, limit],
+        WHERE owner_id = $1
+          AND state <> 'deleted'
+          AND ($2::text IS NULL OR visibility = $2)
+          AND ($3::text IS NULL OR state = $3)
+        ORDER BY ${sortColumn} ${sortDirection}, id ASC
+        LIMIT $4 OFFSET $5`,
+      [ownerId, query.visibility ?? null, query.state ?? null, query.limit, query.offset],
     );
     return rows.map(toRecord);
   },

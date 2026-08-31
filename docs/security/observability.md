@@ -47,11 +47,48 @@ no `SELECT` policy at all, so even a mistaken grant would return nothing.
 Reading the log is an operator action requiring a separate role that **does not
 exist yet**.
 
+## One recorder, two sinks
+
+Every domain records security events through `SecurityEventRecorder`. Nothing
+calls the audit writer directly, and a fitness test enforces that — the recorder
+performs repeated-denial detection, so a module writing straight to the audit
+table would create a blind spot exactly where enumeration shows up.
+
+| Sink                                | Used for                                                                 | Why                                                                                                                                         |
+| ----------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `record` — audit table **and** logs | Authentication outcomes, authorization denials, throttling, boot posture | An investigator must still be able to see these next month.                                                                                 |
+| `recordTransient` — logs only       | Malformed requests, oversized payloads                                   | Anyone with a socket can produce these at will; a durable write would let an unauthenticated attacker append rows to our database for free. |
+
+### Repeated-denial detection
+
+A run of denials by one actor inside a short window escalates to
+`authz.repeated_denial`. It escalates **once per window**, not on every denial
+past the threshold — otherwise one noisy actor becomes unbounded audit writes, a
+self-inflicted amplification. Tracked actors are capped so an attacker cycling
+identities cannot grow memory without limit.
+
+**Known limitation:** per-process and in-memory, exactly like the rate limiter.
+Across N instances an attacker gets N times the threshold, and a restart clears
+the state. It is a detection foundation, not a SIEM, and not a substitute for one.
+
+## Every declared event has an emitter
+
+Task 001 declared `ratelimit.exceeded` and never emitted it, so the taxonomy
+advertised a detection capability the system did not have (VULN-006). A fitness
+test now asserts that **every** member of `SecurityEventType` is referenced by a
+real emitter, and that nothing in `RESERVED_SECURITY_EVENT_TYPES` is emitted.
+Adding a type without a producer fails the build.
+
 ## Event taxonomy
 
 `auth.login.succeeded` · `auth.login.failed` · `auth.logout` ·
 `auth.session.rejected` · `auth.registered` · `authz.denied` ·
-`ratelimit.exceeded` · `validation.rejected` · `payload.too_large`
+`authz.repeated_denial` · `ratelimit.exceeded` · `validation.rejected` ·
+`payload.too_large` · `security.config_deviation`
+
+Reserved (declared as future intent, deliberately **not** in the live taxonomy
+because nothing would emit them): `admin.action`, `file.activity.unusual`,
+`moderation.action`.
 
 `authz.denied` is the important one. It fires on every authorization denial —
 **including** denials where RLS hid the row before the policy engine ran (see

@@ -1,4 +1,4 @@
-import type { Locale } from './locale.js';
+import type { Locale } from './locale.ts';
 
 /**
  * Message catalogues.

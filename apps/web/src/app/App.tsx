@@ -1,5 +1,5 @@
-import { useLocale } from './LocaleProvider.js';
-import { HealthIndicator } from '../features/health/HealthIndicator.js';
+import { useLocale } from './LocaleProvider.tsx';
+import { HealthIndicator } from '../features/health/HealthIndicator.tsx';
 
 export function App(): JSX.Element {
   const { t, locale, setLocale } = useLocale();

@@ -8,10 +8,10 @@ import {
   type RelationshipSnapshot,
 } from '@edu/authz';
 import { SecurityEventType } from '@edu/observability';
-import type { CreateNoteRequest, UpdateNoteRequest } from '@edu/contracts';
-import type { Database } from '../../platform/db.js';
-import type { AuditWriter } from '../../platform/audit.js';
-import type { NoteRecord, NotebookRepository } from './notebook.repository.js';
+import type { CreateNoteRequest, ListNotesQuery, UpdateNoteRequest } from '@edu/contracts';
+import type { Database } from '../../platform/db.ts';
+import type { SecurityEventRecorder } from '../../platform/security/security-events.ts';
+import type { NoteRecord, NotebookRepository } from './notebook.repository.ts';
 
 export interface ActorContext {
   readonly actor: Actor;
@@ -24,19 +24,19 @@ export interface NotebookServiceDeps {
   readonly db: Database;
   readonly repository: NotebookRepository;
   readonly engine: PolicyEngine;
-  readonly audit: AuditWriter;
+  readonly securityEvents: SecurityEventRecorder;
 }
 
 export interface NotebookService {
   get(ctx: ActorContext, noteId: string): Promise<NoteRecord>;
-  list(ctx: ActorContext, limit: number): Promise<NoteRecord[]>;
+  list(ctx: ActorContext, query: ListNotesQuery): Promise<NoteRecord[]>;
   create(ctx: ActorContext, input: CreateNoteRequest): Promise<NoteRecord>;
   update(ctx: ActorContext, noteId: string, input: UpdateNoteRequest): Promise<NoteRecord>;
   remove(ctx: ActorContext, noteId: string): Promise<void>;
 }
 
 export function createNotebookService(deps: NotebookServiceDeps): NotebookService {
-  const { db, repository, engine, audit } = deps;
+  const { db, repository, engine, securityEvents } = deps;
 
   /**
    * Turns a deny into the right HTTP error, and records it.
@@ -52,7 +52,10 @@ export function createNotebookService(deps: NotebookServiceDeps): NotebookServic
     resourceId: string,
     reason: string,
   ): Promise<void> {
-    await audit.write({
+    // Routed through the recorder so a run of denials by one actor escalates
+    // to AUTHZ_REPEATED_DENIAL. This is the single denial funnel for the domain,
+    // which is what makes that detection complete.
+    await securityEvents.record({
       type: SecurityEventType.AUTHZ_DENIED,
       actorId: ctx.actor.id,
       correlationId: ctx.correlationId,
@@ -128,11 +131,14 @@ export function createNotebookService(deps: NotebookServiceDeps): NotebookServic
       });
     },
 
-    async list(ctx, limit) {
+    async list(ctx, query) {
       // Listing is scoped to the caller by construction: the repository takes
       // the actor's own id, and RLS independently confirms it. There is no
       // per-object decision because there is no object the caller could name.
-      return db.withActor(ctx.actor.id, (tx) => repository.listOwn(tx, ctx.actor.id, limit));
+      //
+      // The query has already been validated against the sort/filter allow-list
+      // by the route, so nothing here can reach SQL as an identifier.
+      return db.withActor(ctx.actor.id, (tx) => repository.listOwn(tx, ctx.actor.id, query));
     },
 
     async create(ctx, input) {

@@ -2,10 +2,10 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
-import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.js';
-import { TEST_SUPERUSER_URL } from '../setup/env.js';
-import { closeSeedDb, createUser, truncateAll } from '../setup/fixtures.js';
-import { hashPassword } from '../../apps/api/src/platform/security/passwords.js';
+import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.ts';
+import { TEST_SUPERUSER_URL } from '../setup/env.ts';
+import { closeSeedDb, createUser, truncateAll } from '../setup/fixtures.ts';
+import { hashPassword } from '../../apps/api/src/platform/security/passwords.ts';
 
 /**
  * Session, CSRF, transport-hardening and audit behaviour.

@@ -5,7 +5,13 @@
 ### `ci.yml` — three jobs, deliberately separated
 
 **`static`** — install with `--frozen-lockfile`, format check, lint, typecheck,
-unit tests, architecture fitness tests. Under a minute; catches most mistakes.
+unit tests, architecture fitness tests, **the web build**, and a scan of the
+emitted bundle for server-only values. Under a couple of minutes; catches most
+mistakes.
+
+The build step is not ceremony: it is where Task 002 caught `.tsx` components
+being imported through `.ts` paths — accepted by `tsc`, rejected by Rollup. The
+bundle scan checks the actual shipped artifact rather than our intent about it.
 
 **`supply-chain`** — secret scan and dependency audit. Its own job so its result
 is legible at a glance rather than buried in a general "tests" tick.
@@ -57,7 +63,8 @@ plus per-project `sequence.groupOrder`, since the suites share one database).
 ## Verification status
 
 **Verified:** `tools/ci/setup-test-db.sh` was executed locally and the full
-208-test suite passes against the database it provisions. The workflow YAML is
+351-test suite passes against the database it provisions. The new build and
+bundle-scan steps were executed locally, verbatim. The workflow YAML is
 syntactically valid and formatted.
 
 **Not verified:** no GitHub-hosted run has ever executed. CodeQL has never

@@ -1,7 +1,7 @@
-import { loadConfig } from '../../apps/api/src/platform/config.js';
-import { buildApp, type BuiltApp } from '../../apps/api/src/app.js';
+import { loadConfig } from '../../apps/api/src/platform/config.ts';
+import { buildApp, type BuiltApp } from '../../apps/api/src/app.ts';
 import { createLogger, createMemorySink, type LogRecord } from '@edu/observability';
-import { TEST_APP_URL } from './env.js';
+import { TEST_APP_URL } from './env.ts';
 
 /**
  * Builds the REAL application for security tests.

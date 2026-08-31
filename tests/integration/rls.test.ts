@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { createDatabase, type Database } from '../../apps/api/src/platform/db.js';
-import { TEST_APP_URL } from '../setup/env.js';
+import { createDatabase, type Database } from '../../apps/api/src/platform/db.ts';
+import { TEST_APP_URL } from '../setup/env.ts';
 import {
   assignTeacher,
   closeSeedDb,
@@ -9,7 +9,7 @@ import {
   createUser,
   linkGuardian,
   truncateAll,
-} from '../setup/fixtures.js';
+} from '../setup/fixtures.ts';
 
 /**
  * Row-Level Security, exercised through the real application role.

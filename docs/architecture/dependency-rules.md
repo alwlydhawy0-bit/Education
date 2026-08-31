@@ -80,6 +80,29 @@ _Why:_ this is what guarantees every query runs inside `withActor`/`withoutActor
 and therefore that `app.actor_id` is always set correctly for RLS. A stray
 client would silently sidestep the entire database gate.
 
+### 8. The frontend cannot reach server-only code or secrets
+
+`apps/web` must not import from `apps/api`, must import no workspace package
+except `@edu/contracts`, must not reference `process.env`, must read
+`import.meta.env` in exactly one module, and must not even mention a server-only
+variable name.
+
+_Why:_ the browser bundle is public. The last rule is a tripwire for the
+copy-paste that puts a server value in client code — it fired during Task 002 on
+a docstring, which is the point.
+
+### 9. The application must actually be runnable
+
+No relative import may end in `.js`, and **every relative import must resolve to
+a file that exists**.
+
+_Why:_ Node's type stripping does not rewrite `./x.js` to `./x.ts`, so Task 001's
+`.js` specifiers meant the API could not boot at all — while 208 tests passed,
+because Vitest resolved them through a plugin (VULN-004). The second half of the
+rule was added minutes later, when a bulk rename pointed `.tsx` components at
+`.ts` paths: `tsc` accepted it, Rollup did not. Both halves check the filesystem,
+which is what Node and Rollup actually do.
+
 ## Allowed dependencies, in one table
 
 | From                     | May import                                                |

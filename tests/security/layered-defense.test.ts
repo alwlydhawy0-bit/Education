@@ -1,8 +1,8 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
-import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.js';
-import { closeSeedDb, truncateAll } from '../setup/fixtures.js';
+import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.ts';
+import { closeSeedDb, truncateAll } from '../setup/fixtures.ts';
 
 /**
  * Layer isolation: does the APPLICATION authorization layer stand on its own?

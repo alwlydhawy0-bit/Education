@@ -1,5 +1,5 @@
-import type { Decision } from './decision.js';
-import type { Action, Resource } from './types.js';
+import type { Decision } from './decision.ts';
+import type { Action, Resource } from './types.ts';
 
 /**
  * Raised when code tries to read a protected payload without a matching

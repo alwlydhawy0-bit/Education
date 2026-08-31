@@ -6,8 +6,8 @@ import {
   isLocale,
   LOCALES,
   negotiateLocale,
-} from '../../apps/web/src/shared/i18n/locale.js';
-import { translate, type MessageKey } from '../../apps/web/src/shared/i18n/messages.js';
+} from '../../apps/web/src/shared/i18n/locale.ts';
+import { translate, type MessageKey } from '../../apps/web/src/shared/i18n/messages.ts';
 
 /**
  * Arabic-first behaviour and RTL correctness.

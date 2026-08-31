@@ -156,6 +156,17 @@ The highest-consequence unbuilt control. **Authorization must filter the
 candidate set before similarity search, not after.** Post-filtering leaks through
 ranking, counts, and latency. Semantic similarity must never widen access.
 
+### T9a — Audit-log flooding (added in Task 002)
+
+- **Attack surface:** any endpoint whose failure writes a durable audit row.
+- **Mitigation [BUILT]:** client-driven, high-volume events (`validation.rejected`,
+  `payload.too_large`) are recorded **transiently** — log stream only. A durable
+  write would let an unauthenticated attacker append rows to the database for
+  free. Repeated-denial escalation fires once per window, not per denial, for the
+  same reason. `audit_log.detail` is size-capped at 8 KiB.
+- **Verification:** a unit test asserts `recordTransient` never reaches the audit
+  writer; another asserts escalation happens exactly once per window.
+
 ### T9 — Denial of service
 
 - **Mitigations [BUILT]:** global 300 req/min per IP; 10 login attempts per 15

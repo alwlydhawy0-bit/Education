@@ -2,7 +2,8 @@ import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
 import { ZodError } from 'zod';
 import { AppError, ErrorCode } from '@edu/kernel';
 import { AuthorizationNotEvaluatedError, PolicyConfigurationError } from '@edu/authz';
-import type { Logger } from '@edu/observability';
+import { SecurityEventType, type Logger } from '@edu/observability';
+import type { SecurityEventRecorder } from '../security/security-events.ts';
 
 /**
  * Central error handler.
@@ -16,7 +17,11 @@ import type { Logger } from '@edu/observability';
  * The `correlationId` is returned so a user can quote it in a support request
  * and an operator can find the full detail in the logs.
  */
-export function registerErrorHandler(app: FastifyInstance, logger: Logger): void {
+export function registerErrorHandler(
+  app: FastifyInstance,
+  logger: Logger,
+  securityEvents: SecurityEventRecorder,
+): void {
   app.setErrorHandler((error: unknown, request: FastifyRequest, reply: FastifyReply) => {
     const correlationId = request.correlationId;
     const log = logger.child({ correlationId, method: request.method, path: request.url });
@@ -24,8 +29,23 @@ export function registerErrorHandler(app: FastifyInstance, logger: Logger): void
     if (error instanceof ZodError) {
       // Field paths and messages are safe to return: they describe the client's
       // own request. Received VALUES are not included.
-      log.info('request validation rejected', {
-        issues: error.issues.map((i) => ({ path: i.path.join('.'), code: i.code })),
+      // Recorded TRANSIENTLY — log stream only, never the audit table.
+      //
+      // Anyone with a socket can produce these at will, so a durable write here
+      // would let an unauthenticated attacker append rows to our database for
+      // free. Issue PATHS and CODES only: the submitted values never leave the
+      // request.
+      securityEvents.recordTransient({
+        type: SecurityEventType.VALIDATION_REJECTED,
+        actorId: request.actor?.id ?? null,
+        correlationId,
+        ip: request.ip,
+        detail: {
+          method: request.method,
+          route: request.routeOptions?.url ?? 'unknown',
+          issues: error.issues.map((i) => ({ path: i.path.join('.'), code: i.code })),
+        },
+        occurredAt: new Date(),
       });
       return reply.status(400).send({
         error: {
@@ -69,6 +89,14 @@ export function registerErrorHandler(app: FastifyInstance, logger: Logger): void
     }
 
     if (isBodyTooLarge(error)) {
+      securityEvents.recordTransient({
+        type: SecurityEventType.PAYLOAD_TOO_LARGE,
+        actorId: request.actor?.id ?? null,
+        correlationId,
+        ip: request.ip,
+        detail: { method: request.method, route: request.routeOptions?.url ?? 'unknown' },
+        occurredAt: new Date(),
+      });
       return reply.status(413).send({
         error: { code: ErrorCode.PAYLOAD_TOO_LARGE, message: 'Payload too large', correlationId },
       });

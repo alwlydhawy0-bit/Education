@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { idSchema } from './common.js';
+import { idSchema } from './common.ts';
+import { createListQuerySchema } from './query.ts';
 
 export const noteVisibilitySchema = z.enum([
   'private',
@@ -57,3 +58,25 @@ export const noteResponseSchema = z
   .strict();
 
 export type NoteResponse = z.infer<typeof noteResponseSchema>;
+
+/**
+ * Query contract for `GET /notes`.
+ *
+ * `state` is filterable but the enum deliberately omits `deleted`: a
+ * soft-deleted note behaves as if it does not exist, and offering a filter for
+ * it would be a way to ask "what did I delete?" that the policy does not grant.
+ */
+export const NOTE_SORTABLE_FIELDS = ['updatedAt', 'createdAt', 'title'] as const;
+export type NoteSortField = (typeof NOTE_SORTABLE_FIELDS)[number];
+
+export const listNotesQuerySchema = createListQuerySchema({
+  sortableFields: NOTE_SORTABLE_FIELDS,
+  defaultSort: 'updatedAt',
+  defaultOrder: 'desc',
+  filters: {
+    visibility: noteVisibilitySchema.optional(),
+    state: z.enum(['active', 'archived']).optional(),
+  },
+});
+
+export type ListNotesQuery = z.infer<typeof listNotesQuerySchema>;

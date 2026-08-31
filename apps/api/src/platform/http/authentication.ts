@@ -2,8 +2,8 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { unauthenticated } from '@edu/kernel';
 import { EMPTY_RELATIONSHIPS, type Actor, type RelationshipSnapshot } from '@edu/authz';
 import { SecurityEventType } from '@edu/observability';
-import type { Database, Tx } from '../db.js';
-import type { AuditWriter } from '../audit.js';
+import type { Database, Tx } from '../db.ts';
+import type { SecurityEventRecorder } from '../security/security-events.ts';
 
 /**
  * Authentication wiring.
@@ -35,7 +35,7 @@ export interface AuthenticationDeps {
   readonly identity: SessionAuthenticator;
   readonly relationships: RelationshipLoader;
   readonly db: Database;
-  readonly audit: AuditWriter;
+  readonly securityEvents: SecurityEventRecorder;
   readonly cookieName: string;
 }
 
@@ -49,7 +49,7 @@ export interface AuthenticationDeps {
  * the first authorization call, rather than silently running as nobody.
  */
 export function registerAuthentication(app: FastifyInstance, deps: AuthenticationDeps): void {
-  const { identity, relationships, db, audit, cookieName } = deps;
+  const { identity, relationships, db, securityEvents, cookieName } = deps;
 
   app.addHook('preHandler', async (request: FastifyRequest) => {
     const token = request.cookies[cookieName];
@@ -72,7 +72,7 @@ export function registerAuthentication(app: FastifyInstance, deps: Authenticatio
       // A cookie that does not resolve is a revoked, expired, or forged token.
       // Worth recording: a burst of these is credential stuffing, or a stolen
       // cookie being replayed after revocation.
-      await audit.write({
+      await securityEvents.record({
         type: SecurityEventType.AUTH_SESSION_REJECTED,
         actorId: null,
         correlationId: request.correlationId,

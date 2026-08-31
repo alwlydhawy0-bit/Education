@@ -3,18 +3,18 @@ import { conflict, unauthenticated } from '@edu/kernel';
 import type { Actor } from '@edu/authz';
 import { SecurityEventType } from '@edu/observability';
 import type { RegisterRequest, LoginRequest } from '@edu/contracts';
-import { generateSessionToken, hashSessionToken } from '../../platform/security/tokens.js';
-import { getDummyHash, hashPassword, verifyPassword } from '../../platform/security/passwords.js';
-import type { AuditWriter } from '../../platform/audit.js';
+import { generateSessionToken, hashSessionToken } from '../../platform/security/tokens.ts';
+import { getDummyHash, hashPassword, verifyPassword } from '../../platform/security/passwords.ts';
+import type { SecurityEventRecorder } from '../../platform/security/security-events.ts';
 import {
   EmailAlreadyRegisteredError,
   type IdentityRepository,
   type ResolvedSession,
-} from './identity.repository.js';
+} from './identity.repository.ts';
 
 export interface IdentityServiceDeps {
   readonly repository: IdentityRepository;
-  readonly audit: AuditWriter;
+  readonly securityEvents: SecurityEventRecorder;
   readonly clock: Clock;
   readonly sessionTtlHours: number;
 }
@@ -38,7 +38,7 @@ export interface IdentityService {
 }
 
 export function createIdentityService(deps: IdentityServiceDeps): IdentityService {
-  const { repository, audit, clock, sessionTtlHours } = deps;
+  const { repository, securityEvents, clock, sessionTtlHours } = deps;
 
   return {
     async register(input, meta) {
@@ -50,7 +50,7 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
           input.displayName,
           input.locale,
         );
-        await audit.write({
+        await securityEvents.record({
           type: SecurityEventType.AUTH_REGISTERED,
           actorId: userId,
           correlationId: meta.correlationId,
@@ -89,7 +89,7 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
       const ok = candidate !== null && passwordValid && candidate.status === 'active';
 
       if (!ok) {
-        await audit.write({
+        await securityEvents.record({
           type: SecurityEventType.AUTH_LOGIN_FAILED,
           actorId: candidate?.id ?? null,
           correlationId: meta.correlationId,
@@ -115,7 +115,7 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
         meta.userAgent,
       );
 
-      await audit.write({
+      await securityEvents.record({
         type: SecurityEventType.AUTH_LOGIN_SUCCEEDED,
         actorId: candidate.id,
         correlationId: meta.correlationId,
@@ -130,7 +130,7 @@ export function createIdentityService(deps: IdentityServiceDeps): IdentityServic
     async logout(token, meta) {
       const revoked = await repository.revokeSession(hashSessionToken(token));
       if (revoked) {
-        await audit.write({
+        await securityEvents.record({
           type: SecurityEventType.AUTH_LOGOUT,
           actorId: null,
           correlationId: meta.correlationId,

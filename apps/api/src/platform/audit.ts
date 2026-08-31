@@ -1,6 +1,6 @@
 import type { SecurityEvent } from '@edu/observability';
 import type { Logger } from '@edu/observability';
-import type { Database } from './db.js';
+import type { Database } from './db.ts';
 
 /**
  * Writes security events to the durable audit table and to the log stream.

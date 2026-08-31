@@ -1,4 +1,4 @@
-import type { Action } from './types.js';
+import type { Action } from './types.ts';
 
 /**
  * The outcome of one authorization evaluation.

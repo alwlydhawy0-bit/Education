@@ -29,9 +29,26 @@ machine or a CI runner.
 
 ## Consequences
 
-- NodeNext resolution requires `.js` extensions on relative imports even though
-  the files are `.ts`. Vitest needs a small resolver plugin for this
-  (`vitest.shared.ts`).
+- **Relative imports carry the real `.ts` extension**, not `.js`.
+
+  This is a correction made in Task 002. The original decision paired NodeNext's
+  `.js` convention with running the source directly under type stripping, and
+  those are incompatible: Node does not rewrite `./x.js` to `./x.ts`, so the API
+  could not start at all (VULN-004). The suite passed anyway, because Vitest had
+  a resolver plugin papering over it.
+
+  `.ts` specifiers are resolved natively by Node's type stripping, by Vite, and
+  by TypeScript (`allowImportingTsExtensions`). The Vitest plugin was deleted, so
+  the harness and the runtime now resolve modules identically — which is the
+  property that makes the tests evidence about the real system.
+
 - Strict flags cost some ceremony; the payoff is in the database layer.
-- No build step for the API keeps the dev loop fast; a production deployment may
-  want a compile step later for startup time.
+
+- No build step for the API keeps the dev loop fast.
+
+  **Known risk:** this means production would run on `--experimental-strip-types`.
+  Node's type stripping is erasure-only, and the codebase contains no
+  non-erasable syntax — no enums, no parameter properties, no decorators, all
+  checked before relying on this. But an experimental flag in production is a real
+  dependency on unstable behaviour, and a compile step should be added before the
+  first production deployment. Recorded in docs/security/limitations.md.

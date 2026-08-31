@@ -1,23 +1,75 @@
 import { z } from 'zod';
 
 /**
+ * Centralized configuration.
+ *
  * Configuration is parsed once, at startup, and the process REFUSES TO START if
- * anything is missing or malformed.
+ * anything is missing or malformed. Failing fast matters more than it looks: the
+ * alternative is a server that boots happily with `COOKIE_SECURE=undefined` and
+ * quietly serves session cookies over plaintext for a week before anyone
+ * notices.
  *
- * Failing fast matters more than it looks: the alternative is a server that
- * boots happily with `COOKIE_SECURE=undefined` and quietly serves session
- * cookies over plaintext for a week before anyone notices.
+ * Application code must never read `process.env` directly — everything comes
+ * through `loadConfig`, and the architecture fitness tests enforce that.
  *
- * There are no defaults for security-relevant values in production. Where a
- * default exists it is the SAFE one, and `refine` blocks the unsafe combination
- * outright rather than warning about it.
+ * PUBLIC vs PRIVATE
+ * -----------------
+ * Everything parsed here is PRIVATE (server-only) by default. The only values
+ * that may ever reach a browser are the ones listed in `toPublicConfig`, and
+ * `assertNoPrivateLeakage` verifies at startup that no private value slipped
+ * into that object. See docs/architecture/configuration.md.
  */
+
+/**
+ * Environments that must be configured as if they were production.
+ *
+ * `staging` is included deliberately. A staging environment holds real-shaped
+ * data, is reachable over the network, and is exactly where "we'll tighten it
+ * before launch" goes to die. Every safety refine below applies to both, so
+ * adding an environment cannot silently open a hole.
+ */
+const HARDENED_ENVIRONMENTS = ['production', 'staging'] as const;
+
+export const APP_ENVIRONMENTS = ['development', 'test', 'staging', 'production'] as const;
+export type AppEnvironment = (typeof APP_ENVIRONMENTS)[number];
+
+function isHardened(environment: AppEnvironment): boolean {
+  return (HARDENED_ENVIRONMENTS as readonly string[]).includes(environment);
+}
+
+/**
+ * Every environment variable the application reads. Anything not listed here is
+ * ignored rather than silently becoming configuration.
+ */
+const CONFIG_KEYS = [
+  'NODE_ENV',
+  'PORT',
+  'HOST',
+  'DATABASE_URL',
+  'DATABASE_POOL_MAX',
+  'LOG_LEVEL',
+  'ALLOWED_ORIGINS',
+  'RATE_LIMIT_ENABLED',
+  'SESSION_COOKIE_NAME',
+  'SESSION_TTL_HOURS',
+  'SESSION_COOKIE_SECURE',
+] as const;
+
+/**
+ * Keys whose VALUES must never appear in anything sent to a client.
+ *
+ * Used by `assertNoPrivateLeakage` as a runtime backstop against a future edit
+ * to `toPublicConfig` that adds a field without thinking about it.
+ */
+const SECRET_BEARING_KEYS = ['DATABASE_URL'] as const;
+
 const configSchema = z
   .object({
-    NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
+    NODE_ENV: z.enum(APP_ENVIRONMENTS).default('development'),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
     HOST: z.string().default('127.0.0.1'),
 
+    // PRIVATE. Contains credentials. Never logged, never exposed.
     DATABASE_URL: z.string().min(1, 'DATABASE_URL is required'),
     DATABASE_POOL_MAX: z.coerce.number().int().min(1).max(200).default(10),
 
@@ -36,7 +88,7 @@ const configSchema = z
 
     /**
      * Rate limiting is ON by default and can only be disabled explicitly. The
-     * production refine below makes disabling it in production impossible, so
+     * refine below makes disabling it in a hardened environment impossible, so
      * this flag exists for test isolation, not as an operational escape hatch.
      */
     RATE_LIMIT_ENABLED: z
@@ -53,41 +105,79 @@ const configSchema = z
       .transform((v) => v === 'true'),
   })
   .strict()
-  .refine((c) => !(c.NODE_ENV === 'production' && c.RATE_LIMIT_ENABLED === false), {
-    message: 'RATE_LIMIT_ENABLED must not be false in production — refusing to start.',
+  .refine((c) => !(isHardened(c.NODE_ENV) && c.RATE_LIMIT_ENABLED === false), {
+    message: 'RATE_LIMIT_ENABLED must not be false in production or staging — refusing to start.',
     path: ['RATE_LIMIT_ENABLED'],
   })
-  .refine((c) => !(c.NODE_ENV === 'production' && c.SESSION_COOKIE_SECURE === false), {
-    message: 'SESSION_COOKIE_SECURE must be true in production — refusing to start.',
+  .refine((c) => !(isHardened(c.NODE_ENV) && c.SESSION_COOKIE_SECURE === false), {
+    message: 'SESSION_COOKIE_SECURE must be true in production or staging — refusing to start.',
     path: ['SESSION_COOKIE_SECURE'],
   })
   .refine(
-    (c) => c.NODE_ENV !== 'production' || c.ALLOWED_ORIGINS.every((o) => o.startsWith('https://')),
+    (c) => !isHardened(c.NODE_ENV) || c.ALLOWED_ORIGINS.every((o) => o.startsWith('https://')),
     {
-      message: 'All ALLOWED_ORIGINS must be https:// in production — refusing to start.',
+      message: 'All ALLOWED_ORIGINS must be https:// in production or staging — refusing to start.',
       path: ['ALLOWED_ORIGINS'],
     },
-  );
+  )
+  .refine((c) => !isHardened(c.NODE_ENV) || c.ALLOWED_ORIGINS.length > 0, {
+    message: 'ALLOWED_ORIGINS must not be empty in production or staging — refusing to start.',
+    path: ['ALLOWED_ORIGINS'],
+  })
+  .refine((c) => !isHardened(c.NODE_ENV) || c.LOG_LEVEL !== 'debug', {
+    // Debug logging in a hardened environment increases the volume of
+    // request-shaped detail written to disk, and with it the chance that
+    // something private is retained far longer than intended.
+    message: 'LOG_LEVEL must not be "debug" in production or staging — refusing to start.',
+    path: ['LOG_LEVEL'],
+  });
 
 export type AppConfig = Readonly<z.infer<typeof configSchema>>;
 
+/**
+ * The subset of configuration that is safe to hand to a browser.
+ *
+ * Deliberately tiny. A value belongs here only if a client genuinely needs it
+ * AND leaking it to an anonymous visitor is harmless. When in doubt, it does not
+ * belong here.
+ *
+ * Note what is absent: the session cookie name (the cookie is HttpOnly, so the
+ * browser attaches it without JavaScript ever naming it), anything about the
+ * database, and anything about internal hosts or ports.
+ */
+export interface PublicConfig {
+  readonly environment: AppEnvironment;
+  readonly apiVersion: 'v1';
+}
+
+export function toPublicConfig(config: AppConfig): PublicConfig {
+  return Object.freeze({ environment: config.NODE_ENV, apiVersion: 'v1' as const });
+}
+
+/**
+ * Runtime backstop: proves no private value is reachable through the public
+ * config object.
+ *
+ * `toPublicConfig` is an allow-list, which is the real control. This exists
+ * because allow-lists are edited by people in a hurry, and a future field added
+ * without thought (`databaseUrl` "just for a debug banner") should fail loudly at
+ * startup rather than ship.
+ */
+export function assertNoPrivateLeakage(config: AppConfig, publicConfig: PublicConfig): void {
+  const serialized = JSON.stringify(publicConfig);
+  for (const key of SECRET_BEARING_KEYS) {
+    const value = config[key];
+    if (typeof value === 'string' && value.length > 0 && serialized.includes(value)) {
+      throw new Error(
+        `Public configuration contains the value of ${key}. This would expose a server-only secret to every client. Refusing to start.`,
+      );
+    }
+  }
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  // Only the keys we know about are read. An unexpected EDU_* variable is
-  // ignored rather than silently becoming configuration.
   const candidate: Record<string, unknown> = {};
-  for (const key of [
-    'NODE_ENV',
-    'PORT',
-    'HOST',
-    'DATABASE_URL',
-    'DATABASE_POOL_MAX',
-    'LOG_LEVEL',
-    'ALLOWED_ORIGINS',
-    'RATE_LIMIT_ENABLED',
-    'SESSION_COOKIE_NAME',
-    'SESSION_TTL_HOURS',
-    'SESSION_COOKIE_SECURE',
-  ]) {
+  for (const key of CONFIG_KEYS) {
     if (env[key] !== undefined) candidate[key] = env[key];
   }
 
@@ -98,5 +188,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       .join('\n');
     throw new Error(`Invalid configuration:\n${issues}`);
   }
-  return Object.freeze(parsed.data);
+
+  const config = Object.freeze(parsed.data);
+  // Checked on every boot, in every environment, so a leak cannot reach
+  // production by only being tested in development.
+  assertNoPrivateLeakage(config, toPublicConfig(config));
+  return config;
 }

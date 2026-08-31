@@ -1,4 +1,4 @@
-import { redact } from './redaction.js';
+import { redact } from './redaction.ts';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 

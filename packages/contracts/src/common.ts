@@ -29,14 +29,14 @@ export const uuidSchema = z.string().uuid({ message: 'must be a UUID' });
  */
 export const idSchema = uuidSchema;
 
-export const paginationSchema = z
-  .object({
-    limit: z.coerce.number().int().min(1).max(100).default(20),
-    cursor: z.string().max(200).optional(),
-  })
-  .strict();
-
-export type Pagination = z.infer<typeof paginationSchema>;
+/**
+ * Pagination primitives live in `./query.js`, together with sorting and
+ * filtering, so that a list endpoint validates all three the same way.
+ *
+ * The previous schema here accepted a `cursor` that no repository implemented,
+ * so a paginating client silently received page one forever. Accepting a
+ * parameter you do not honour is worse than not offering it.
+ */
 
 export const errorResponseSchema = z
   .object({

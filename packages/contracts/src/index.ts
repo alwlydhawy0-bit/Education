@@ -1,3 +1,4 @@
-export * from './common.js';
-export * from './identity.contract.js';
-export * from './notebook.contract.js';
+export * from './common.ts';
+export * from './query.ts';
+export * from './identity.contract.ts';
+export * from './notebook.contract.ts';

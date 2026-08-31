@@ -22,10 +22,47 @@ export const SecurityEventType = {
    */
   AUTHZ_DENIED: 'authz.denied',
 
+  /**
+   * Escalation of AUTHZ_DENIED: one actor has been denied repeatedly inside a
+   * short window. A single denial is noise; a run of them across different
+   * object ids is the shape of enumeration.
+   */
+  AUTHZ_REPEATED_DENIAL: 'authz.repeated_denial',
+
   RATE_LIMIT_EXCEEDED: 'ratelimit.exceeded',
   VALIDATION_REJECTED: 'validation.rejected',
   PAYLOAD_TOO_LARGE: 'payload.too_large',
+
+  /**
+   * Emitted at startup when the running security posture deviates from the safe
+   * defaults (rate limiting off, insecure cookies, debug logging). The
+   * configuration loader refuses these outright in production and staging, so
+   * this records the deviations that ARE permitted elsewhere.
+   */
+  SECURITY_CONFIG_DEVIATION: 'security.config_deviation',
 } as const;
+
+/**
+ * Event types that are DELIBERATELY NOT DECLARED yet, because nothing would
+ * emit them.
+ *
+ * Task 001 declared `ratelimit.exceeded` and never emitted it, so the taxonomy
+ * advertised a detection capability the system did not have. To stop that
+ * recurring, `tests/architecture/security-events.test.ts` asserts that every
+ * member of `SecurityEventType` has a real emitter in the API source. Adding a
+ * type here instead of there is the honest way to record future intent:
+ *
+ *   - `admin.action`           — no administrative endpoints exist.
+ *   - `file.activity.unusual`  — no file storage exists.
+ *   - `moderation.action`      — no moderation exists.
+ *
+ * Move one into `SecurityEventType` in the same change that adds its emitter.
+ */
+export const RESERVED_SECURITY_EVENT_TYPES = [
+  'admin.action',
+  'file.activity.unusual',
+  'moderation.action',
+] as const;
 
 export type SecurityEventType = (typeof SecurityEventType)[keyof typeof SecurityEventType];
 

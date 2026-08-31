@@ -8,7 +8,7 @@ university, built around practical, evidence-based learning.
 > executable evidence that they hold. See
 > [`docs/architecture/architecture-report.md`](docs/architecture/architecture-report.md).
 >
-> **This system is not proven secure.** 208 tests pass, which establishes that
+> **This system is not proven secure.** 351 tests pass, which establishes that
 > specific enumerated properties held at a point in time. Read
 > [`docs/security/limitations.md`](docs/security/limitations.md) for what was
 > **not** tested.
@@ -95,8 +95,15 @@ indistinguishable.
 **Privilege escalation is blocked at the database.** The application role has no
 write privilege on `user_roles` whatsoever.
 
-**The architecture is enforced by tests**, not by convention — 16 fitness
-assertions covering the dependency rules.
+**The architecture is enforced by tests**, not by convention — 40 fitness
+assertions covering the dependency rules, the runnability of the application, and
+the honesty of the security-event taxonomy (every declared event must have a real
+emitter).
+
+**Configuration is fail-fast and split PUBLIC/PRIVATE.** The server refuses to
+start in production _or staging_ with insecure cookies, plaintext origins, rate
+limiting off, or debug logging. Nothing server-only can reach the client bundle —
+checked against the built artifact, not just asserted.
 
 ## Documentation
 

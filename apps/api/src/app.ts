@@ -1,24 +1,25 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import cookie from '@fastify/cookie';
 import helmet from '@fastify/helmet';
-import rateLimit from '@fastify/rate-limit';
 import { systemClock, type Clock } from '@edu/kernel';
 import { createPolicyEngine } from '@edu/authz';
-import { createLogger, stdoutJsonSink, type Logger } from '@edu/observability';
-import type { AppConfig } from './platform/config.js';
-import { createDatabase, type Database } from './platform/db.js';
-import { createAuditWriter } from './platform/audit.js';
-import { registerRequestContext } from './platform/http/context.js';
-import { registerErrorHandler } from './platform/http/errors.js';
-import { registerOriginGuard } from './platform/http/origin-guard.js';
-import { registerAuthentication } from './platform/http/authentication.js';
-import { createIdentityRepository } from './modules/identity/identity.repository.js';
-import { createIdentityService } from './modules/identity/identity.service.js';
-import { registerIdentityRoutes } from './modules/identity/identity.routes.js';
-import { relationshipReader } from './modules/relationships/relationships.repository.js';
-import { notebookRepository } from './modules/notebook/notebook.repository.js';
-import { createNotebookService } from './modules/notebook/notebook.service.js';
-import { registerNotebookRoutes } from './modules/notebook/notebook.routes.js';
+import { createLogger, SecurityEventType, stdoutJsonSink, type Logger } from '@edu/observability';
+import type { AppConfig } from './platform/config.ts';
+import { createDatabase, type Database } from './platform/db.ts';
+import { createAuditWriter } from './platform/audit.ts';
+import { registerRequestContext } from './platform/http/context.ts';
+import { registerErrorHandler } from './platform/http/errors.ts';
+import { registerOriginGuard } from './platform/http/origin-guard.ts';
+import { registerAuthentication } from './platform/http/authentication.ts';
+import { registerRateLimiting } from './platform/security/rate-limit.ts';
+import { createSecurityEventRecorder } from './platform/security/security-events.ts';
+import { createIdentityRepository } from './modules/identity/identity.repository.ts';
+import { createIdentityService } from './modules/identity/identity.service.ts';
+import { registerIdentityRoutes } from './modules/identity/identity.routes.ts';
+import { relationshipReader } from './modules/relationships/relationships.repository.ts';
+import { notebookRepository } from './modules/notebook/notebook.repository.ts';
+import { createNotebookService } from './modules/notebook/notebook.service.ts';
+import { registerNotebookRoutes } from './modules/notebook/notebook.routes.ts';
 
 /**
  * Composition root.
@@ -58,6 +59,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       poolMax: config.DATABASE_POOL_MAX,
     });
 
+  const isHardenedEnvironment = config.NODE_ENV === 'production' || config.NODE_ENV === 'staging';
+
   const app = Fastify({
     // Fastify's own logger is disabled: all logging goes through the redacting
     // logger in @edu/observability, so there is exactly one path to the log
@@ -71,8 +74,22 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   });
 
   // --- Order matters below. -----------------------------------------------
-  // context -> security headers -> origin guard -> cookies -> rate limit ->
-  // authentication -> routes.
+  //
+  //   onRequest:   context -> security headers -> RATE LIMIT
+  //   preHandler:  origin guard -> authentication
+  //   then:        routes
+  //
+  // Fastify runs every `onRequest` hook before any `preHandler`, so the rate
+  // limiter necessarily sees a request before the origin guard can reject it.
+  // That ordering is deliberate: with the guard first, a request carrying a bad
+  // Origin was rejected before ever being counted, so an attacker could flood
+  // the server indefinitely just by sending a wrong Origin header and never
+  // appear in the rate-limit signal.
+  //
+  // Registration order alone would NOT have achieved this: hooks added inside a
+  // Fastify plugin (the rate limiter) are appended when the plugin loads, not
+  // when it is registered, so a synchronously-added `onRequest` hook wins
+  // regardless. The lifecycle guarantee is what makes this robust.
   registerRequestContext(app);
 
   await app.register(helmet, {
@@ -98,32 +115,53 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       config.NODE_ENV === 'production' ? { maxAge: 31_536_000, includeSubDomains: true } : false,
   });
 
+  // Security-event plumbing is built first: the rate limiter records an event
+  // when a limit is exceeded, so it needs the recorder before it registers.
+  //
+  // The audit writer is wrapped by the recorder and is not passed anywhere else
+  // — the recorder is the only writer, which is what makes repeated-denial
+  // detection see every denial.
+  const audit = createAuditWriter(db, logger);
+  const securityEvents = createSecurityEventRecorder({ audit, logger });
+
+  await registerRateLimiting(app, {
+    enabled: config.RATE_LIMIT_ENABLED,
+    hardenedEnvironment: isHardenedEnvironment,
+    securityEvents,
+    logger,
+  });
+
   registerOriginGuard(app, config.ALLOWED_ORIGINS);
 
   await app.register(cookie, {});
 
-  if (config.RATE_LIMIT_ENABLED) {
-    await app.register(rateLimit, {
-      global: true,
-      max: 300,
-      timeWindow: '1 minute',
-      // Keyed on the socket address. With trustProxy false this cannot be
-      // spoofed by a header; behind a real proxy, trustProxy must be configured
-      // together with this.
-      keyGenerator: (request) => request.ip,
+  registerErrorHandler(app, logger, securityEvents);
+
+  // Record the security posture this process actually booted with.
+  //
+  // The configuration loader REFUSES these combinations in production and
+  // staging, so in practice this fires only in development and tests. It exists
+  // so that "which posture was this instance running?" is answerable from the
+  // audit trail rather than from someone's memory of the deployment.
+  const deviations = describeSecurityPostureDeviations(config);
+  if (deviations.length > 0) {
+    await securityEvents.record({
+      type: SecurityEventType.SECURITY_CONFIG_DEVIATION,
+      actorId: null,
+      correlationId: 'boot',
+      ip: null,
+      detail: { environment: config.NODE_ENV, deviations },
+      occurredAt: clock.now(),
     });
   }
 
-  registerErrorHandler(app, logger);
-
   // --- Domain wiring ------------------------------------------------------
-  const audit = createAuditWriter(db, logger);
   const engine = createPolicyEngine();
 
   const identityRepository = createIdentityRepository(db);
   const identity = createIdentityService({
     repository: identityRepository,
-    audit,
+    securityEvents,
     clock,
     sessionTtlHours: config.SESSION_TTL_HOURS,
   });
@@ -132,14 +170,14 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     db,
     repository: notebookRepository,
     engine,
-    audit,
+    securityEvents,
   });
 
   registerAuthentication(app, {
     identity,
     relationships: relationshipReader,
     db,
-    audit,
+    securityEvents,
     cookieName: config.SESSION_COOKIE_NAME,
   });
 
@@ -159,4 +197,21 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerNotebookRoutes(app, notebook);
 
   return { app, db };
+}
+
+/**
+ * Security-relevant settings that differ from the safe defaults.
+ *
+ * Kept as a pure function so the boot-time event is testable without starting a
+ * server.
+ */
+export function describeSecurityPostureDeviations(config: AppConfig): string[] {
+  const deviations: string[] = [];
+  if (!config.RATE_LIMIT_ENABLED) deviations.push('rate_limiting_disabled');
+  if (!config.SESSION_COOKIE_SECURE) deviations.push('insecure_session_cookie');
+  if (config.LOG_LEVEL === 'debug') deviations.push('debug_logging');
+  if (config.ALLOWED_ORIGINS.some((origin) => origin.startsWith('http://'))) {
+    deviations.push('plaintext_allowed_origin');
+  }
+  return deviations;
 }

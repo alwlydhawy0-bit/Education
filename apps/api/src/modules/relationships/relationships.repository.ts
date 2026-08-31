@@ -1,5 +1,5 @@
 import type { RelationshipSnapshot } from '@edu/authz';
-import type { Tx } from '../../platform/db.js';
+import type { Tx } from '../../platform/db.ts';
 
 /**
  * Loads the relationship edges that authorization decisions depend on.

@@ -7,8 +7,8 @@ import {
   sessionCookieFrom,
   writeHeaders,
   type TestApp,
-} from '../setup/app.js';
-import { closeSeedDb, truncateAll } from '../setup/fixtures.js';
+} from '../setup/app.ts';
+import { closeSeedDb, truncateAll } from '../setup/fixtures.ts';
 
 /**
  * IDOR / BOLA regression suite (brief section 14).

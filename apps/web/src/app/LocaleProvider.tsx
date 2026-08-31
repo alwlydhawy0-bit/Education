@@ -7,8 +7,8 @@ import {
   negotiateLocale,
   type Direction,
   type Locale,
-} from '../shared/i18n/locale.js';
-import { translate, type MessageKey } from '../shared/i18n/messages.js';
+} from '../shared/i18n/locale.ts';
+import { translate, type MessageKey } from '../shared/i18n/messages.ts';
 
 interface LocaleContextValue {
   readonly locale: Locale;

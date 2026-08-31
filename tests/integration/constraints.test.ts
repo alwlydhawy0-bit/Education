@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import pg from 'pg';
-import { TEST_SUPERUSER_URL } from '../setup/env.js';
-import { closeSeedDb, createOrganization, createUser, truncateAll } from '../setup/fixtures.js';
+import { TEST_SUPERUSER_URL } from '../setup/env.ts';
+import { closeSeedDb, createOrganization, createUser, truncateAll } from '../setup/fixtures.ts';
 
 /**
  * Database-level data integrity.

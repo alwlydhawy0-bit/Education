@@ -1,5 +1,5 @@
-import { allow, deny, type Decision } from '../decision.js';
-import { Role, type AuthorizationContext, type NoteAction, type NoteResource } from '../types.js';
+import { allow, deny, type Decision } from '../decision.ts';
+import { Role, type AuthorizationContext, type NoteAction, type NoteResource } from '../types.ts';
 
 /**
  * Policy for the student notebook.

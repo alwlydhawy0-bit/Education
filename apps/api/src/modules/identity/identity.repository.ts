@@ -1,5 +1,5 @@
 import type { Role } from '@edu/authz';
-import type { Database, Tx } from '../../platform/db.js';
+import type { Database, Tx } from '../../platform/db.ts';
 
 /**
  * Identity persistence.

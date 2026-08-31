@@ -58,6 +58,25 @@ jobs:
         # A violation here is an architecture regression, not a style nit.
         run: pnpm exec vitest run --project architecture
 
+      - name: Build the web client
+        # Build validation, not just typechecking. A bundle that fails to build
+        # is a broken deploy, and the build is also where a server-only value
+        # would become visible in a downloadable artifact.
+        run: pnpm --filter @edu/web build
+
+      - name: Assert no server-only values reached the client bundle
+        # A cheap, direct check on the actual shipped artifact rather than on our
+        # intent. See docs/architecture/configuration.md (PUBLIC vs PRIVATE).
+        run: |
+          set -euo pipefail
+          for needle in DATABASE_URL 'postgres://' edu_app SESSION_COOKIE_SECURE ALLOWED_ORIGINS; do
+            if grep -rqs "$needle" apps/web/dist; then
+              echo "FAIL: '$needle' present in the client bundle"
+              exit 1
+            fi
+          done
+          echo "client bundle contains no server-only values"
+
   # ---------------------------------------------------------------------
   # Supply chain and secrets. Kept in its own job so that its result is
   # legible at a glance in the checks list.
@@ -144,5 +163,5 @@ jobs:
       # Kept as its own step so the checks list shows explicitly whether the
       # security boundaries passed — a green "tests" tick that hides a skipped
       # security suite is exactly the failure mode this guards against.
-      - name: Security tests (IDOR/BOLA, session, CSRF, audit)
+      - name: Security tests (IDOR/BOLA, session, CSRF, rate limiting, audit)
         run: pnpm exec vitest run --project security

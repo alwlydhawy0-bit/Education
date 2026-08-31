@@ -1,4 +1,5 @@
-import { API_VERSION, errorResponseSchema } from '@edu/contracts';
+import { errorResponseSchema } from '@edu/contracts';
+import { clientConfig } from '../config/index.ts';
 
 /**
  * The single place the web app talks to the API.
@@ -35,7 +36,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
   const method = options.method ?? 'GET';
   const hasBody = options.body !== undefined;
 
-  const response = await fetch(`/api/${API_VERSION}${path}`, {
+  const response = await fetch(`/api/${clientConfig.apiVersion}${path}`, {
     method,
     // Sends the session cookie. Combined with SameSite=Strict on the server
     // side, and the server's Origin allow-list, this is the CSRF posture.

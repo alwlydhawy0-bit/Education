@@ -1,6 +1,6 @@
-export * from './types.js';
-export * from './decision.js';
-export * from './guarded.js';
-export * from './engine.js';
-export { notePolicy } from './policies/note.policy.js';
-export { userPolicy } from './policies/user.policy.js';
+export * from './types.ts';
+export * from './decision.ts';
+export * from './guarded.ts';
+export * from './engine.ts';
+export { notePolicy } from './policies/note.policy.ts';
+export { userPolicy } from './policies/user.policy.ts';

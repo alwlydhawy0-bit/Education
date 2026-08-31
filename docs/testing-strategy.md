@@ -1,13 +1,13 @@
 # Testing Strategy
 
-**208 tests, all executed and passing** as of Task 001.
+**351 tests, all executed and passing** as of Task 002.
 
-| Project        | Tests | Needs      | Proves                                                               |
-| -------------- | ----- | ---------- | -------------------------------------------------------------------- |
-| `unit`         | 112   | nothing    | Policy decision table, `Guarded`, redaction, contracts, config, i18n |
-| `architecture` | 16    | nothing    | The dependency rules hold                                            |
-| `integration`  | 45    | PostgreSQL | Schema, constraints, RLS                                             |
-| `security`     | 35    | PostgreSQL | IDOR/BOLA, layer isolation, session, CSRF, audit, rate limiting      |
+| Project        | Tests | Needs      | Proves                                                                                                                               |
+| -------------- | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `unit`         | 181   | nothing    | Policy decision table, `Guarded`, redaction, contracts, config, query validation, security-event recorder, rate-limit policies, i18n |
+| `architecture` | 40    | nothing    | Dependency rules; every security event has an emitter; the app is runnable                                                           |
+| `integration`  | 59    | PostgreSQL | Schema, constraints, RLS, query safety, and that the process actually boots                                                          |
+| `security`     | 71    | PostgreSQL | IDOR/BOLA scenarios A–E, cross-organization isolation, layer isolation, session, CSRF, rate limiting, audit                          |
 
 ```bash
 pnpm test                 # everything
@@ -81,6 +81,22 @@ Truncation between tests, not transactional rollback — the code under test
 manages its own transactions, so wrapping it in an outer one would change its
 behaviour. Deterministic UUID constants in unit tests make the decision table
 readable.
+
+## The boot smoke test
+
+Every other test builds the app in-process via `buildApp`. That is fast and
+precise, but it never exercises `main.ts`, never resolves modules the way Node
+does at runtime, and never binds a socket.
+
+Task 001 shipped an API that could not start (VULN-004) and all 208 tests passed
+anyway, because Vitest resolved its imports through a plugin the real runtime
+does not have. `tests/integration/boot.test.ts` spawns the server as a real
+process and asserts it binds, serves `/health`, enforces authentication, and
+refuses to start without `DATABASE_URL`.
+
+**A green suite is evidence about the harness as much as about the system.** That
+test, and architecture rule 9, exist to keep the two honest about each other. Both
+were verified to fail when the original defect was reintroduced.
 
 ## Gaps — see also [`limitations.md`](./security/limitations.md)
 

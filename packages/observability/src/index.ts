@@ -1,3 +1,3 @@
-export * from './redaction.js';
-export * from './logger.js';
-export * from './security-events.js';
+export * from './redaction.ts';
+export * from './logger.ts';
+export * from './security-events.ts';

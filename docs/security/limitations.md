@@ -13,8 +13,11 @@ does not establish the absence of vulnerabilities.
 
 ## What was actually verified
 
-- 208 tests executed and passing: 112 unit, 16 architecture, 45 integration,
-  35 security.
+**Updated for Task 002.** The counts and the "not verified" list below reflect
+the current state, not Task 001's.
+
+- 351 tests executed and passing: 181 unit, 40 architecture, 59 integration,
+  71 security.
 - Migrations applied cleanly from empty to full schema, repeatedly.
 - RLS enforced against a real non-superuser role — verified by attack, not by
   reading the policy.
@@ -22,23 +25,34 @@ does not establish the absence of vulnerabilities.
   role with `BYPASSRLS`.
 - Secret scan and dependency audit executed; the audit found two real advisories
   (vite high, vitest critical), which were fixed by upgrading, not exempted.
+- **The API was booted as a real process** and driven over HTTP with curl:
+  security headers, register, login, note creation, a rejected sort-injection
+  attempt, a 401 on a protected route and a 403 on a missing Origin. The server
+  logs were then searched for the password, the session token and the database
+  password — none were present.
+- **The web client was built** (`vite build`) and the emitted bundle searched for
+  `DATABASE_URL`, `postgres://`, role names, development passwords and cookie and
+  origin settings. None were present.
+- Rate limiting verified to return 429, to record a `ratelimit.exceeded` audit
+  event, and to count requests the CSRF origin guard rejects.
 - The CI database-provisioning script executed locally, with the full suite
   passing against the database it creates.
 
 ## What was NOT verified
 
-- **The GitHub Actions workflows have never run.** They are syntactically valid
-  and the provisioning script they call was executed locally, but no hosted run
-  has occurred. CodeQL has never analysed this code.
+- **The GitHub Actions workflows have never run on GitHub.** They are
+  syntactically valid, the provisioning script they call was executed locally,
+  and the new build and bundle-scan steps were executed locally verbatim — but no
+  hosted run has occurred. CodeQL has never analysed this code.
 - **No DAST.** No running instance was scanned by an external tool.
 - **No penetration test.** No human adversary has attempted to break this.
 - **No load, stress, or soak testing.** Zero performance data exists. Every
   performance-related statement in the docs is reasoning, not measurement.
 - **No production deployment.** No TLS termination, WAF, secrets manager, backup,
   or restore has been configured or tested.
-- **The web frontend was never run in a browser.** It typechecks, lints, and its
-  pure i18n logic is unit-tested. No component render test, no E2E test, no
-  visual RTL verification. `npm run build` for the web app was not executed.
+- **The web frontend was never run in a browser.** It typechecks, lints, builds,
+  and its pure i18n logic is unit-tested. No component render test, no E2E test,
+  and no visual RTL verification — nobody has looked at a rendered page.
 - **No accessibility testing.** Nothing was checked against WCAG, and no screen
   reader was used. Accessibility ranks above performance in the brief's priority
   order and currently has no coverage at all.
@@ -49,6 +63,30 @@ does not establish the absence of vulnerabilities.
   it is unproven that the remaining difference is undetectable.
 - **Rate limiting was verified in-process only**, single instance. Behaviour
   across replicas is untested and, by design, currently incorrect.
+
+## Added in Task 002
+
+- **Production would run on `--experimental-strip-types`.** The codebase contains
+  no non-erasable syntax (checked: no enums, no parameter properties, no
+  decorators), and stripping is erasure-only. But an experimental flag in
+  production is a real dependency on unstable behaviour. A compile step should be
+  added before the first production deployment. See ADR 0003.
+- **Rate limiting is per-process and in-memory.** With N replicas the effective
+  limit is N times the configured value, and a restart clears it. A shared store
+  is required for production and is not implemented (RISK-RATE-01).
+- **Repeated-denial detection shares that limitation** — per-process, in-memory,
+  cleared on restart.
+- **`trustProxy` is false.** Correct for direct exposure. Introducing a proxy
+  REQUIRES configuring it at the same time, or per-IP limiting silently collapses
+  into a single global limit.
+- **No production secret management.** No vault, no rotation, no per-environment
+  injection. The expectation is that the deployment platform injects environment
+  variables.
+- **Offset pagination has a 10,000 ceiling.** Beyond that a list is simply not
+  reachable; cursor pagination is required and is not implemented.
+- **No actor-scoped rate limiting.** The limiter runs before authentication, so
+  quotas are per-IP only. The reserved `ai.request` policy will need per-actor
+  quotas, since provider cost is real money.
 
 ## Structural limitations
 

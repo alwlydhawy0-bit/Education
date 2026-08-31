@@ -1,5 +1,5 @@
-import { loadConfig } from './platform/config.js';
-import { buildApp } from './app.js';
+import { loadConfig } from './platform/config.ts';
+import { buildApp } from './app.ts';
 
 /**
  * Process entry point. Kept separate from `app.ts` so that tests can build the

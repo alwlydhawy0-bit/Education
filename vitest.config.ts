@@ -25,10 +25,8 @@
  * default.)
  */
 import { defineConfig } from 'vitest/config';
-import { resolveJsToTs } from './vitest.shared.js';
 
 const dbProject = (name: 'integration' | 'security', groupOrder: number) => ({
-  plugins: [resolveJsToTs()],
   test: {
     name,
     include: [`tests/${name}/**/*.test.ts`],
@@ -51,7 +49,6 @@ export default defineConfig({
   test: {
     projects: [
       {
-        plugins: [resolveJsToTs()],
         test: {
           name: 'unit',
           include: ['tests/unit/**/*.test.ts'],
@@ -60,7 +57,6 @@ export default defineConfig({
         },
       },
       {
-        plugins: [resolveJsToTs()],
         test: {
           name: 'architecture',
           include: ['tests/architecture/**/*.test.ts'],

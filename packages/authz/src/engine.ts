@@ -1,6 +1,6 @@
-import { deny, type Decision } from './decision.js';
-import { notePolicy } from './policies/note.policy.js';
-import { userPolicy } from './policies/user.policy.js';
+import { deny, type Decision } from './decision.ts';
+import { notePolicy } from './policies/note.policy.ts';
+import { userPolicy } from './policies/user.policy.ts';
 import {
   resourceKindForAction,
   type Action,
@@ -9,7 +9,7 @@ import {
   type Resource,
   type ResourceKind,
   type UserAction,
-} from './types.js';
+} from './types.ts';
 
 /**
  * Raised when the engine is asked to evaluate an action against the wrong kind

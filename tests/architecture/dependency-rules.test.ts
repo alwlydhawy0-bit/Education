@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 
 /**
  * Architecture fitness functions.
@@ -36,16 +36,35 @@ function sourceFiles(dir: string): string[] {
       if (entry === 'node_modules' || entry === 'dist') continue;
       const full = join(current, entry);
       if (statSync(full).isDirectory()) walk(full);
-      else if (entry.endsWith('.ts') && !entry.endsWith('.test.ts')) out.push(full);
+      else if (/\.tsx?$/.test(entry)) out.push(full);
     }
   };
   walk(absolute);
   return out;
 }
 
-/** Import specifiers, from both `import ... from '...'` and `import('...')`. */
+/**
+ * Strips comments before scanning for imports.
+ *
+ * Without this, prose describing an import (a JSDoc line explaining the very
+ * regexes below) is matched as if it were code. Only block comments and lines
+ * that BEGIN with a comment marker are removed, so a `//` inside a string
+ * literal — a URL, say — is left intact and cannot truncate a real line.
+ */
+function stripComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((line) => {
+      const trimmed = line.trimStart();
+      return !trimmed.startsWith('//') && !trimmed.startsWith('*');
+    })
+    .join('\n');
+}
+
+/** Import specifiers, from static imports and dynamic `import(...)` alike. */
 function importsOf(file: string): string[] {
-  const source = readFileSync(file, 'utf8');
+  const source = stripComments(readFileSync(file, 'utf8'));
   const specifiers: string[] = [];
   const patterns = [
     /(?:^|\n)\s*import\s+(?:type\s+)?[^'"]*?from\s+['"]([^'"]+)['"]/g,
@@ -237,6 +256,123 @@ describe('rule 7 — connection pooling is centralized', () => {
     // Centralizing this is what guarantees every query runs inside
     // `withActor`/`withoutActor`, and therefore that `app.actor_id` is always
     // set correctly for RLS.
+    expect(violations).toEqual([]);
+  });
+});
+
+describe('rule 8 — the frontend cannot reach server-only code or secrets', () => {
+  const webFiles = [...sourceFiles('apps/web/src'), ...sourceFiles('apps/web')].filter(
+    (file, index, all) => all.indexOf(file) === index,
+  );
+
+  it('never imports from apps/api', () => {
+    // The browser bundle is public. An import from the API app would pull
+    // server code — and anything it references — into a downloadable artifact.
+    const violations: string[] = [];
+    for (const file of webFiles) {
+      for (const specifier of importsOf(file)) {
+        if (specifier.includes('apps/api') || specifier.includes('@edu/api')) {
+          violations.push(`${relative(ROOT, file)} imports "${specifier}"`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('imports only the shared contracts package from the workspace', () => {
+    // `@edu/contracts` is designed for both sides of the wire. The others are
+    // server-oriented; pulling them client-side would be a slow drift toward
+    // shipping server logic to the browser.
+    const allowed = new Set(['@edu/contracts']);
+    const violations: string[] = [];
+    for (const file of webFiles) {
+      for (const specifier of importsOf(file)) {
+        if (specifier.startsWith('@edu/') && !allowed.has(specifier)) {
+          violations.push(`${relative(ROOT, file)} imports "${specifier}"`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('never reads process.env — server configuration is not client configuration', () => {
+    const violations = webFiles
+      .filter((file) => !file.includes('vite.config'))
+      .filter((file) => /\bprocess\.env\b/.test(readFileSync(file, 'utf8')))
+      .map((file) => relative(ROOT, file));
+    expect(violations).toEqual([]);
+  });
+
+  it('reads import.meta.env in exactly one module', () => {
+    // One validated entry point, so no feature can introduce an unchecked value.
+    const readers = webFiles
+      .filter((file) => /import\.meta\.env/.test(readFileSync(file, 'utf8')))
+      .map((file) => relative(ROOT, file));
+    expect(readers).toEqual(['apps/web/src/shared/config/index.ts']);
+  });
+
+  it('contains no server-only environment variable names', () => {
+    // A tripwire for the copy-paste that puts a server value in client code.
+    const forbidden = ['DATABASE_URL', 'SESSION_COOKIE_SECURE', 'ALLOWED_ORIGINS'];
+    const violations: string[] = [];
+    for (const file of webFiles) {
+      const source = readFileSync(file, 'utf8');
+      for (const name of forbidden) {
+        if (source.includes(name)) violations.push(`${relative(ROOT, file)} mentions ${name}`);
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+});
+
+describe('rule 9 — the application must actually be runnable', () => {
+  it('never writes a relative import with a .js extension', () => {
+    // Node's type stripping does NOT rewrite `./x.js` to `./x.ts`. Task 001 used
+    // `.js` specifiers throughout, so `pnpm start` failed with ERR_MODULE_NOT_FOUND
+    // — the API could not boot at all. It went unnoticed because Vitest had a
+    // resolver plugin papering over it, so every test passed against code that
+    // could not run.
+    //
+    // Relative imports therefore carry the real `.ts` extension, which Node,
+    // Vite and TypeScript all resolve. tests/integration/boot.test.ts proves the
+    // process starts; this rule catches the cause directly.
+    const violations: string[] = [];
+    for (const dir of ['apps/api/src', 'apps/web/src', 'packages', 'db', 'tools']) {
+      for (const file of sourceFiles(dir)) {
+        for (const specifier of importsOf(file)) {
+          if (specifier.startsWith('.') && specifier.endsWith('.js')) {
+            violations.push(`${relative(ROOT, file)} imports "${specifier}"`);
+          }
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('every relative import resolves to a file that exists', () => {
+    // `tsc` is lenient here — it happily resolved `./App.ts` to `App.tsx` — but
+    // Rollup and Node are not, so a wrong extension is a broken build or a
+    // broken boot rather than a type error. This rule checks the specifier
+    // against the filesystem, which is what both runtimes actually do.
+    // Root-level config files are included: a dead import there does not fail
+    // the build (the config loader tree-shakes it) but it is still a lie about
+    // what the project depends on.
+    const rootConfigs = readdirSync(ROOT)
+      .filter((entry) => entry.endsWith('.ts'))
+      .map((entry) => join(ROOT, entry));
+
+    const violations: string[] = [];
+    for (const dir of ['apps/api/src', 'apps/web/src', 'packages', 'db', 'tools', 'tests']) {
+      for (const file of [...sourceFiles(dir), ...rootConfigs]) {
+        for (const specifier of importsOf(file)) {
+          if (!specifier.startsWith('.')) continue;
+          const target = resolve(dirname(file), specifier);
+          if (!existsSync(target)) {
+            violations.push(`${relative(ROOT, file)} imports "${specifier}" (no such file)`);
+          }
+        }
+      }
+    }
     expect(violations).toEqual([]);
   });
 });

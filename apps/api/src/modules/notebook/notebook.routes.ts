@@ -3,13 +3,13 @@ import { z } from 'zod';
 import {
   createNoteRequestSchema,
   idSchema,
+  listNotesQuerySchema,
   noteResponseSchema,
-  paginationSchema,
   updateNoteRequestSchema,
 } from '@edu/contracts';
-import { requireActor } from '../../platform/http/authentication.js';
-import type { ActorContext, NotebookService } from './notebook.service.js';
-import type { NoteRecord } from './notebook.repository.js';
+import { requireActor } from '../../platform/http/authentication.ts';
+import type { ActorContext, NotebookService } from './notebook.service.ts';
+import type { NoteRecord } from './notebook.repository.ts';
 
 const noteParamsSchema = z.object({ id: idSchema }).strict();
 
@@ -42,8 +42,9 @@ export function registerNotebookRoutes(app: FastifyInstance, notebook: NotebookS
   app.get('/api/v1/notes', {
     preHandler: requireActor,
     handler: async (request, reply) => {
-      const { limit } = paginationSchema.parse(request.query ?? {});
-      const notes = await notebook.list(contextOf(request), limit);
+      // Strict: an unknown query parameter is a 400, never a silent no-op.
+      const query = listNotesQuerySchema.parse(request.query ?? {});
+      const notes = await notebook.list(contextOf(request), query);
       return reply.status(200).send({ items: notes.map(toResponse) });
     },
   });

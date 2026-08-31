@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { apiRequest } from '../../shared/api/client.js';
-import { useLocale } from '../../app/LocaleProvider.js';
+import { apiRequest } from '../../shared/api/client.ts';
+import { useLocale } from '../../app/LocaleProvider.tsx';
 
 type Status = 'checking' | 'ok' | 'unavailable';
 

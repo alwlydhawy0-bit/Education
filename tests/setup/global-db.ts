@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import pg from 'pg';
-import { TEST_APP_URL, TEST_MIGRATOR_URL } from './env.js';
+import { TEST_APP_URL, TEST_MIGRATOR_URL } from './env.ts';
 
 /**
  * Runs once before the integration and security suites.

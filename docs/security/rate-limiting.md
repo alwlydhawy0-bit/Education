@@ -1,0 +1,78 @@
+# Rate Limiting
+
+## What exists — stated plainly
+
+A **per-process, in-memory** limiter (`@fastify/rate-limit`), keyed by socket
+address, with named policies in `apps/api/src/platform/security/rate-limit.ts`.
+
+**This is not production-grade for a multi-instance deployment.** Specifically:
+
+- Counters are **not shared between instances**. With N instances behind a load
+  balancer the effective limit is N times the configured value.
+- Counters **reset on restart**, so every deploy clears an attacker's budget.
+- Keying is `request.ip` with `trustProxy: false`. Correct for direct exposure;
+  **wrong behind a proxy**, where every request appears to come from the proxy
+  and the per-IP limit collapses into one global limit.
+
+The production requirement is a shared store (Redis or equivalent) via the
+plugin's `store` option. It is **not implemented**. In a hardened environment the
+server logs a warning naming this limitation on every boot — a quiet limitation
+is one that gets forgotten. Tracked as RISK-RATE-01.
+
+## Enforced policies
+
+| Policy          | Limit       | Why                                                                                                                   |
+| --------------- | ----------- | --------------------------------------------------------------------------------------------------------------------- |
+| `global`        | 300 / min   | Blunt ceiling. High enough not to affect a classroom sharing an IP.                                                   |
+| `auth.login`    | 10 / 15 min | Credential stuffing and password brute force.                                                                         |
+| `auth.register` | 5 / 15 min  | Bulk account creation, Argon2 CPU exhaustion, and the compensating control for the enumeration weakness RISK-ENUM-01. |
+
+Limits live in one catalogue rather than as numbers scattered across route
+definitions, so the whole throttling posture is reviewable on one screen.
+
+## Reserved policies — declared, NOT enforced
+
+`auth.password_reset`, `ai.request`, `file.upload`, `operation.expensive`.
+
+These have no routes yet. They are recorded so the limit is decided alongside the
+feature rather than bolted on afterwards, and they are kept in a **separate
+object** so nothing mistakes them for active protection. A unit test asserts the
+two sets never overlap.
+
+## Ordering: why the limiter runs before the origin guard
+
+Fastify runs every `onRequest` hook before any `preHandler`. The limiter is an
+`onRequest` hook; the CSRF origin guard is a `preHandler`. So a request is
+**counted before** the origin check can reject it.
+
+This was a real defect, found while writing the tests. With the origin guard at
+`onRequest` it ran first, so an attacker could send unlimited requests simply by
+setting a wrong `Origin` header: each was a cheap 403, none was ever counted, and
+the flood was invisible in the rate-limit signal.
+
+Registration order alone would not have fixed it — hooks added inside a Fastify
+plugin are appended when the plugin _loads_, not when it is registered, so a
+synchronously-added `onRequest` hook wins regardless. The lifecycle guarantee is
+what makes the current ordering robust.
+
+The cost is that the request body is parsed before a cross-origin rejection.
+That is bounded by the 256 KiB body limit, and no handler runs either way.
+
+## Events
+
+Exceeding a limit records a `ratelimit.exceeded` security event with the method
+and the **route pattern** — never the concrete URL, which can contain identifiers
+and query values.
+
+`actorId` on these events is always `null`, and correctly so: the hook runs at
+`onRequest`, before the session is resolved. Reading `request.actor` there would
+look like per-actor attribution while silently always producing null. Actor-scoped
+quotas — which the reserved `ai.request` policy will need, since provider cost is
+real money — require a limiter that runs after authentication. Not built.
+
+## Related: repeated-denial detection
+
+Separate from rate limiting, `createSecurityEventRecorder` escalates a run of
+authorization denials by one actor to `authz.repeated_denial`. It shares the same
+limitation: **per-process and in-memory**, so it is a detection foundation, not a
+SIEM, and not a substitute for one.

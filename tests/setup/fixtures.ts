@@ -1,5 +1,5 @@
 import pg from 'pg';
-import { TEST_SUPERUSER_URL } from './env.js';
+import { TEST_SUPERUSER_URL } from './env.ts';
 
 /**
  * Seeding helpers.

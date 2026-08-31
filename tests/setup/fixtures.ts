@@ -36,8 +36,14 @@ export async function closeSeedDb(): Promise<void> {
 /** Wipes all domain data between tests. Order respects foreign keys. */
 export async function truncateAll(): Promise<void> {
   const db = await seedDb();
+  // `roles`, `permissions` and `role_permissions` are seeded reference data
+  // created by migration 0007 — truncating them would leave registration unable
+  // to grant the default role.
   await db.query(
-    'TRUNCATE notes, guardian_links, teacher_assignments, sessions, user_roles, audit_log, users, organizations RESTART IDENTITY CASCADE',
+    `TRUNCATE notes, guardian_relationships, teacher_assignments, class_memberships,
+              classes, sessions, user_roles, email_verifications, password_reset_tokens,
+              profiles, audit_log, users, organizations
+     RESTART IDENTITY CASCADE`,
   );
 }
 
@@ -58,6 +64,8 @@ export async function createUser(options: {
   organizationId?: string | null;
   status?: 'active' | 'suspended' | 'pending_verification';
   passwordHash?: string;
+  roleScopeType?: 'global' | 'organization' | 'class';
+  roleScopeId?: string | null;
 }): Promise<SeededUser> {
   const db = await seedDb();
   const { rows } = await db.query<{ id: string }>(
@@ -74,10 +82,62 @@ export async function createUser(options: {
   const id = rows[0]?.id;
   if (!id) throw new Error('Failed to seed user');
 
+  // Also create the profile, so seeded users match what registration produces.
+  await db.query(
+    `INSERT INTO profiles (user_id, display_name, locale) VALUES ($1, $2, 'ar')
+     ON CONFLICT (user_id) DO NOTHING`,
+    [id, options.email.split('@')[0] ?? 'user'],
+  );
+
   for (const role of options.roles ?? ['student']) {
-    await db.query('INSERT INTO user_roles (user_id, role) VALUES ($1, $2)', [id, role]);
+    await grantRole(id, role, options.roleScopeType ?? 'global', options.roleScopeId ?? null);
   }
   return { id, email: options.email.toLowerCase() };
+}
+
+/** Grants a role, resolving the role name to its id. */
+export async function grantRole(
+  userId: string,
+  role: string,
+  scopeType: 'global' | 'organization' | 'class' = 'global',
+  scopeId: string | null = null,
+): Promise<void> {
+  const db = await seedDb();
+  await db.query(
+    `INSERT INTO user_roles (user_id, role_id, scope_type, scope_id)
+     SELECT $1, r.id, $3, $4 FROM roles r WHERE r.name = $2
+     ON CONFLICT DO NOTHING`,
+    [userId, role, scopeType, scopeId],
+  );
+}
+
+export async function createClass(
+  organizationId: string,
+  name = 'Test Class',
+  status: 'active' | 'archived' = 'active',
+): Promise<string> {
+  const db = await seedDb();
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO classes (organization_id, name, status, archived_at)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [organizationId, name, status, status === 'archived' ? new Date() : null],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed class');
+  return id;
+}
+
+export async function addClassMember(
+  classId: string,
+  userId: string,
+  status: 'active' | 'ended' = 'active',
+): Promise<void> {
+  const db = await seedDb();
+  await db.query(
+    `INSERT INTO class_memberships (class_id, user_id, status, ended_at)
+     VALUES ($1, $2, $3, $4)`,
+    [classId, userId, status, status === 'ended' ? new Date() : null],
+  );
 }
 
 export async function createNote(options: {
@@ -108,27 +168,56 @@ export async function createNote(options: {
 
 export async function linkGuardian(
   guardianId: string,
-  studentId: string,
+  childId: string,
   status: 'pending' | 'verified' | 'revoked' = 'verified',
-): Promise<void> {
+): Promise<string> {
   const db = await seedDb();
-  await db.query(
-    `INSERT INTO guardian_links (guardian_id, student_id, status, verified_at)
-     VALUES ($1, $2, $3, $4)`,
-    [guardianId, studentId, status, status === 'verified' ? new Date() : null],
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO guardian_relationships (guardian_id, child_id, status, verified_at)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [guardianId, childId, status, status === 'verified' ? new Date() : null],
   );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed guardian relationship');
+  return id;
 }
 
+/**
+ * Assigns a teacher to a class.
+ *
+ * Teacher-to-student is DERIVED from a shared class, so seeding that
+ * relationship means seeding both halves: this assignment and the student's
+ * membership. `linkTeacherToStudent` below does both for the common case.
+ */
 export async function assignTeacher(
   teacherId: string,
-  studentId: string,
-  organizationId: string,
+  classId: string,
   status: 'active' | 'ended' = 'active',
 ): Promise<void> {
   const db = await seedDb();
   await db.query(
-    `INSERT INTO teacher_assignments (teacher_id, student_id, organization_id, status, ended_at)
-     VALUES ($1, $2, $3, $4, $5)`,
-    [teacherId, studentId, organizationId, status, status === 'ended' ? new Date() : null],
+    `INSERT INTO teacher_assignments (teacher_id, class_id, status, ended_at)
+     VALUES ($1, $2, $3, $4)`,
+    [teacherId, classId, status, status === 'ended' ? new Date() : null],
   );
+}
+
+/** Convenience: creates a class, assigns the teacher, and enrols the student. */
+export async function linkTeacherToStudent(options: {
+  teacherId: string;
+  studentId: string;
+  organizationId: string;
+  className?: string;
+  classStatus?: 'active' | 'archived';
+  assignmentStatus?: 'active' | 'ended';
+  membershipStatus?: 'active' | 'ended';
+}): Promise<string> {
+  const classId = await createClass(
+    options.organizationId,
+    options.className ?? 'Test Class',
+    options.classStatus ?? 'active',
+  );
+  await assignTeacher(options.teacherId, classId, options.assignmentStatus ?? 'active');
+  await addClassMember(classId, options.studentId, options.membershipStatus ?? 'active');
+  return classId;
 }

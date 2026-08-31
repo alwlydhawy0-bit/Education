@@ -76,6 +76,35 @@ export const RATE_LIMIT_POLICIES = {
     timeWindow: '15 minutes',
     rationale: 'Bulk account creation, Argon2 CPU exhaustion, email enumeration.',
   },
+  /**
+   * Refresh is legitimate but frequent. The limit is generous enough for normal
+   * rotation and tight enough that grinding stolen refresh tokens is slow.
+   */
+  authRefresh: {
+    name: 'auth.refresh',
+    max: 60,
+    timeWindow: '15 minutes',
+    rationale: 'Refresh-token grinding and rotation abuse.',
+  },
+
+  /**
+   * Reset is the classic harassment and enumeration endpoint: unlimited
+   * requests mean unlimited emails to a victim's inbox.
+   */
+  passwordReset: {
+    name: 'auth.password_reset',
+    max: 5,
+    timeWindow: '1 hour',
+    rationale: 'Reset-token flooding, inbox harassment, and account enumeration.',
+  },
+
+  /** Guessing a verification token is the attack this bounds. */
+  authVerifyEmail: {
+    name: 'auth.verify_email',
+    max: 20,
+    timeWindow: '1 hour',
+    rationale: 'Brute-forcing a verification token.',
+  },
 } as const satisfies Record<string, RateLimitPolicy>;
 
 /**
@@ -88,12 +117,6 @@ export const RATE_LIMIT_POLICIES = {
  * asserts these are not mistaken for active policies.
  */
 export const RESERVED_RATE_LIMIT_POLICIES = {
-  passwordReset: {
-    name: 'auth.password_reset',
-    max: 5,
-    timeWindow: '1 hour',
-    rationale: 'Reset-token flooding and user harassment. No reset flow exists yet.',
-  },
   aiRequest: {
     name: 'ai.request',
     max: 60,

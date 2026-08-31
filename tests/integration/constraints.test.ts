@@ -1,7 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import pg from 'pg';
 import { TEST_SUPERUSER_URL } from '../setup/env.ts';
-import { closeSeedDb, createOrganization, createUser, truncateAll } from '../setup/fixtures.ts';
+import {
+  closeSeedDb,
+  createClass,
+  createOrganization,
+  createUser,
+  truncateAll,
+} from '../setup/fixtures.ts';
 
 /**
  * Database-level data integrity.
@@ -48,74 +54,152 @@ describe('users', () => {
     ).rejects.toThrow(/users_status_ck/);
   });
 
-  it('rejects an unknown role', async () => {
+  it('rejects a role grant naming a role that does not exist', async () => {
+    // Roles are now rows, so an unknown role is a foreign-key failure rather
+    // than a CHECK failure — and `auth_assign_role` refuses it by name before
+    // the insert is attempted at all.
     const user = await createUser({ email: 'r@test.local' });
     await expect(
-      db.query(`INSERT INTO user_roles (user_id, role) VALUES ($1,'superuser')`, [user.id]),
-    ).rejects.toThrow(/user_roles_role_ck/);
+      db.query(`SELECT auth_assign_role($1, 'superuser', 'global', NULL, NULL)`, [user.id]),
+    ).rejects.toThrow(/Unknown role/);
+  });
+
+  it('rejects a scoped grant with no scope id, and a global grant with one', async () => {
+    // Access is evaluated against the scope, so the two must never drift: a
+    // scoped grant missing its target would silently widen into a global one.
+    const user = await createUser({ email: 'r2@test.local' });
+    await expect(
+      db.query(
+        `INSERT INTO user_roles (user_id, role_id, scope_type, scope_id)
+         SELECT $1, id, 'class', NULL FROM roles WHERE name='teacher'`,
+        [user.id],
+      ),
+    ).rejects.toThrow(/user_roles_scope_pairing_ck/);
+
+    await expect(
+      db.query(
+        `INSERT INTO user_roles (user_id, role_id, scope_type, scope_id)
+         SELECT $1, id, 'global', gen_random_uuid() FROM roles WHERE name='teacher'`,
+        [user.id],
+      ),
+    ).rejects.toThrow(/user_roles_scope_pairing_ck/);
+  });
+
+  it('rejects a permission whose name disagrees with its resource and action', async () => {
+    await expect(
+      db.query(
+        `INSERT INTO permissions (name, resource, action) VALUES ('notes:read','users','list')`,
+      ),
+    ).rejects.toThrow(/permissions_name_derived_ck/);
   });
 });
 
 describe('relationship integrity', () => {
   it('rejects self-guardianship', async () => {
+    // The trivial escalation: claim guardianship of yourself to unlock
+    // guardian-scoped access to your own record.
     const user = await createUser({ email: 'self@test.local' });
     await expect(
       db.query(
-        `INSERT INTO guardian_links (guardian_id, student_id, status, verified_at)
+        `INSERT INTO guardian_relationships (guardian_id, child_id, status, verified_at)
          VALUES ($1,$1,'verified',now())`,
         [user.id],
       ),
-    ).rejects.toThrow(/guardian_links_not_self_ck/);
+    ).rejects.toThrow(/guardian_relationships_not_self_ck/);
   });
 
-  it('rejects a self teacher-assignment', async () => {
-    const org = await createOrganization('S');
-    const user = await createUser({ email: 'self2@test.local', organizationId: org });
-    await expect(
-      db.query(
-        `INSERT INTO teacher_assignments (teacher_id, student_id, organization_id)
-         VALUES ($1,$1,$2)`,
-        [user.id, org],
-      ),
-    ).rejects.toThrow(/teacher_assignments_not_self_ck/);
-  });
-
-  it('rejects a "verified" guardian link with no verification timestamp', async () => {
+  it('rejects a "verified" guardianship with no verification timestamp', async () => {
     // Authorization keys off `status`, so status and evidence must not drift.
     const g = await createUser({ email: 'g@test.local' });
     const s = await createUser({ email: 's@test.local' });
     await expect(
       db.query(
-        `INSERT INTO guardian_links (guardian_id, student_id, status) VALUES ($1,$2,'verified')`,
+        `INSERT INTO guardian_relationships (guardian_id, child_id, status)
+         VALUES ($1,$2,'verified')`,
         [g.id, s.id],
       ),
-    ).rejects.toThrow(/guardian_links_verified_consistency_ck/);
+    ).rejects.toThrow(/guardian_relationships_verified_consistency_ck/);
   });
 
-  it('rejects an "ended" assignment with no end timestamp', async () => {
-    const org = await createOrganization('S');
-    const t = await createUser({ email: 't@test.local', organizationId: org });
-    const s = await createUser({ email: 's2@test.local', organizationId: org });
+  it('rejects an unknown relationship type', async () => {
+    const g = await createUser({ email: 'g-type@test.local' });
+    const s = await createUser({ email: 's-type@test.local' });
     await expect(
       db.query(
-        `INSERT INTO teacher_assignments (teacher_id, student_id, organization_id, status)
-         VALUES ($1,$2,$3,'ended')`,
-        [t.id, s.id, org],
+        `INSERT INTO guardian_relationships (guardian_id, child_id, relationship_type)
+         VALUES ($1,$2,'owner')`,
+        [g.id, s.id],
       ),
-    ).rejects.toThrow(/teacher_assignments_ended_consistency_ck/);
+    ).rejects.toThrow(/guardian_relationships_type_ck/);
   });
 
-  it('rejects a duplicate guardian link', async () => {
+  it('rejects a duplicate guardianship', async () => {
     const g = await createUser({ email: 'g2@test.local' });
     const s = await createUser({ email: 's3@test.local' });
     const insert = () =>
       db.query(
-        `INSERT INTO guardian_links (guardian_id, student_id, status, verified_at)
+        `INSERT INTO guardian_relationships (guardian_id, child_id, status, verified_at)
          VALUES ($1,$2,'verified',now())`,
         [g.id, s.id],
       );
     await insert();
-    await expect(insert()).rejects.toThrow(/guardian_links_pair_uk/);
+    await expect(insert()).rejects.toThrow(/guardian_relationships_pair_uk/);
+  });
+
+  it('rejects an "ended" teacher assignment with no end timestamp', async () => {
+    const org = await createOrganization('S');
+    const t = await createUser({ email: 't@test.local', organizationId: org });
+    const classId = await createClass(org);
+    await expect(
+      db.query(
+        `INSERT INTO teacher_assignments (teacher_id, class_id, status) VALUES ($1,$2,'ended')`,
+        [t.id, classId],
+      ),
+    ).rejects.toThrow(/teacher_assignments_ended_consistency_ck/);
+  });
+
+  it('rejects a duplicate teacher assignment to the same class', async () => {
+    const org = await createOrganization('S');
+    const t = await createUser({ email: 't-dup@test.local', organizationId: org });
+    const classId = await createClass(org);
+    const insert = () =>
+      db.query(`INSERT INTO teacher_assignments (teacher_id, class_id) VALUES ($1,$2)`, [
+        t.id,
+        classId,
+      ]);
+    await insert();
+    await expect(insert()).rejects.toThrow(/teacher_assignments_pair_uk/);
+  });
+
+  it('rejects an "ended" class membership with no end timestamp', async () => {
+    const org = await createOrganization('S');
+    const s = await createUser({ email: 's-mem@test.local', organizationId: org });
+    const classId = await createClass(org);
+    await expect(
+      db.query(`INSERT INTO class_memberships (class_id, user_id, status) VALUES ($1,$2,'ended')`, [
+        classId,
+        s.id,
+      ]),
+    ).rejects.toThrow(/class_memberships_ended_consistency_ck/);
+  });
+
+  it('rejects an "archived" class with no archived timestamp', async () => {
+    const org = await createOrganization('S');
+    await expect(
+      db.query(`INSERT INTO classes (organization_id, name, status) VALUES ($1,'C','archived')`, [
+        org,
+      ]),
+    ).rejects.toThrow(/classes_archived_consistency_ck/);
+  });
+
+  it('rejects a duplicate class membership', async () => {
+    const org = await createOrganization('S');
+    const s = await createUser({ email: 's-dup@test.local', organizationId: org });
+    const classId = await createClass(org);
+    const insert = () =>
+      db.query(`INSERT INTO class_memberships (class_id, user_id) VALUES ($1,$2)`, [classId, s.id]);
+    await insert();
+    await expect(insert()).rejects.toThrow(/class_memberships_pair_uk/);
   });
 });
 
@@ -190,16 +274,29 @@ describe('sessions', () => {
 });
 
 describe('auth_register_user — the only role-granting path', () => {
-  it('grants exactly the student role and nothing else', async () => {
+  it('grants exactly the student role, globally scoped, and nothing else', async () => {
     const { rows } = await db.query<{ auth_register_user: string }>(
       `SELECT auth_register_user('newuser@test.local','$argon2id$x','New User','ar')`,
     );
     const id = rows[0]?.auth_register_user;
-    const roles = await db.query<{ role: string }>(
-      'SELECT role FROM user_roles WHERE user_id = $1',
+    const grants = await db.query<{ role_name: string; scope_type: string }>(
+      'SELECT * FROM auth_user_grants($1)',
       [id],
     );
-    expect(roles.rows.map((r) => r.role)).toEqual(['student']);
+    expect(grants.rows).toEqual([
+      expect.objectContaining({ role_name: 'student', scope_type: 'global' }),
+    ]);
+  });
+
+  it('also creates the profile, so the two tables cannot diverge', async () => {
+    const { rows } = await db.query<{ auth_register_user: string }>(
+      `SELECT auth_register_user('withprofile@test.local','$argon2id$x','With Profile','ar')`,
+    );
+    const { rows: profiles } = await db.query(
+      'SELECT display_name FROM profiles WHERE user_id = $1',
+      [rows[0]?.auth_register_user],
+    );
+    expect(profiles).toHaveLength(1);
   });
 
   it('normalizes the email it stores', async () => {
@@ -236,7 +333,7 @@ describe('auth_resolve_session — expiry and revocation are enforced in SQL', (
     expect(rows).toEqual([]);
   });
 
-  it('returns the actor with their real roles for a live session', async () => {
+  it('returns the actor with their real grants and permissions', async () => {
     const u = await createUser({ email: 'live@test.local', roles: ['student', 'guardian'] });
     const hash = Buffer.alloc(32, 5);
     await db.query(
@@ -244,11 +341,19 @@ describe('auth_resolve_session — expiry and revocation are enforced in SQL', (
        VALUES ($1,$2, now() + interval '1 hour')`,
       [u.id, hash],
     );
-    const { rows } = await db.query<{ user_id: string; roles: string[] }>(
-      'SELECT * FROM auth_resolve_session($1)',
-      [hash],
-    );
+    const { rows } = await db.query<{
+      user_id: string;
+      grants: { role: string; scopeType: string }[];
+      permissions: string[];
+      email_verified: boolean;
+    }>('SELECT * FROM auth_resolve_session($1)', [hash]);
+
     expect(rows[0]?.user_id).toBe(u.id);
-    expect(rows[0]?.roles.sort()).toEqual(['guardian', 'student']);
+    expect(rows[0]?.grants.map((g) => g.role).sort()).toEqual(['guardian', 'student']);
+    // Permissions are the flattened union of every role's grants — derived by
+    // the database, never supplied by the client.
+    expect(rows[0]?.permissions).toContain('notes:read');
+    expect(rows[0]?.permissions).toContain('students:read');
+    expect(rows[0]?.email_verified).toBe(false);
   });
 });

@@ -38,6 +38,9 @@ importers:
       eslint-plugin-import:
         specifier: ^2.31.0
         version: 2.32.0(@typescript-eslint/parser@8.68.0(eslint@9.39.5)(typescript@5.9.3))(eslint@9.39.5)
+      fastify:
+        specifier: ^5.2.0
+        version: 5.12.1
       pg:
         specifier: ^8.13.1
         version: 8.23.0

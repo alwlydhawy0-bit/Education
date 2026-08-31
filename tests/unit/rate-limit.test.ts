@@ -46,16 +46,24 @@ describe('reserved policies are NOT active protection', () => {
   it('is kept separate from the enforced catalogue', () => {
     // If a reserved policy ever appears in RATE_LIMIT_POLICIES without a route
     // using it, the catalogue starts claiming protection that does not exist.
-    const enforced = Object.values(RATE_LIMIT_POLICIES).map((p) => p.name);
-    const reserved = Object.values(RESERVED_RATE_LIMIT_POLICIES).map((p) => p.name);
+    const enforced: string[] = Object.values(RATE_LIMIT_POLICIES).map((p) => p.name);
+    const reserved: string[] = Object.values(RESERVED_RATE_LIMIT_POLICIES).map((p) => p.name);
     expect(enforced.filter((name) => reserved.includes(name))).toEqual([]);
   });
 
-  it('covers the surfaces the brief calls out for future protection', () => {
-    const reserved = Object.values(RESERVED_RATE_LIMIT_POLICIES).map((p) => p.name);
-    expect(reserved).toContain('auth.password_reset');
+  it('covers the surfaces still awaiting a route', () => {
+    const reserved: string[] = Object.values(RESERVED_RATE_LIMIT_POLICIES).map((p) => p.name);
     expect(reserved).toContain('ai.request');
     expect(reserved).toContain('file.upload');
     expect(reserved).toContain('operation.expensive');
+  });
+
+  it('now ENFORCES password reset, which moved out of the reserved set', () => {
+    // Task 003 built the reset flow, so its policy graduated from documented
+    // intent to active protection.
+    const enforced: string[] = Object.values(RATE_LIMIT_POLICIES).map((p) => p.name);
+    expect(enforced).toContain('auth.password_reset');
+    expect(enforced).toContain('auth.refresh');
+    expect(enforced).toContain('auth.verify_email');
   });
 });

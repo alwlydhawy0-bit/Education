@@ -23,7 +23,10 @@ import type { SecurityEventRecorder } from '../security/security-events.ts';
 
 /** Satisfied by the identity module's service. */
 export interface SessionAuthenticator {
-  authenticate(token: string): Promise<{ actor: Actor } | null>;
+  authenticate(token: string): Promise<{
+    actor: Actor;
+    session: { email: string; displayName: string; locale: 'ar' | 'en' };
+  } | null>;
 }
 
 /** Satisfied by the relationships module's reader. */
@@ -84,6 +87,11 @@ export function registerAuthentication(app: FastifyInstance, deps: Authenticatio
     }
 
     request.actor = resolved.actor;
+    request.actorIdentity = {
+      email: resolved.session.email,
+      displayName: resolved.session.displayName,
+      locale: resolved.session.locale,
+    };
   });
 }
 

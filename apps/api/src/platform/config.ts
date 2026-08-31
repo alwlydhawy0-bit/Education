@@ -51,7 +51,14 @@ const CONFIG_KEYS = [
   'ALLOWED_ORIGINS',
   'RATE_LIMIT_ENABLED',
   'SESSION_COOKIE_NAME',
+  'REFRESH_COOKIE_NAME',
   'SESSION_TTL_HOURS',
+  'REFRESH_TTL_DAYS',
+  'EMAIL_VERIFICATION_TTL_HOURS',
+  'PASSWORD_RESET_TTL_MINUTES',
+  'MAX_FAILED_LOGINS',
+  'LOCKOUT_MINUTES',
+  'REQUIRE_VERIFIED_EMAIL_FOR_LOGIN',
   'SESSION_COOKIE_SECURE',
 ] as const;
 
@@ -97,7 +104,38 @@ const configSchema = z
       .transform((v) => v === 'true'),
 
     SESSION_COOKIE_NAME: z.string().default('edu_session'),
+    REFRESH_COOKIE_NAME: z.string().default('edu_refresh'),
+
+    /**
+     * Access-token lifetime. Short by design: the refresh token carries
+     * longevity, and a short access token bounds how long a leaked one is
+     * useful. Kept in hours rather than minutes so the default is still
+     * comfortable for a school day.
+     */
     SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(12),
+
+    /** Refresh-token lifetime, in days. Rotated on every use. */
+    REFRESH_TTL_DAYS: z.coerce.number().int().min(1).max(365).default(30),
+
+    EMAIL_VERIFICATION_TTL_HOURS: z.coerce.number().int().min(1).max(168).default(48),
+    PASSWORD_RESET_TTL_MINUTES: z.coerce.number().int().min(5).max(1440).default(30),
+
+    /** Failed attempts before an account locks. */
+    MAX_FAILED_LOGINS: z.coerce.number().int().min(3).max(50).default(10),
+    LOCKOUT_MINUTES: z.coerce.number().int().min(1).max(1440).default(15),
+
+    /**
+     * Whether an unverified address blocks login.
+     *
+     * Defaults FALSE, deliberately. Turning this on without working mail
+     * delivery locks every user out permanently — a worse failure than the risk
+     * it addresses. It must be enabled in the same change that configures a mail
+     * provider. See docs/security/limitations.md.
+     */
+    REQUIRE_VERIFIED_EMAIL_FOR_LOGIN: z
+      .enum(['true', 'false'])
+      .default('false')
+      .transform((v) => v === 'true'),
     /** Set false ONLY for local plaintext development. */
     SESSION_COOKIE_SECURE: z
       .enum(['true', 'false'])

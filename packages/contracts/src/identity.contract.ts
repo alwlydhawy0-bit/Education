@@ -99,3 +99,134 @@ export const currentUserResponseSchema = z
   .strict();
 
 export type CurrentUserResponse = z.infer<typeof currentUserResponseSchema>;
+
+/**
+ * Opaque token carried in a link (email verification, password reset).
+ *
+ * Bounded and character-restricted so a malformed value is rejected before it
+ * reaches a hash function or the database. 43 characters is the base64url
+ * encoding of 32 random bytes; the range allows for future token sizes without
+ * accepting arbitrary input.
+ */
+export const opaqueTokenSchema = z
+  .string()
+  .min(20)
+  .max(200)
+  .regex(/^[A-Za-z0-9_-]+$/, { message: 'Malformed token' });
+
+export const verifyEmailRequestSchema = z.object({ token: opaqueTokenSchema }).strict();
+export type VerifyEmailRequest = z.infer<typeof verifyEmailRequestSchema>;
+
+export const forgotPasswordRequestSchema = z.object({ email: emailSchema }).strict();
+export type ForgotPasswordRequest = z.infer<typeof forgotPasswordRequestSchema>;
+
+/**
+ * Reset carries the new password, so the full registration password policy
+ * applies — a reset must not be a way to set a weaker password than signup
+ * would have allowed.
+ */
+export const resetPasswordRequestSchema = z
+  .object({ token: opaqueTokenSchema, password: passwordSchema })
+  .strict();
+export type ResetPasswordRequest = z.infer<typeof resetPasswordRequestSchema>;
+
+/** The authenticated user's own view of themselves. */
+export const currentUserV2Schema = z
+  .object({
+    id: idSchema,
+    email: emailSchema,
+    displayName: z.string(),
+    roles: z.array(actorRoleSchema),
+    grants: z.array(
+      z.object({
+        role: actorRoleSchema,
+        scopeType: z.enum(['global', 'organization', 'class']),
+        scopeId: idSchema.nullable(),
+      }),
+    ),
+    permissions: z.array(z.string()),
+    locale: z.enum(['ar', 'en']),
+    organizationId: idSchema.nullable(),
+    emailVerified: z.boolean(),
+  })
+  .strict();
+
+export type CurrentUserV2 = z.infer<typeof currentUserV2Schema>;
+
+// --- Profile ---------------------------------------------------------------
+
+export const profileResponseSchema = z
+  .object({
+    userId: idSchema,
+    displayName: z.string(),
+    fullName: z.string().nullable(),
+    avatarUrl: z.string().nullable(),
+    bio: z.string(),
+    locale: z.enum(['ar', 'en']),
+    updatedAt: z.string().datetime(),
+  })
+  .strict();
+
+export type ProfileResponse = z.infer<typeof profileResponseSchema>;
+
+/**
+ * Profile updates carry no `userId`: ownership comes from the session. There is
+ * no field here for an attacker to point at somebody else's profile.
+ */
+export const updateProfileRequestSchema = z
+  .object({
+    displayName: displayNameSchema.optional(),
+    fullName: z.string().trim().min(1).max(200).nullable().optional(),
+    // https only. A `data:` or `javascript:` URL rendered as an avatar is an
+    // XSS vector, and an arbitrary scheme is an SSRF vector for any future
+    // server-side fetch. Mirrored by a CHECK constraint in migration 0009.
+    avatarUrl: z.string().url().startsWith('https://').max(2000).nullable().optional(),
+    bio: z.string().max(2000).optional(),
+    locale: z.enum(['ar', 'en']).optional(),
+  })
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: 'At least one field must be provided' });
+
+export type UpdateProfileRequest = z.infer<typeof updateProfileRequestSchema>;
+
+// --- Administration --------------------------------------------------------
+
+export const userStatusSchema = z.enum(['active', 'suspended', 'pending_verification']);
+
+export const adminUserResponseSchema = z
+  .object({
+    id: idSchema,
+    email: emailSchema,
+    displayName: z.string(),
+    status: userStatusSchema,
+    organizationId: idSchema.nullable(),
+    emailVerified: z.boolean(),
+    roles: z.array(actorRoleSchema),
+    createdAt: z.string().datetime(),
+  })
+  .strict();
+
+export type AdminUserResponse = z.infer<typeof adminUserResponseSchema>;
+
+/** Only the status is settable here. Everything else belongs to the user. */
+export const adminUpdateUserRequestSchema = z.object({ status: userStatusSchema }).strict();
+
+export type AdminUpdateUserRequest = z.infer<typeof adminUpdateUserRequestSchema>;
+
+export const roleScopeTypeSchema = z.enum(['global', 'organization', 'class']);
+
+export const assignRoleRequestSchema = z
+  .object({
+    role: actorRoleSchema,
+    scopeType: roleScopeTypeSchema.default('global'),
+    scopeId: idSchema.nullable().default(null),
+  })
+  .strict()
+  // A scoped grant with no target is not scoped at all; a global grant with one
+  // is a contradiction. Rejecting both here mirrors the CHECK constraint on
+  // user_roles, so the two layers cannot disagree.
+  .refine((v) => (v.scopeType === 'global') === (v.scopeId === null), {
+    message: 'scopeId must be provided for scoped grants and omitted for global grants',
+  });
+
+export type AssignRoleRequest = z.infer<typeof assignRoleRequestSchema>;

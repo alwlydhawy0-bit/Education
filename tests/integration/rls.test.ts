@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { createDatabase, type Database } from '../../apps/api/src/platform/db.ts';
 import { TEST_APP_URL } from '../setup/env.ts';
 import {
-  assignTeacher,
+  linkTeacherToStudent,
   closeSeedDb,
   createNote,
   createOrganization,
@@ -96,7 +96,11 @@ describe('RLS — notes SELECT', () => {
       roles: ['teacher'],
       organizationId: org,
     });
-    await assignTeacher(teacher.id, student.id, org);
+    await linkTeacherToStudent({
+      teacherId: teacher.id,
+      studentId: student.id,
+      organizationId: org,
+    });
     const noteId = await createNote({
       ownerId: student.id,
       organizationId: org,
@@ -198,7 +202,11 @@ describe('RLS — notes WRITE', () => {
 describe('RLS — relationship-scoped reads', () => {
   it('lets an assigned teacher read a note shared with teachers', async () => {
     const { org, student, teacher, noteId } = await setupScenario('shared_with_teacher');
-    await assignTeacher(teacher.id, student.id, org);
+    await linkTeacherToStudent({
+      teacherId: teacher.id,
+      studentId: student.id,
+      organizationId: org,
+    });
     const rows = await db.withActor(
       teacher.id,
       async (tx) => (await tx.query('SELECT id FROM notes WHERE id = $1', [noteId])).rows,
@@ -208,7 +216,12 @@ describe('RLS — relationship-scoped reads', () => {
 
   it('denies a teacher whose assignment has ENDED', async () => {
     const { org, student, teacher, noteId } = await setupScenario('shared_with_teacher');
-    await assignTeacher(teacher.id, student.id, org, 'ended');
+    await linkTeacherToStudent({
+      teacherId: teacher.id,
+      studentId: student.id,
+      organizationId: org,
+      assignmentStatus: 'ended',
+    });
     const rows = await db.withActor(
       teacher.id,
       async (tx) => (await tx.query('SELECT id FROM notes WHERE id = $1', [noteId])).rows,
@@ -218,7 +231,11 @@ describe('RLS — relationship-scoped reads', () => {
 
   it('denies an assigned teacher when the note is still private', async () => {
     const { org, student, teacher, noteId } = await setupScenario('private');
-    await assignTeacher(teacher.id, student.id, org);
+    await linkTeacherToStudent({
+      teacherId: teacher.id,
+      studentId: student.id,
+      organizationId: org,
+    });
     const rows = await db.withActor(
       teacher.id,
       async (tx) => (await tx.query('SELECT id FROM notes WHERE id = $1', [noteId])).rows,
@@ -255,7 +272,11 @@ describe('RLS — relationship-scoped reads', () => {
       roles: ['teacher'],
       organizationId: orgB,
     });
-    await assignTeacher(teacher.id, student.id, orgB);
+    await linkTeacherToStudent({
+      teacherId: teacher.id,
+      studentId: student.id,
+      organizationId: orgB,
+    });
     const noteId = await createNote({
       ownerId: student.id,
       organizationId: orgA,
@@ -282,10 +303,11 @@ describe('RLS — other tables', () => {
   it('prevents reading another user session', async () => {
     const { student, stranger } = await setupScenario();
     await db.withoutActor((tx) =>
-      tx.query(`SELECT auth_create_session($1, $2, now() + interval '1 hour', NULL, NULL)`, [
-        student.id,
-        Buffer.alloc(32, 7),
-      ]),
+      tx.query(
+        `SELECT auth_create_session($1, $2, $3, now() + interval '1 hour',
+                                    now() + interval '30 days', NULL, NULL, NULL, NULL)`,
+        [student.id, Buffer.alloc(32, 7), Buffer.alloc(32, 8)],
+      ),
     );
     const rows = await db.withActor(
       stranger.id,
@@ -295,12 +317,30 @@ describe('RLS — other tables', () => {
   });
 
   it('prevents the application role from granting any role', async () => {
+    // `edu_app` holds no write privilege on `user_roles` at all, so escalation
+    // is refused by the privilege system before RLS is even consulted.
     const { stranger } = await setupScenario();
     await expect(
       db.withActor(stranger.id, (tx) =>
-        tx.query('INSERT INTO user_roles (user_id, role) VALUES ($1, $2)', [stranger.id, 'admin']),
+        tx.query(
+          `INSERT INTO user_roles (user_id, role_id, scope_type)
+           SELECT $1, r.id, 'global' FROM roles r WHERE r.name = 'admin'`,
+          [stranger.id],
+        ),
       ),
     ).rejects.toThrow(/permission denied/i);
+  });
+
+  it('prevents the application role from reading another user grants', async () => {
+    // The `user_roles` policy is deliberately "own grants only", to avoid the
+    // policy recursion an admin branch would create.
+    const { student, stranger } = await setupScenario();
+    const rows = await db.withActor(
+      stranger.id,
+      async (tx) =>
+        (await tx.query('SELECT * FROM user_roles WHERE user_id = $1', [student.id])).rows,
+    );
+    expect(rows).toEqual([]);
   });
 
   it('prevents the application role from reading the audit log', async () => {

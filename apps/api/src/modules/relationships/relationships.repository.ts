@@ -4,15 +4,21 @@ import type { Tx } from '../../platform/db.ts';
 /**
  * Loads the relationship edges that authorization decisions depend on.
  *
- * This module OWNS the `guardian_links` and `teacher_assignments` tables. No
- * other module queries them directly — `notebook` and `identity` consume this
- * snapshot instead. That is the dependency rule from
- * docs/architecture/dependency-rules.md in practice: a domain reaches another
- * domain's data through a contract, never through its tables.
+ * This module OWNS `guardian_relationships`, `classes`, `class_memberships` and
+ * `teacher_assignments`. No other module queries them — `notebook`, `identity`
+ * and the admin surfaces all consume this snapshot instead. That is the
+ * dependency rule from docs/architecture/dependency-rules.md in practice.
  *
- * Only VERIFIED guardianships and ACTIVE assignments are returned. A pending
- * link or an ended assignment is not an access grant, and filtering here means
- * no caller can forget that.
+ * THE DERIVATION LIVES HERE, AND ONLY HERE.
+ *
+ * Teacher-to-student is not a stored edge. It holds when the actor has an
+ * ACTIVE assignment to an ACTIVE class in which the student has an ACTIVE
+ * membership. Ending any one of those three revokes access immediately, and
+ * because the join is written once, no caller can accidentally check two of the
+ * three conditions and forget the other.
+ *
+ * Only VERIFIED guardianships are returned. A pending or revoked claim is not an
+ * access grant, and filtering here means no caller can forget that either.
  */
 export interface RelationshipReader {
   loadSnapshot(tx: Tx, actorId: string): Promise<RelationshipSnapshot>;
@@ -20,22 +26,49 @@ export interface RelationshipReader {
 
 export const relationshipReader: RelationshipReader = {
   async loadSnapshot(tx, actorId) {
-    const [guardianRows, teacherRows] = await Promise.all([
-      tx.query<{ student_id: string }>(
-        `SELECT student_id FROM guardian_links
+    const [guardianRows, teacherRows, teachesRows, memberRows] = await Promise.all([
+      tx.query<{ child_id: string }>(
+        `SELECT child_id FROM guardian_relationships
           WHERE guardian_id = $1 AND status = 'verified'`,
         [actorId],
       ),
+
+      // The derivation. Every hop is status-checked.
       tx.query<{ student_id: string }>(
-        `SELECT student_id FROM teacher_assignments
-          WHERE teacher_id = $1 AND status = 'active'`,
+        `SELECT DISTINCT cm.user_id AS student_id
+           FROM teacher_assignments ta
+           JOIN classes c            ON c.id = ta.class_id
+           JOIN class_memberships cm ON cm.class_id = ta.class_id
+          WHERE ta.teacher_id = $1
+            AND ta.status = 'active'
+            AND c.status  = 'active'
+            AND cm.status = 'active'
+            AND cm.user_id <> $1`,
+        [actorId],
+      ),
+
+      tx.query<{ class_id: string }>(
+        `SELECT ta.class_id
+           FROM teacher_assignments ta
+           JOIN classes c ON c.id = ta.class_id
+          WHERE ta.teacher_id = $1 AND ta.status = 'active' AND c.status = 'active'`,
+        [actorId],
+      ),
+
+      tx.query<{ class_id: string }>(
+        `SELECT cm.class_id
+           FROM class_memberships cm
+           JOIN classes c ON c.id = cm.class_id
+          WHERE cm.user_id = $1 AND cm.status = 'active' AND c.status = 'active'`,
         [actorId],
       ),
     ]);
 
     return {
-      guardianOf: guardianRows.rows.map((r) => r.student_id),
+      guardianOf: guardianRows.rows.map((r) => r.child_id),
       teacherOf: teacherRows.rows.map((r) => r.student_id),
+      teachesClasses: teachesRows.rows.map((r) => r.class_id),
+      memberOfClasses: memberRows.rows.map((r) => r.class_id),
     };
   },
 };

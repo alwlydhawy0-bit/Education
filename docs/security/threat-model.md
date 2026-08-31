@@ -103,6 +103,41 @@ through `withActor`/`withoutActor`.
 - **Residual risk:** no legitimate role-granting path exists, so the _audited_
   version of it is unwritten and unmodelled.
 
+### T3a — Stolen refresh token (added in Task 003)
+
+- **Attack surface:** the refresh cookie.
+- **Mitigations [BUILT]:** rotation on every use; single-use enforcement in SQL;
+  **reuse detection** that revokes the entire session family when an
+  already-rotated token is presented; the cookie is path-scoped to the refresh
+  endpoint so it is absent from ordinary requests; only the SHA-256 is stored.
+- **Verification:** `tests/security/auth-flows.test.ts` proves the replay is
+  refused, the victim's still-live session is killed, and
+  `auth.refresh.reuse_detected` is recorded.
+- **Residual risk:** detection is retrospective — the attacker holds a valid
+  token until either party next rotates.
+
+### T3b — Privilege escalation through role administration (added in Task 003)
+
+- **Attack surface:** `POST /admin/users/:id/roles`.
+- **Mitigations [BUILT]:** no self-modification of roles by anyone; only
+  `security_admin` may grant privileged roles; privileged roles may never be
+  granted globally; every grant confined to the actor's own organization;
+  `edu_app` holds no write privilege on `user_roles`, so all writes go through an
+  audited SECURITY DEFINER function; every grant and revoke is recorded with the
+  **operator's** id.
+- **Verification:** 12 tests in `tests/security/rbac-authorization.test.ts` and
+  the decision table in `tests/unit/rbac-policies.test.ts`.
+
+### T3c — False guardianship (added in Task 003)
+
+- **Attack surface:** `guardian_relationships`.
+- **Mitigations [BUILT]:** self-guardianship blocked by a CHECK constraint;
+  **self-verification refused for every role**; only a `verified` link grants
+  access, and a verified row must record when it was verified; either
+  participant may revoke.
+- **Residual risk:** no endpoint creates or verifies these yet, so the policy is
+  tested but the workflow around it is unbuilt.
+
 ### T3 — Account takeover
 
 - **Mitigations [BUILT]:** Argon2id with pinned OWASP parameters; login rate

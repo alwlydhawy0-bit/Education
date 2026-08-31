@@ -65,7 +65,8 @@ export interface ListQueryOptions<
  */
 export function createListQuerySchema<
   TSortField extends string,
-  TFilters extends Record<string, z.ZodTypeAny> = Record<string, never>,
+  // eslint-disable-next-line @typescript-eslint/no-empty-object-type
+  TFilters extends Record<string, z.ZodTypeAny> = {},
 >(options: ListQueryOptions<TSortField, TFilters>) {
   return z
     .object({

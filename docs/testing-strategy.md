@@ -1,13 +1,13 @@
 # Testing Strategy
 
-**351 tests, all executed and passing** as of Task 002.
+**477 tests, all executed and passing** as of Task 003.
 
 | Project        | Tests | Needs      | Proves                                                                                                                               |
 | -------------- | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `unit`         | 181   | nothing    | Policy decision table, `Guarded`, redaction, contracts, config, query validation, security-event recorder, rate-limit policies, i18n |
-| `architecture` | 40    | nothing    | Dependency rules; every security event has an emitter; the app is runnable                                                           |
-| `integration`  | 59    | PostgreSQL | Schema, constraints, RLS, query safety, and that the process actually boots                                                          |
-| `security`     | 71    | PostgreSQL | IDOR/BOLA scenarios A–E, cross-organization isolation, layer isolation, session, CSRF, rate limiting, audit                          |
+| `unit`         | 227   | nothing    | Policy decision table, `Guarded`, redaction, contracts, config, query validation, security-event recorder, rate-limit policies, i18n |
+| `architecture` | 51    | nothing    | Dependency rules; every security event has an emitter; the app is runnable                                                           |
+| `integration`  | 79    | PostgreSQL | Schema, constraints, RLS, query safety, and that the process actually boots                                                          |
+| `security`     | 120   | PostgreSQL | IDOR/BOLA scenarios A–E, cross-organization isolation, layer isolation, session, CSRF, rate limiting, audit                          |
 
 ```bash
 pnpm test                 # everything

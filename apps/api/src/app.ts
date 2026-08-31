@@ -15,11 +15,15 @@ import { registerRateLimiting } from './platform/security/rate-limit.ts';
 import { createSecurityEventRecorder } from './platform/security/security-events.ts';
 import { createIdentityRepository } from './modules/identity/identity.repository.ts';
 import { createIdentityService } from './modules/identity/identity.service.ts';
+import { createLoggingMailDelivery, type MailDelivery } from './modules/identity/mail-delivery.ts';
 import { registerIdentityRoutes } from './modules/identity/identity.routes.ts';
 import { relationshipReader } from './modules/relationships/relationships.repository.ts';
 import { notebookRepository } from './modules/notebook/notebook.repository.ts';
 import { createNotebookService } from './modules/notebook/notebook.service.ts';
 import { registerNotebookRoutes } from './modules/notebook/notebook.routes.ts';
+import { usersRepository } from './modules/users/users.repository.ts';
+import { createUsersService, roleAdministration } from './modules/users/users.service.ts';
+import { registerUsersRoutes } from './modules/users/users.routes.ts';
 
 /**
  * Composition root.
@@ -40,6 +44,12 @@ export interface BuildAppOptions {
   readonly database?: Database;
   readonly logger?: Logger;
   readonly clock?: Clock;
+  /**
+   * Overrides outbound email. Tests inject a capturing implementation so that
+   * verification and reset tokens never have to be exposed over HTTP to be
+   * testable — which would itself be an account-takeover vulnerability.
+   */
+  readonly mail?: MailDelivery;
 }
 
 export interface BuiltApp {
@@ -162,8 +172,27 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const identity = createIdentityService({
     repository: identityRepository,
     securityEvents,
+    // No mail provider exists. `LoggingMailDelivery` records that a message
+    // would have been sent and deliberately never logs the token.
+    mail: options.mail ?? createLoggingMailDelivery(logger),
     clock,
-    sessionTtlHours: config.SESSION_TTL_HOURS,
+    options: {
+      sessionTtlHours: config.SESSION_TTL_HOURS,
+      refreshTtlDays: config.REFRESH_TTL_DAYS,
+      emailVerificationTtlHours: config.EMAIL_VERIFICATION_TTL_HOURS,
+      passwordResetTtlMinutes: config.PASSWORD_RESET_TTL_MINUTES,
+      maxFailedLogins: config.MAX_FAILED_LOGINS,
+      lockoutMinutes: config.LOCKOUT_MINUTES,
+      requireVerifiedEmailForLogin: config.REQUIRE_VERIFIED_EMAIL_FOR_LOGIN,
+    },
+  });
+
+  const users = createUsersService({
+    db,
+    repository: usersRepository,
+    roles: roleAdministration,
+    engine,
+    securityEvents,
   });
 
   const notebook = createNotebookService({
@@ -192,9 +221,11 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerIdentityRoutes(app, {
     identity,
     cookieName: config.SESSION_COOKIE_NAME,
+    refreshCookieName: config.REFRESH_COOKIE_NAME,
     cookieSecure: config.SESSION_COOKIE_SECURE,
   });
   registerNotebookRoutes(app, notebook);
+  registerUsersRoutes(app, users);
 
   return { app, db };
 }

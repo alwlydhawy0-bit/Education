@@ -34,9 +34,17 @@ const NOTE_ID = 'ffffffff-ffff-4fff-8fff-ffffffffffff';
 const engine = createPolicyEngine();
 
 function actor(overrides: Partial<Actor> & Pick<Actor, 'id' | 'roles'>): Actor {
+  const roles = overrides.roles;
   return {
     status: 'active',
     organizationId: ORG_A,
+    emailVerified: true,
+    // Default the scoped grants to the global equivalent of the role list, so a
+    // test that only cares about roles does not have to restate them.
+    grants: roles.map((role) => ({ role, scopeType: 'global' as const, scopeId: null })),
+    // The notebook policy does not consult permissions, but the Actor type
+    // requires them; a permissive default keeps these cases about the policy.
+    permissions: ['notes:read', 'notes:create', 'notes:update', 'notes:delete', 'students:read'],
     ...overrides,
   };
 }
@@ -66,8 +74,18 @@ const assignedTeacher = actor({ id: TEACHER, roles: [Role.TEACHER] });
 const verifiedGuardian = actor({ id: GUARDIAN, roles: [Role.GUARDIAN] });
 const administrator = actor({ id: ADMIN, roles: [Role.ADMIN] });
 
-const teacherOfStudent: RelationshipSnapshot = { guardianOf: [], teacherOf: [STUDENT] };
-const guardianOfStudent: RelationshipSnapshot = { guardianOf: [STUDENT], teacherOf: [] };
+const teacherOfStudent: RelationshipSnapshot = {
+  guardianOf: [],
+  teacherOf: [STUDENT],
+  teachesClasses: [],
+  memberOfClasses: [],
+};
+const guardianOfStudent: RelationshipSnapshot = {
+  guardianOf: [STUDENT],
+  teacherOf: [],
+  teachesClasses: [],
+  memberOfClasses: [],
+};
 
 describe('notePolicy — owner', () => {
   it.each(NOTE_ACTIONS)('allows the owner to %s their own active note', (action) => {

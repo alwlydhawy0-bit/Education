@@ -1,6 +1,10 @@
 import { deny, type Decision } from './decision.ts';
 import { notePolicy } from './policies/note.policy.ts';
 import { userPolicy } from './policies/user.policy.ts';
+import { profilePolicy } from './policies/profile.policy.ts';
+import { roleGrantPolicy } from './policies/role-grant.policy.ts';
+import { classMembershipPolicy } from './policies/class-membership.policy.ts';
+import { guardianRelationshipPolicy } from './policies/guardian-relationship.policy.ts';
 import {
   resourceKindForAction,
   type Action,
@@ -41,6 +45,10 @@ type PolicyFn = (ctx: AuthorizationContext, action: never, resource: never) => D
 const DEFAULT_POLICIES: Readonly<Record<ResourceKind, PolicyFn>> = Object.freeze({
   note: notePolicy as unknown as PolicyFn,
   user: userPolicy as unknown as PolicyFn,
+  profile: profilePolicy as unknown as PolicyFn,
+  role_grant: roleGrantPolicy as unknown as PolicyFn,
+  class_membership: classMembershipPolicy as unknown as PolicyFn,
+  guardian_relationship: guardianRelationshipPolicy as unknown as PolicyFn,
 });
 
 export function createPolicyEngine(

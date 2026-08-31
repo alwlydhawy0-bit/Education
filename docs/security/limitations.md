@@ -16,8 +16,8 @@ does not establish the absence of vulnerabilities.
 **Updated for Task 002.** The counts and the "not verified" list below reflect
 the current state, not Task 001's.
 
-- 351 tests executed and passing: 181 unit, 40 architecture, 59 integration,
-  71 security.
+- 477 tests executed and passing: 227 unit, 51 architecture, 79 integration,
+  120 security.
 - Migrations applied cleanly from empty to full schema, repeatedly.
 - RLS enforced against a real non-superuser role — verified by attack, not by
   reading the policy.
@@ -63,6 +63,35 @@ the current state, not Task 001's.
   it is unproven that the remaining difference is undetectable.
 - **Rate limiting was verified in-process only**, single instance. Behaviour
   across replicas is untested and, by design, currently incorrect.
+
+## Added in Task 003
+
+- **No email delivery.** The `MailDelivery` port exists and is exercised by
+  tests, but nothing sends. Verification and reset tokens therefore reach nobody
+  in a real deployment.
+- **Login is not blocked on an unverified address by default.**
+  `REQUIRE_VERIFIED_EMAIL_FOR_LOGIN` exists and is tested, but enabling it
+  without a mail provider would lock every user out permanently — a worse failure
+  than the risk it addresses. It must be enabled in the same change that
+  configures delivery.
+- **No MFA**, no password change while logged in, no session listing, no
+  device-management UI.
+- **No endpoints for managing classes, class membership, or guardian
+  relationships.** The tables, the policies and the RLS exist and are tested;
+  the write APIs do not. Those relationships can currently only be created by an
+  operator with database access.
+- **`organizations` has no management API.** Organizations can only be created
+  directly in the database.
+- **Account lockout is a fixed window**, not exponential backoff, and locks on a
+  per-account basis only. An attacker spreading attempts across many accounts is
+  bounded only by the per-IP rate limiter, which is per-process.
+- **Admin listing is offset-paginated** with a 10,000 ceiling, and fetches each
+  user's roles in a separate query — correct, but N+1. Not a problem at current
+  scale; it will be at a few thousand users.
+- **`auth_user_grants` is a SECURITY DEFINER read** with no internal
+  authorization: the caller must authorize first. The service does, and a test
+  covers it, but the function itself would return any user's grants if called
+  directly by application code.
 
 ## Added in Task 002
 

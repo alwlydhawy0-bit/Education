@@ -144,6 +144,47 @@ RLS would generate no signal at all. See VULN-002 in the
 Detection should threshold on rate and distinct-id count, since the same event
 fires for innocent 404s (stale bookmarks, typos).
 
+## Roles, scopes and permissions (Task 003)
+
+A role grant carries a **scope**: `global`, `organization`, or `class`. A global
+grant covers everything; a scoped grant covers only its own target. An
+organization-scoped grant deliberately does **not** cover classes inside that
+organization — class containment is a relationship question, and answering it
+from an id alone would mean guessing at data the pure policy package cannot see.
+
+**A permission is necessary, never sufficient.** Holding `notes:read` says the
+actor's roles permit reading notes in general; it says nothing about any
+particular note. Object-level authorization always still runs. Policies check
+permission _and_ scope _and_ relationship _and_ resource state.
+
+### Privilege containment
+
+| Rule                                                        | Why                                                                                                                    |
+| ----------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Nobody may change their own roles                           | Self-grant is the shortest path from a compromised admin account to permanent control, and has no legitimate use       |
+| Only `security_admin` may grant `admin` or `security_admin` | Compromising one ordinary admin must not compound                                                                      |
+| A privileged role may never be granted globally             | It would reach every organization on the platform                                                                      |
+| Every grant is confined to the actor's own organization     | An admin of one school cannot reach another                                                                            |
+| Only `security_admin` may suspend                           | Suspension is a denial-of-service capability over a real person's account, kept separable from ordinary administration |
+
+### Guardian verification
+
+**A guardian may not verify their own relationship.** Verification turns a claim
+into access over a child's private work, so self-verification would let anyone
+claim guardianship of any student and confirm it themselves. Refused for every
+role, including administrators acting on their own relationships.
+
+Revocation is the opposite: it only ever removes access, so **either participant
+may revoke** — a student must always be able to cut off an adult without asking
+permission.
+
+### Profiles
+
+Several roles can read a profile they have a relationship with. **Nobody may
+update another person's profile** — not a teacher, not an administrator. A
+profile is self-description; removing inappropriate content is a moderation
+action against the account, which is a different capability and does not exist.
+
 ## Adding a new protected resource
 
 1. Add the table with `owner_id`, `organization_id`, `visibility`, `state`.

@@ -4,3 +4,7 @@ export * from './guarded.ts';
 export * from './engine.ts';
 export { notePolicy } from './policies/note.policy.ts';
 export { userPolicy } from './policies/user.policy.ts';
+export { profilePolicy } from './policies/profile.policy.ts';
+export { roleGrantPolicy } from './policies/role-grant.policy.ts';
+export { classMembershipPolicy } from './policies/class-membership.policy.ts';
+export { guardianRelationshipPolicy } from './policies/guardian-relationship.policy.ts';

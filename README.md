@@ -8,7 +8,7 @@ university, built around practical, evidence-based learning.
 > executable evidence that they hold. See
 > [`docs/architecture/architecture-report.md`](docs/architecture/architecture-report.md).
 >
-> **This system is not proven secure.** 351 tests pass, which establishes that
+> **This system is not proven secure.** 477 tests pass, which establishes that
 > specific enumerated properties held at a point in time. Read
 > [`docs/security/limitations.md`](docs/security/limitations.md) for what was
 > **not** tested.
@@ -95,7 +95,13 @@ indistinguishable.
 **Privilege escalation is blocked at the database.** The application role has no
 write privilege on `user_roles` whatsoever.
 
-**The architecture is enforced by tests**, not by convention — 40 fitness
+**Roles carry a scope, and teacher–student is derived.** "Teacher" means
+teacher _of this class_; the relationship holds only while the assignment, the
+class and the membership are all active, so ending any one revokes access
+immediately. Privilege containment means nobody can change their own roles and
+only a security administrator can grant privileged ones.
+
+**The architecture is enforced by tests**, not by convention — 51 fitness
 assertions covering the dependency rules, the runnability of the application, and
 the honesty of the security-event taxonomy (every declared event must have a real
 emitter).
@@ -107,21 +113,21 @@ checked against the built artifact, not just asserted.
 
 ## Documentation
 
-| Document                                                        | What it covers                                                  |
-| --------------------------------------------------------------- | --------------------------------------------------------------- |
-| [Architecture report](docs/architecture/architecture-report.md) | The full §29 report — current state, decisions, risks, sequence |
-| [Domain boundaries](docs/architecture/domain-boundaries.md)     | Who owns what data                                              |
-| [Dependency rules](docs/architecture/dependency-rules.md)       | What may import what, and why                                   |
-| [ADRs](docs/architecture/adr/)                                  | Seven decisions with their trade-offs                           |
-| [Threat model](docs/security/threat-model.md)                   | Assets, actors, threats, risk register                          |
-| [Authorization](docs/security/authorization.md)                 | The IDOR/BOLA strategy and decision table                       |
-| [File security](docs/security/file-security.md)                 | **Designed, not implemented**                                   |
-| [AI security](docs/security/ai-security.md)                     | **Designed, not implemented**                                   |
-| [Observability](docs/security/observability.md)                 | Logging, redaction, audit                                       |
-| [Vulnerability log](docs/security/vulnerability-log.md)         | Three defects found and fixed during Task 001                   |
-| [Limitations](docs/security/limitations.md)                     | **What was not tested and remains unknown**                     |
-| [Testing strategy](docs/testing-strategy.md)                    | The four layers and what each proves                            |
-| [CI/CD](docs/cicd.md)                                           | Pipeline and security gates                                     |
+| Document                                                        | What it covers                                                      |
+| --------------------------------------------------------------- | ------------------------------------------------------------------- |
+| [Architecture report](docs/architecture/architecture-report.md) | The full §29 report — current state, decisions, risks, sequence     |
+| [Domain boundaries](docs/architecture/domain-boundaries.md)     | Who owns what data                                                  |
+| [Dependency rules](docs/architecture/dependency-rules.md)       | What may import what, and why                                       |
+| [ADRs](docs/architecture/adr/)                                  | Seven decisions with their trade-offs                               |
+| [Threat model](docs/security/threat-model.md)                   | Assets, actors, threats, risk register                              |
+| [Authorization](docs/security/authorization.md)                 | The IDOR/BOLA strategy and decision table                           |
+| [File security](docs/security/file-security.md)                 | **Designed, not implemented**                                       |
+| [AI security](docs/security/ai-security.md)                     | **Designed, not implemented**                                       |
+| [Observability](docs/security/observability.md)                 | Logging, redaction, audit                                           |
+| [Vulnerability log](docs/security/vulnerability-log.md)         | Eleven defects found and fixed, with root cause and regression test |
+| [Limitations](docs/security/limitations.md)                     | **What was not tested and remains unknown**                         |
+| [Testing strategy](docs/testing-strategy.md)                    | The four layers and what each proves                                |
+| [CI/CD](docs/cicd.md)                                           | Pipeline and security gates                                         |
 
 ## Contributing
 

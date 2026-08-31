@@ -32,6 +32,12 @@ Exposes `RelationshipReader.loadSnapshot(tx, actorId)`, returning only
 **verified** guardianships and **active** assignments, so no caller can forget to
 filter.
 
+**Teacher-to-student is derived, not stored** — the actor has an active
+assignment to an active class in which the student has an active membership. The
+join lives here and only here, so ending any one of the three revokes access
+immediately and no caller can check two conditions and forget the third. See
+[ADR 0008](./adr/0008-rbac-scopes.md).
+
 ### `notebook` — **[BUILT]**
 
 Owns `notes`. The worked example of the protected-resource pattern:

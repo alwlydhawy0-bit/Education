@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import type { FastifyInstance } from 'fastify';
 import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.ts';
 import {
-  assignTeacher,
+  linkTeacherToStudent,
   closeSeedDb,
   createOrganization,
   createUser,
@@ -188,7 +188,11 @@ describe('Scenario D — a privileged role is NOT authority over a specific obje
       roles: ['teacher'],
       organizationId,
     });
-    await assignTeacher(teacher.id, student.id, organizationId);
+    await linkTeacherToStudent({
+      teacherId: teacher.id,
+      studentId: student.id,
+      organizationId: organizationId,
+    });
     const noteId = await createNote(student.cookie, 'private');
 
     expect((await read(noteId, teacher.cookie)).statusCode).toBe(404);
@@ -202,7 +206,11 @@ describe('Scenario D — a privileged role is NOT authority over a specific obje
       roles: ['teacher'],
       organizationId,
     });
-    await assignTeacher(teacher.id, student.id, organizationId);
+    await linkTeacherToStudent({
+      teacherId: teacher.id,
+      studentId: student.id,
+      organizationId: organizationId,
+    });
     const noteId = await createNote(student.cookie, 'shared_with_teacher');
 
     const response = await read(noteId, teacher.cookie);
@@ -218,7 +226,11 @@ describe('Scenario D — a privileged role is NOT authority over a specific obje
       roles: ['teacher'],
       organizationId,
     });
-    await assignTeacher(teacher.id, student.id, organizationId);
+    await linkTeacherToStudent({
+      teacherId: teacher.id,
+      studentId: student.id,
+      organizationId: organizationId,
+    });
     const noteId = await createNote(student.cookie, 'shared_with_teacher');
 
     const patched = await app.inject({
@@ -312,7 +324,11 @@ describe('Cross-boundary — organization isolation', () => {
       roles: ['teacher'],
       organizationId: orgB,
     });
-    await assignTeacher(foreignTeacher.id, student.id, orgB);
+    await linkTeacherToStudent({
+      teacherId: foreignTeacher.id,
+      studentId: student.id,
+      organizationId: orgB,
+    });
 
     const noteId = await createNote(student.cookie, 'shared_with_teacher');
 
@@ -329,7 +345,12 @@ describe('Cross-boundary — organization isolation', () => {
       roles: ['teacher'],
       organizationId,
     });
-    await assignTeacher(teacher.id, student.id, organizationId, 'ended');
+    await linkTeacherToStudent({
+      teacherId: teacher.id,
+      studentId: student.id,
+      organizationId: organizationId,
+      assignmentStatus: 'ended',
+    });
     const noteId = await createNote(student.cookie, 'shared_with_teacher');
 
     expect((await read(noteId, teacher.cookie)).statusCode).toBe(404);
@@ -343,7 +364,11 @@ describe('Cross-boundary — organization isolation', () => {
       roles: ['teacher'],
       organizationId: orgA,
     });
-    await assignTeacher(teacher.id, student.id, orgA);
+    await linkTeacherToStudent({
+      teacherId: teacher.id,
+      studentId: student.id,
+      organizationId: orgA,
+    });
     await createNote(student.cookie, 'shared_with_teacher');
 
     // Even a legitimately assigned teacher's own listing shows only their notes.

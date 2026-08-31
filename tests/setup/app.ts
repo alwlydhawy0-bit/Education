@@ -1,6 +1,7 @@
 import { loadConfig } from '../../apps/api/src/platform/config.ts';
 import { buildApp, type BuiltApp } from '../../apps/api/src/app.ts';
 import { createLogger, createMemorySink, type LogRecord } from '@edu/observability';
+import type { MailDelivery } from '../../apps/api/src/modules/identity/mail-delivery.ts';
 import { TEST_APP_URL } from './env.ts';
 
 /**
@@ -15,8 +16,23 @@ import { TEST_APP_URL } from './env.ts';
  */
 export const TEST_ORIGIN = 'http://localhost:5173';
 
+export interface CapturedMail {
+  readonly kind: 'email_verification' | 'password_reset';
+  readonly to: string;
+  readonly token: string;
+}
+
 export interface TestApp extends BuiltApp {
   readonly logs: LogRecord[];
+  /**
+   * Messages the app would have sent.
+   *
+   * Verification and reset tokens must never be returned over HTTP — anyone who
+   * could trigger a reset would then be able to read the token and take the
+   * account over. Capturing them at the mail port is how the flows stay testable
+   * end to end without opening that hole.
+   */
+  readonly mail: CapturedMail[];
 }
 
 export async function buildTestApp(overrides: Record<string, string> = {}): Promise<TestApp> {
@@ -31,11 +47,22 @@ export async function buildTestApp(overrides: Record<string, string> = {}): Prom
     ...overrides,
   });
 
+  const mail: CapturedMail[] = [];
+  const capturingMail: MailDelivery = {
+    async sendEmailVerification(to, token) {
+      mail.push({ kind: 'email_verification', to, token });
+    },
+    async sendPasswordReset(to, token) {
+      mail.push({ kind: 'password_reset', to, token });
+    },
+  };
+
   const built = await buildApp({
     config,
     logger: createLogger({ level: 'debug', sink }),
+    mail: capturingMail,
   });
-  return { ...built, logs: records };
+  return { ...built, logs: records, mail };
 }
 
 /** Headers a browser would send for a same-origin state-changing request. */
@@ -48,10 +75,20 @@ export const writeHeaders = { origin: TEST_ORIGIN, 'content-type': 'application/
  */
 export const bodylessWriteHeaders = { origin: TEST_ORIGIN };
 
-/** Extracts the session cookie value from a login response. */
-export function sessionCookieFrom(setCookie: string | string[] | undefined): string {
-  const raw = Array.isArray(setCookie) ? setCookie.join(';') : (setCookie ?? '');
-  const match = /edu_session=([^;]+)/.exec(raw);
-  if (!match?.[1]) throw new Error(`No session cookie in: ${raw}`);
+/** Extracts a named cookie value from a Set-Cookie header. */
+export function cookieFrom(setCookie: string | string[] | undefined, name: string): string {
+  const raw = Array.isArray(setCookie) ? setCookie.join('\n') : (setCookie ?? '');
+  const match = new RegExp(`${name}=([^;\\s]+)`).exec(raw);
+  if (!match?.[1]) throw new Error(`No "${name}" cookie in: ${raw}`);
   return match[1];
+}
+
+/** Extracts the access-token cookie value from a login response. */
+export function sessionCookieFrom(setCookie: string | string[] | undefined): string {
+  return cookieFrom(setCookie, 'edu_session');
+}
+
+/** Extracts the refresh-token cookie value from a login response. */
+export function refreshCookieFrom(setCookie: string | string[] | undefined): string {
+  return cookieFrom(setCookie, 'edu_refresh');
 }

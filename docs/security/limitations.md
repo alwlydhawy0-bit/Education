@@ -7,17 +7,17 @@ of the documentation — it states what was **not** done.
 ## The headline
 
 **This system is not proven secure, and no such claim is made anywhere in this
-repository.** 987 automated tests passed against a real PostgreSQL database.
+repository.** 1,098 automated tests passed against a real PostgreSQL database.
 That establishes that specific, enumerated properties held at a point in time. It
 does not establish the absence of vulnerabilities.
 
 ## What was actually verified
 
-**Updated for Task 006.** The counts and the "not verified" list below reflect
+**Updated for Task 007.** The counts and the "not verified" list below reflect
 the current state.
 
-- 987 tests executed and passing: 459 unit, 76 architecture, 156 integration,
-  296 security.
+- 1,098 tests executed and passing: 493 unit, 77 architecture, 185 integration,
+  343 security.
 - Migrations applied cleanly from empty to full schema, repeatedly.
 - RLS enforced against a real non-superuser role — verified by attack, not by
   reading the policy.
@@ -25,6 +25,12 @@ the current state.
   role with `BYPASSRLS`.
 - Secret scan and dependency audit executed; the audit found two real advisories
   (vite high, vitest critical), which were fixed by upgrading, not exempted.
+- **The learner progress surface was driven over HTTP against a booted
+  server** — 39 checks covering the write asymmetry, every refused write shape,
+  the learner's own history, the teacher, guardian and administrator read paths,
+  and retention after class removal — with the server log then searched for
+  passwords, session tokens, database credentials and lesson titles. None were
+  present.
 - **The class–course assignment surface was driven over HTTP against a booted
   server** — 39 checks covering the narrowing, every refused assignment shape,
   the syllabus and learner endpoints, and instant revocation on four different
@@ -102,6 +108,48 @@ the current state.
   authorization: the caller must authorize first. The service does, and a test
   covers it, but the function itself would return any user's grants if called
   directly by application code.
+
+## Added in Task 007
+
+- **Nothing records who read a child's progress.** Writes are traceable through
+  the row itself; reads are not. A teacher or an administrator can page through
+  every learner's record in their school and leave no trace
+  (RISK-PROGRESS-02). An audit event per read is the obvious fix and was not
+  built, because a per-touch event stream on the highest-volume read path in the
+  system needs a retention and access policy of its own that does not exist yet.
+  This is a real gap, not a deferred nicety.
+- **Progress moves forward only, and there is no way back.** A learner who marks
+  a lesson complete by accident cannot undo it: not through the API, and not
+  through RLS, which grants no DELETE and forbids a rank decrease in a trigger.
+  Correcting a record is an out-of-band database operation today
+  (RISK-PROGRESS-03). Integrity of the record was chosen over correctability,
+  and the cost falls on the learner.
+- **A school `admin` reads every learning record in their school.** There is no
+  smaller unit of trust, no per-class administrator, and no consent step
+  (RISK-PROGRESS-01).
+- **There is no roll-up.** Progress exists per lesson only. "How far through this
+  course is this class" is not answered anywhere; a caller must fetch the rows
+  and count. No unit, course or class aggregate, no percentage, no cohort view.
+- **No time-on-task, and no attempt at one.** `last_accessed_at` is the last time
+  the learner wrote to the row, not a duration, not a session, and not evidence
+  of attention. Reading it as engagement data would be wrong.
+- **Titles are read live, not snapshotted.** A learner keeps their rows after
+  losing access, and `app_lesson_label` resolves the lesson, unit and course
+  titles at read time — so renaming or re-titling a lesson rewrites what their
+  history appears to say. Storing a copy at write time would freeze the label but
+  duplicate content into a per-child table, which was judged the worse trade.
+- **`app_lesson_label` is a SECURITY DEFINER function that returns lesson, unit
+  and course titles for any lesson id to any authenticated caller.** That is the
+  whole reason retention works, and it is a deliberate hole in the row-level
+  model: it discloses titles, and only titles, of a lesson whose id the caller
+  already holds. It returns no body, no state and no organization, and the
+  progress rows it labels are themselves gated. It has not been reviewed by
+  anybody but its author.
+- **The forward-only guarantee is a trigger, not a constraint.** A superuser or
+  the migration role can move a row backwards; `edu_app` cannot.
+- **No quizzes, grading, mastery, AI tutor or experiments.** Recording that a
+  lesson was completed says nothing about whether anything was learned, and this
+  system makes no claim that it does.
 
 ## Added in Task 006
 

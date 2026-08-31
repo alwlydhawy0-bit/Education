@@ -1,13 +1,13 @@
 # Testing Strategy
 
-**477 tests, all executed and passing** as of Task 003.
+**1,098 tests, all executed and passing** as of Task 007.
 
-| Project        | Tests | Needs      | Proves                                                                                                                               |
-| -------------- | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `unit`         | 227   | nothing    | Policy decision table, `Guarded`, redaction, contracts, config, query validation, security-event recorder, rate-limit policies, i18n |
-| `architecture` | 51    | nothing    | Dependency rules; every security event has an emitter; the app is runnable                                                           |
-| `integration`  | 79    | PostgreSQL | Schema, constraints, RLS, query safety, and that the process actually boots                                                          |
-| `security`     | 120   | PostgreSQL | IDOR/BOLA scenarios A–E, cross-organization isolation, layer isolation, session, CSRF, rate limiting, audit                          |
+| Project        | Tests | Needs      | Proves                                                                                                                                |
+| -------------- | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `unit`         | 493   | nothing    | Policy decision tables, `Guarded`, redaction, contracts, config, query validation, security-event recorder, rate-limit policies, i18n |
+| `architecture` | 77    | nothing    | Dependency rules; every security event has an emitter; the app is runnable                                                            |
+| `integration`  | 185   | PostgreSQL | Schema, constraints, RLS, query safety, and that the process actually boots                                                           |
+| `security`     | 343   | PostgreSQL | IDOR/BOLA scenarios A–E, cross-organization isolation, layer isolation, session, CSRF, rate limiting, audit                           |
 
 ```bash
 pnpm test                 # everything
@@ -77,6 +77,13 @@ Task 006 added the assignment decision table, and reworked the content table
 around the narrowing: most "a learner can read this" cases now need an
 enrolled context rather than an empty one, which is itself the assertion.
 
+Task 007 added the progress table, which is the first one where the read row and
+the write row for the same actor and the same resource give different answers.
+It is enumerated as two tables rather than one — `record` against every actor
+including the platform operator, and `read`/`list` against every relationship —
+because collapsing them into a single matrix is exactly the mistake the
+asymmetry invites.
+
 **Architecture** — the nine dependency rules, by scanning imports in source,
 plus the rule that every declared security-event type has an emitter.
 
@@ -91,6 +98,13 @@ instant revocation on all three triggers. Three of them FORCE rows the database
 normally refuses — by disabling the scope trigger for the insert — because a
 read-path defence that is only ever reached through a write-path trigger has
 not actually been tested.
+
+`rls-progress.test.ts` (Task 007) is 29 checks over the read/write asymmetry as
+`edu_app`: the owner writing and every third party failing to, the four reader
+relationships, the forward-only trigger, the immutability of `completed_at` and
+of both parties, the absence of any DELETE grant, and — the one that matters for
+retention — a learner reading their own labelled history after their class
+membership has ended.
 
 `rls-content.test.ts` (Task 005) does the same for the content tree: 32 checks
 covering draft and archived visibility, the whole-chain published rule, the
@@ -122,6 +136,15 @@ Both defects that suite found are recorded in the vulnerability log.
 Task 006 added 61 more across `class-courses.test.ts` and the layered-defence
 suite, including the four revocation paths asserted on the SAME live session —
 a revocation that takes effect at next login is not a revocation.
+
+Task 007 added 47 more: `progress.test.ts` for the write asymmetry and the four
+read relationships driven over HTTP, plus a `learner progress, with RLS
+disabled` block in the layered-defence suite. Each test in that suite was
+verified to fail with the corresponding check removed, and one of them was NOT:
+coarsening the teacher rule from "shares this class" to "teaches any class"
+leaves layered-defence green, because the repository's SQL scoping fires before
+the policy. That is recorded in a comment in the file rather than presented as
+coverage the suite does not have.
 
 **The two gates are tested with the other removed.** This is the claim that
 would be easiest to state and hardest to have earned, so it has a test on each

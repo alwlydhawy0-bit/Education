@@ -40,8 +40,8 @@ export async function truncateAll(): Promise<void> {
   // created by migration 0007 — truncating them would leave registration unable
   // to grant the default role.
   await db.query(
-    `TRUNCATE notes, guardian_relationships, teacher_assignments, class_course_assignments,
-              class_memberships,
+    `TRUNCATE notes, lesson_progress, guardian_relationships, teacher_assignments,
+              class_course_assignments, class_memberships,
               classes, lessons, course_units, courses, curricula, education_levels,
               sessions, user_roles, email_verifications, password_reset_tokens,
               profiles, audit_log, users, organizations
@@ -463,5 +463,37 @@ async function insertAssignment(
   );
   const id = rows[0]?.id;
   if (!id) throw new Error('Failed to seed course assignment');
+  return id;
+}
+
+/**
+ * Records progress for a learner, as superuser.
+ *
+ * Seeded rather than written through the API so a test can construct states the
+ * application role could never reach — progress on a lesson the learner has
+ * since lost, or one they never had. Those are exactly what the retention and
+ * read-path tests need.
+ */
+export async function recordProgress(options: {
+  userId: string;
+  lessonId: string;
+  status?: 'not_started' | 'in_progress' | 'completed';
+  lastAccessedAt?: Date;
+}): Promise<string> {
+  const db = await seedDb();
+  const status = options.status ?? 'in_progress';
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO lesson_progress (user_id, lesson_id, status, completed_at, last_accessed_at)
+     VALUES ($1, $2, $3, $4, COALESCE($5, now())) RETURNING id`,
+    [
+      options.userId,
+      options.lessonId,
+      status,
+      status === 'completed' ? new Date() : null,
+      options.lastAccessedAt ?? null,
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed progress');
   return id;
 }

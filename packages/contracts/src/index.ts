@@ -5,3 +5,4 @@ export * from './notebook.contract.ts';
 export * from './relationships.contract.ts';
 export * from './curriculum.contract.ts';
 export * from './class-courses.contract.ts';
+export * from './progress.contract.ts';

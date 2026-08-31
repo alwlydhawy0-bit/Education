@@ -11,6 +11,7 @@ import { teacherAssignmentPolicy } from './policies/teacher-assignment.policy.ts
 import { contentPolicy } from './policies/content.policy.ts';
 import { educationLevelPolicy } from './policies/education-level.policy.ts';
 import { classCourseAssignmentPolicy } from './policies/class-course-assignment.policy.ts';
+import { lessonProgressPolicy } from './policies/lesson-progress.policy.ts';
 import {
   resourceKindForAction,
   type Action,
@@ -67,6 +68,7 @@ const DEFAULT_POLICIES: Readonly<Record<ResourceKind, PolicyFn>> = Object.freeze
   course_unit: contentPolicy as unknown as PolicyFn,
   lesson: contentPolicy as unknown as PolicyFn,
   class_course_assignment: classCourseAssignmentPolicy as unknown as PolicyFn,
+  lesson_progress: lessonProgressPolicy as unknown as PolicyFn,
 });
 
 export function createPolicyEngine(

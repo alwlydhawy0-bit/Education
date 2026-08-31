@@ -312,6 +312,74 @@ through `withActor`/`withoutActor`.
   not caching, and it is the right trade here; it is also untested at scale
   (RISK-ASSIGN-03).
 
+### T3l — Forged learning records (added in Task 007)
+
+- **Attack surface:** `PUT /api/v1/lessons/:id/progress`, and any path that
+  might let one account author a claim about another's study.
+- **Why it matters:** a progress row is a statement in a child's own voice. If a
+  teacher, an administrator or a platform operator can write one, the record
+  stops being evidence of anything — including evidence in a dispute where the
+  adult writing it is the interested party.
+- **Mitigations [BUILT]:** the write path is bound to the authenticated actor at
+  both gates. The policy's `record` branch denies any row whose `learnerId` is
+  not the actor, and it is evaluated **before** the platform-operator branch, so
+  the one actor that may do anything else on the platform may not do this. RLS
+  admits INSERT and UPDATE only `WITH CHECK (user_id = app_current_actor())`,
+  and a trigger makes `user_id` and `lesson_id` immutable after insert. The
+  learner is never taken from the request body — the contract is `.strict()` and
+  carries no learner field at all.
+- **Verification:** security tests attempt to record for another learner as a
+  teacher of their class, as an administrator of their school, as a verified
+  guardian and as a platform operator; and the same attempts again with RLS
+  disabled, so each gate is shown to refuse alone.
+- **Residual risk:** an operator with direct database access can still write a
+  row. That is true of every table and is bounded by infrastructure controls,
+  not by this model.
+
+### T3m — Surveillance of a child's study through a role (added in Task 007)
+
+- **Attack surface:** `GET /api/v1/classes/:id/students/:studentId/progress` and
+  `GET /api/v1/guardians/children/:childId/progress`.
+- **Why it matters:** when a lesson was opened and when it was completed is a
+  behavioural record of a child. Every earlier task's read rules were about
+  material; this one is about a person.
+- **Mitigations [BUILT]:** no role reads a progress row on its own. A teacher
+  needs a class they teach **and** an active membership by that learner in that
+  same class — a conjunction computed once in SQL
+  (`app_actor_observes_learner_lesson`) and carried into the policy as
+  `observableByActorAsTeacher`, so neither gate can re-derive it more loosely. A
+  guardian needs a **verified** link; pending and revoked claims are filtered out
+  of the relationship snapshot before the policy runs. An administrator needs
+  `admin` — not `security_admin` — of that learner's own organization.
+- **Verification:** the decision table as unit tests, the same matrix against
+  live RLS, and cross-user attempts over HTTP: a teacher of a different class, a
+  teacher of the right class reading a non-member, a guardian of a different
+  child, an administrator of another school, a `security_admin`.
+- **Residual risk:** a school `admin` can read every learning record in their
+  school, and nothing records that they did (RISK-PROGRESS-01,
+  RISK-PROGRESS-02).
+
+### T3n — Erasure of a child's record by revocation (added in Task 007)
+
+- **Attack surface:** `GET /api/v1/me/progress` after the learner has been
+  removed from a class or the course has been withdrawn.
+- **Why it matters:** the task requires retention — losing access must stop new
+  writes without destroying history. A read path that _appears_ to honour that
+  while returning nothing is worse than an explicit deletion, because nobody is
+  told.
+- **Mitigations [BUILT]:** reading your own record performs no access check at
+  all. Nothing in the progress repository joins `lessons`, because a revoked
+  learner can no longer see that row and the join would quietly drop every one of
+  their rows; lesson, unit and course titles come from the SECURITY DEFINER
+  helper `app_lesson_label`. There is no DELETE policy and no DELETE privilege on
+  `lesson_progress`, and `completed_at` is immutable once written.
+- **Verification:** an end-to-end case that records progress, revokes the class
+  membership, and asserts the learner's own history is still returned **with its
+  titles intact** while a further write returns 404.
+- **Residual risk:** the row survives, but the lesson it points at can be
+  archived or edited underneath it. The stored titles are read live, not
+  snapshotted, so a renamed lesson renames history.
+
 ### T3 — Account takeover
 
 - **Mitigations [BUILT]:** Argon2id with pinned OWASP parameters; login rate
@@ -444,6 +512,9 @@ ranking, counts, and latency. Semantic similarity must never widen access.
 | RISK-ASSIGN-01     | A teacher of a class may assign any published course in their school without a second person                      | Low                             | Accepted; the content itself was already reviewed to be published      |
 | RISK-ASSIGN-02     | The unit of assignment is the class; no per-learner differentiation exists                                        | Low                             | Accepted; deliberate scope                                             |
 | RISK-ASSIGN-03     | Reachability is recomputed per request and never cached; untested at scale                                        | Low                             | Open; correctness chosen over throughput                               |
+| RISK-PROGRESS-01   | A school `admin` can read every learning record in their school                                                   | Medium                          | Accepted; the organization is the smallest unit of trust in the model  |
+| RISK-PROGRESS-02   | Reads of a child's progress are not recorded; there is no audit trail of who looked                               | Medium                          | Open; deliberate for now, see limitations.md                           |
+| RISK-PROGRESS-03   | Progress is forward-only; an accidental completion cannot be retracted through the API                            | Low                             | Accepted; integrity of the record chosen over correctability           |
 
 ## 6. What was NOT threat-modelled
 

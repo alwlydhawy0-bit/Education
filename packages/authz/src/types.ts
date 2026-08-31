@@ -194,7 +194,8 @@ export type ResourceKind =
   | 'course'
   | 'course_unit'
   | 'lesson'
-  | 'class_course_assignment';
+  | 'class_course_assignment'
+  | 'lesson_progress';
 
 export interface BaseResource {
   readonly kind: ResourceKind;
@@ -385,6 +386,38 @@ export interface ClassCourseAssignmentResource extends BaseResource {
   readonly state: 'active' | 'inactive' | 'archived';
 }
 
+/** A learner's running record for one lesson. Forward-only; see ADR 0010. */
+export type LessonProgressState = 'not_started' | 'in_progress' | 'completed';
+
+/**
+ * One learner's progress on one lesson.
+ *
+ * The first resource in the platform whose subject is a NAMED CHILD and whose
+ * author is that same child. Two fields carry facts the pure policy cannot
+ * derive, both computed in the same query that loads the row:
+ *
+ *   `learnerMayStudy` — does the row's SUBJECT still reach this lesson through
+ *   a class? Only the subject writes, so on a write this is a fact about the
+ *   actor; on a read it is not consulted at all, which is the retention rule.
+ *
+ *   `observableByActorAsTeacher` — ACTOR-RELATIVE, unusually. It answers the
+ *   task's precise teacher rule: the learner is enrolled in a class the actor
+ *   teaches AND the lesson's course is assigned to THAT SAME class. Two coarser
+ *   snapshot edges ("I teach them" and "I reach that course") would both be true
+ *   for a teacher who reaches the course through a DIFFERENT class, so the
+ *   conjunction has to be evaluated where the class ids can be compared.
+ */
+export interface LessonProgressResource extends BaseResource {
+  readonly kind: 'lesson_progress';
+  readonly learnerId: string;
+  readonly learnerOrganizationId: string | null;
+  readonly lessonId: string;
+  readonly courseId: string;
+  readonly state: LessonProgressState;
+  readonly learnerMayStudy: boolean;
+  readonly observableByActorAsTeacher: boolean;
+}
+
 export type Resource =
   | NoteResource
   | UserResource
@@ -400,7 +433,8 @@ export type Resource =
   | CourseResource
   | CourseUnitResource
   | LessonResource
-  | ClassCourseAssignmentResource;
+  | ClassCourseAssignmentResource
+  | LessonProgressResource;
 
 // --- Actions -------------------------------------------------------------
 // An action is `<resourceKind>:<verb>`. The engine enforces that the prefix
@@ -500,6 +534,19 @@ export const CLASS_COURSE_ASSIGNMENT_ACTIONS = [
 
 export type ClassCourseAssignmentAction = (typeof CLASS_COURSE_ASSIGNMENT_ACTIONS)[number];
 
+/**
+ * `record` rather than `create`/`update`, because the endpoint is an upsert and
+ * the distinction carries no authority: whoever may start a record may continue
+ * it, and nobody else may do either.
+ */
+export const LESSON_PROGRESS_ACTIONS = [
+  'lesson_progress:read',
+  'lesson_progress:list',
+  'lesson_progress:record',
+] as const;
+
+export type LessonProgressAction = (typeof LESSON_PROGRESS_ACTIONS)[number];
+
 export type NoteAction = (typeof NOTE_ACTIONS)[number];
 export type UserAction = (typeof USER_ACTIONS)[number];
 export type ProfileAction = (typeof PROFILE_ACTIONS)[number];
@@ -522,7 +569,8 @@ export type Action =
   | GuardianRelationshipAction
   | EducationLevelAction
   | ContentAction
-  | ClassCourseAssignmentAction;
+  | ClassCourseAssignmentAction
+  | LessonProgressAction;
 
 export const ALL_ACTIONS: readonly Action[] = [
   ...NOTE_ACTIONS,
@@ -540,6 +588,7 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...COURSE_UNIT_ACTIONS,
   ...LESSON_ACTIONS,
   ...CLASS_COURSE_ASSIGNMENT_ACTIONS,
+  ...LESSON_PROGRESS_ACTIONS,
 ];
 
 /** The two permissions that split authoring from publishing. See ADR 0009. */

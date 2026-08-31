@@ -5,6 +5,7 @@ import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../
 import {
   addClassMember,
   assignCourseToClass,
+  assignTeacher,
   closeSeedDb,
   createClass,
   createCourse,
@@ -15,6 +16,7 @@ import {
   createUnit,
   createUser,
   linkGuardian,
+  recordProgress,
   truncateAll,
 } from '../setup/fixtures.ts';
 import { hashPassword } from '../../apps/api/src/platform/security/passwords.ts';
@@ -818,5 +820,210 @@ describe('class-scoped content access, with RLS disabled', () => {
         })
       ).statusCode,
     ).toBe(404);
+  });
+});
+
+// =========================================================================
+/**
+ * Learner progress, with RLS disabled.
+ *
+ * The most sensitive boundary in the platform so far: a named child's record,
+ * written by that child, read by their teacher and their guardian. Every read
+ * route leans on a relationship built in an earlier task, and all of them are
+ * expressed as RLS — so with RLS off, anything refused below was refused by
+ * `lessonProgressPolicy` alone.
+ *
+ * Progress rows are SEEDED here, including rows the write path would refuse, so
+ * the read path is tested on its own rather than only through the write gate.
+ */
+describe('learner progress, with RLS disabled', () => {
+  async function seedAndLogin(
+    email: string,
+    roles: readonly string[] | undefined,
+    organizationId: string | null,
+  ): Promise<{ id: string; cookie: string }> {
+    const user = await createUser({
+      email,
+      ...(roles ? { roles } : {}),
+      organizationId,
+      passwordHash: await hashPassword(PASSWORD),
+    });
+    const loggedIn = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: writeHeaders,
+      payload: { email, password: PASSWORD },
+    });
+    expect(loggedIn.statusCode).toBe(204);
+    return {
+      id: user.id,
+      cookie: `edu_session=${sessionCookieFrom(loggedIn.headers['set-cookie'])}`,
+    };
+  }
+
+  async function world() {
+    const orgA = await createOrganization('Progress School A');
+    const orgB = await createOrganization('Progress School B');
+    const levelId = await createEducationLevel();
+
+    const learner = await seedAndLogin('nrls-prog-learner@test.local', undefined, orgA);
+    const peer = await seedAndLogin('nrls-prog-peer@test.local', undefined, orgA);
+    const teacher = await seedAndLogin('nrls-prog-teacher@test.local', ['teacher'], orgA);
+    const otherTeacher = await seedAndLogin('nrls-prog-teacher2@test.local', ['teacher'], orgA);
+    const guardian = await seedAndLogin('nrls-prog-guardian@test.local', ['guardian'], orgA);
+    const adminB = await seedAndLogin('nrls-prog-admin-b@test.local', ['admin'], orgB);
+
+    const classA1 = await createClass(orgA, 'PA1');
+    const classA2 = await createClass(orgA, 'PA2');
+    await addClassMember(classA1, learner.id);
+    await addClassMember(classA1, peer.id);
+    await assignTeacher(teacher.id, classA1);
+    await assignTeacher(teacher.id, classA2);
+    await assignTeacher(otherTeacher.id, classA2);
+    await linkGuardian(guardian.id, learner.id, 'verified');
+
+    const curriculumA = await createCurriculum({
+      organizationId: orgA,
+      code: 'math',
+      status: 'published',
+    });
+    const mk = async (title: string) => {
+      const course = await createCourse({
+        organizationId: orgA,
+        curriculumId: curriculumA,
+        levelId,
+        title,
+        status: 'published',
+      });
+      const unit = await createUnit({ courseId: course, title: `${title}u`, status: 'published' });
+      const lesson = await createLesson({
+        unitId: unit,
+        title: `${title} Lesson`,
+        status: 'published',
+      });
+      return { course, lesson };
+    };
+    const P = await mk('P');
+    const Q = await mk('Q');
+    await assignCourseToClass({ classId: classA1, courseId: P.course });
+    await assignCourseToClass({ classId: classA2, courseId: Q.course });
+
+    await recordProgress({ userId: learner.id, lessonId: P.lesson, status: 'completed' });
+    await recordProgress({ userId: peer.id, lessonId: P.lesson, status: 'in_progress' });
+    // Forced: the learner is not in PA2, so they could never record this.
+    await recordProgress({ userId: learner.id, lessonId: Q.lesson, status: 'completed' });
+
+    return { orgA, classA1, classA2, learner, peer, teacher, otherTeacher, guardian, adminB, P, Q };
+  }
+
+  it('still shows a learner only their own records', async () => {
+    const w = await world();
+    const mine = await app.inject({
+      method: 'GET',
+      url: '/api/v1/me/progress',
+      headers: { cookie: w.peer.cookie },
+    });
+    expect(mine.json<{ items: unknown[] }>().items).toHaveLength(1);
+    expect(mine.body).toContain('P Lesson');
+  });
+
+  it('still refuses a learner writing another learner’s record', async () => {
+    const w = await world();
+    // The only write route derives its subject from the session, so the closest
+    // a peer can get is writing their own row — which is what this asserts did
+    // NOT touch the learner's.
+    const response = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/lessons/${w.P.lesson}/progress`,
+      headers: { ...writeHeaders, cookie: w.peer.cookie },
+      payload: { status: 'completed' },
+    });
+    expect(response.statusCode).toBe(200);
+    const learnerRows = await app.inject({
+      method: 'GET',
+      url: '/api/v1/me/progress',
+      headers: { cookie: w.learner.cookie },
+    });
+    expect(learnerRows.json<{ items: { status: string }[] }>().items).toHaveLength(2);
+  });
+
+  it('still refuses a learner writing progress for an unassigned lesson', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/lessons/${w.Q.lesson}/progress`,
+      headers: { ...writeHeaders, cookie: w.peer.cookie },
+      payload: { status: 'completed' },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  /**
+   * A note on what this next case does and does not prove.
+   *
+   * The teacher precision rule — "the course must be assigned to the class the
+   * learner is actually in" — is enforced at THREE places: the service's class
+   * check, the SQL scoping in `listForLearnerInClass`, and the policy's
+   * `observableByActorAsTeacher`. On the only route that reaches it, the SQL
+   * scoping fires first, so this test would still pass with the policy branch
+   * coarsened. Verified by injecting exactly that defect.
+   *
+   * That is defence in depth behaving as designed, not a gap — but it means the
+   * POLICY half of this boundary is pinned elsewhere: `progress-policy.test.ts`
+   * asserts the branch directly, and `rls-progress.test.ts` asserts the
+   * database's own version with no application code in the path. Both fail when
+   * the check is coarsened.
+   */
+  it('still excludes a course assigned to a DIFFERENT class from the teacher view', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${w.classA1}/students/${w.learner.id}/progress`,
+      headers: { cookie: w.teacher.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('P Lesson');
+    expect(response.body).not.toContain('Q Lesson');
+  });
+
+  it('still refuses a teacher a class they do not teach', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${w.classA1}/students/${w.learner.id}/progress`,
+      headers: { cookie: w.otherTeacher.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still refuses an administrator of another school', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${w.classA1}/students/${w.learner.id}/progress`,
+      headers: { cookie: w.adminB.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still refuses a guardian an unlinked child', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/guardians/children/${w.peer.id}/progress`,
+      headers: { cookie: w.guardian.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still shows a verified guardian their own child', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/guardians/children/${w.learner.id}/progress`,
+      headers: { cookie: w.guardian.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ items: unknown[] }>().items).toHaveLength(2);
   });
 });

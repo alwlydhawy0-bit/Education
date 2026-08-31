@@ -14,3 +14,4 @@ export { teacherAssignmentPolicy } from './policies/teacher-assignment.policy.ts
 export { contentPolicy } from './policies/content.policy.ts';
 export { educationLevelPolicy } from './policies/education-level.policy.ts';
 export { classCourseAssignmentPolicy } from './policies/class-course-assignment.policy.ts';
+export { lessonProgressPolicy } from './policies/lesson-progress.policy.ts';

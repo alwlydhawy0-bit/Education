@@ -173,3 +173,10 @@ Also absent: per-learner assignment (the unit of assignment is the class);
 scheduling that actually gates access (the dates are descriptive); assignment to
 a whole school or year group; copying an assignment between classes; and any
 notification when a course is assigned or withdrawn.
+
+## What this does not record
+
+An assignment says a class studies a course. Whether anybody did is
+[the learner progress API](progress.md), which reads this edge to decide who may
+still record — and deliberately does not read it to decide who may still look
+back.

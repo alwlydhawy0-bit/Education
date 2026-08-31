@@ -273,6 +273,70 @@ that class, or an administrator of its organization. Choosing among published
 courses is running a class; deciding what content exists is not, and a teacher
 still may not do it.
 
+### Learner progress (Task 007)
+
+The first per-child record the child themselves authors, and the first place
+where the read rule and the write rule are deliberately _not_ the same rule.
+
+**Writing is the learner's alone.** There is no branch in
+`lessonProgressPolicy` through which a teacher, a guardian, an administrator or
+a platform operator may record what somebody else studied. The `record` branch
+is evaluated _before_ the platform-operator branch — the one inversion of the
+usual ordering in this codebase — because "who studied this" is not an
+administrative fact and nobody should be able to manufacture one. A record a
+third party can write is not evidence of anything.
+
+**Reading your own record is unconditional; adding to it is not.** The write
+gate asks whether the learner still reaches the lesson through a class
+(Task 006's chain, recomputed per request). The read gate does not ask at all.
+That asymmetry _is_ the retention rule the task requires: removing a child from
+a class stops them adding to their record and must not erase what they already
+have.
+
+Retention has a consequence that is easy to miss and was found by probing the
+database before any application code existed. Once the learner loses access,
+they can no longer see the `lessons` row, so any query that joined `lessons` to
+label their own history would return **zero rows** — silently deleting the
+record from their view while the rows sat intact. Nothing in the progress
+repository joins `lessons`; titles come from the SECURITY DEFINER helper
+`app_lesson_label`, which is reachable precisely because it does not carry the
+caller's RLS with it.
+
+**Every third-party read passes through a graph edge from an earlier task**, not
+a role:
+
+| Reader            | Edge required                                                                                                              |
+| ----------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| The learner       | — (own row)                                                                                                                |
+| Guardian          | a **verified** guardianship (Task 003; pending and revoked claims are filtered out of the snapshot before the policy runs) |
+| Teacher           | teacher of a class **and** that learner is an active member of **that same class** — a conjunction, not two role checks    |
+| Administrator     | `admin` of that learner's own organization                                                                                 |
+| Platform operator | reads only                                                                                                                 |
+
+The teacher rule is carried as `observableByActorAsTeacher`, an
+**actor-relative** field computed in SQL, rather than as a `teacherOf` list the
+policy intersects itself. Teaching _a_ class must never imply reading _a_
+student; it is the shared class that authorizes, and computing the conjunction
+in one place keeps the policy from re-deriving it slightly differently.
+
+`admin` and **not** `security_admin`, deliberately. A security administrator
+manages accounts and lockouts; handing that same role every child's learning
+record would merge two unrelated authorities into a single compromise. Both
+gates had to be taught this distinction separately: the existing SQL helper
+`app_actor_is_org_admin()` matches either role, so `app_actor_holds_role('admin')`
+was added so RLS and the policy answer the same question.
+
+**Progress moves forward only.** `not_started` → `in_progress` → `completed`, a
+strict rank comparison in `progress.domain.ts` and again in the
+`lesson_progress_guard()` trigger. `completed_at` is written once and is
+immutable thereafter; the learner and the lesson on a row can never change.
+There is no DELETE policy and no DELETE privilege on the table at all.
+
+Every denial in this domain is `hide` (404). A learner cannot distinguish
+"never had access", "lost access", "the lesson was unpublished" or "the course
+was withdrawn" — and should not be able to, since the difference is a fact about
+their school's administration, not about them.
+
 ### Profiles
 
 Several roles can read a profile they have a relationship with. **Nobody may

@@ -253,6 +253,7 @@ describe('rule 6 — protected resources are returned guarded', () => {
       ['curriculum/curriculum.repository.ts', 'findLesson'],
       ['class-courses/class-courses.repository.ts', 'findById'],
       ['class-courses/class-courses.repository.ts', 'findActive'],
+      ['progress/progress.repository.ts', 'find'],
     ];
     const violations: string[] = [];
     for (const [file, method] of loaders) {

@@ -172,4 +172,6 @@ are documented separately in
 [the relationship & class management API](relationships.md). Curricula, courses,
 units and lessons are in
 [the curriculum & course API](curriculum.md), and course-to-class assignment in
-[the class–course assignment API](class-courses.md).
+[the class–course assignment API](class-courses.md). What a learner has studied
+is in [the learner progress API](progress.md) — the first surface where a user
+authors a record about themselves that other people may read.

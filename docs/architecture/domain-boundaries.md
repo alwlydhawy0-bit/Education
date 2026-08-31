@@ -74,6 +74,38 @@ model — only a **platform operator** (global `security_admin`) may create one,
 and every other domain treats an organization id as a value it was given, never
 one it may choose.
 
+### `progress` — **[BUILT]**
+
+Owns `lesson_progress`: one row per (learner, lesson), recording that a learner
+started or completed a lesson. The platform's first table of **per-child
+behavioural data**, and the first whose read rule and write rule differ.
+
+It is downstream of everything: it needs `class-courses` to decide whether a
+learner may still write, `relationships` to decide which teacher or guardian may
+read, and `curriculum` to label a row. It is a module of its own so that none of
+those three has to know it exists — the dependency points one way only, and the
+architecture rules assert it.
+
+**It reads no other domain's tables directly.** That is a stronger statement here
+than elsewhere and it is deliberate: a query in this module that joined `lessons`
+for a title would return nothing once the learner lost access, silently erasing
+their retained history. Lesson, unit and course titles come from the SECURITY
+DEFINER helper `app_lesson_label`, and the write gate comes from
+`app_actor_may_study_lesson` — both owned by the database, both the acyclic-graph
+technique used since Task 004.
+
+The invariants live in the database:
+
+- **One row per learner and lesson**, a total unique index; the write path is an
+  upsert on it, not a read-then-write.
+- **Forward only.** `not_started → in_progress → completed` by rank, in a
+  trigger. `completed_at` is written once and immutable; a row's learner and
+  lesson can never be re-pointed.
+- **`status = 'completed'` if and only if `completed_at IS NOT NULL`**, a CHECK,
+  so the two can never disagree.
+- **No DELETE policy and no DELETE privilege.** Retention is enforced by the
+  absence of the grant, not by nobody calling it.
+
 ### `class-courses` — **[BUILT]**
 
 Owns `class_course_assignments`: the edge from the class graph to the content
@@ -175,7 +207,7 @@ written, not after.
 A domain can be extracted into its own service when its tables are touched only
 by it, its contract is explicit, it has no imports from sibling modules, and its
 tests do not depend on another domain's internals. `notebook`, `curriculum`,
-`class-courses` and `organizations` meet this cleanly today; `relationships` meets it except for the
+`class-courses`, `progress` and `organizations` meet this cleanly today; `relationships` meets it except for the
 `display_name` join noted above, and `identity`/`users` share the `users` table.
 Both exceptions are recorded rather than papered over — enforced by `tests/architecture/dependency-rules.test.ts`, not by
 inspection.

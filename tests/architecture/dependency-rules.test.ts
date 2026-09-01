@@ -412,6 +412,100 @@ describe('rule 9 — the application must actually be runnable', () => {
 });
 
 /**
+ * Rule 11 — the declared Node engine must actually run the toolchain.
+ *
+ * `engines.node` is a promise to everyone who builds this repository, and a
+ * hosting platform reads it to choose a runtime. When it is looser than what
+ * the build tools require, the promise is false in a way nothing catches
+ * locally: a developer on a newer Node sees a green build, and CI or a
+ * deployment provisioning a Node inside the gap fails at `vite build` with an
+ * error about the tool, not about the version.
+ *
+ * That is exactly the shape of the Vercel failure investigated in Task 009A:
+ * the root package.json declared `>=22.0.0` while vite 7 requires
+ * `^20.19.0 || >=22.12.0`, so every Node from 22.0.0 to 22.11.x satisfied the
+ * repository and broke the build.
+ *
+ * The floor is read from vite's OWN package.json rather than hard-coded, so
+ * upgrading vite to a version with a higher requirement fails this test instead
+ * of silently reintroducing the gap.
+ */
+describe('rule 11 — the declared Node engine runs the toolchain', () => {
+  /** Lowest version satisfying a range like `^20.19.0 || >=22.12.0`, per major. */
+  function floorsByMajor(range: string): Map<number, [number, number, number]> {
+    const floors = new Map<number, [number, number, number]>();
+    for (const clause of range.split('||').map((c) => c.trim())) {
+      const match = /^[\^>=~]*\s*(\d+)\.(\d+)\.(\d+)/.exec(clause);
+      if (!match) continue;
+      const parsed: [number, number, number] = [
+        Number(match[1]),
+        Number(match[2]),
+        Number(match[3]),
+      ];
+      const existing = floors.get(parsed[0]);
+      if (!existing || parsed[1] < existing[1]) floors.set(parsed[0], parsed);
+    }
+    return floors;
+  }
+
+  const declared = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8')) as {
+    engines?: { node?: string };
+  };
+  const viteManifest = JSON.parse(
+    readFileSync(join(ROOT, 'apps/web/node_modules/vite/package.json'), 'utf8'),
+  ) as { version: string; engines?: { node?: string } };
+
+  it('declares a Node floor at or above what vite requires', () => {
+    const declaredRange = declared.engines?.node;
+    const viteRange = viteManifest.engines?.node;
+    expect(declaredRange, 'root package.json must declare engines.node').toBeTruthy();
+    expect(viteRange, 'vite must declare engines.node').toBeTruthy();
+
+    const declaredFloors = floorsByMajor(declaredRange as string);
+    const viteFloors = floorsByMajor(viteRange as string);
+
+    // For every major the repository permits, vite must accept that major AND
+    // the repository's floor within it must not be below vite's.
+    const violations: string[] = [];
+    for (const [major, floor] of declaredFloors) {
+      const viteFloor = viteFloors.get(major);
+      if (!viteFloor) {
+        violations.push(
+          `repo permits Node ${major}.x, which vite ${viteManifest.version} does not support`,
+        );
+        continue;
+      }
+      const below =
+        floor[1] < viteFloor[1] || (floor[1] === viteFloor[1] && floor[2] < viteFloor[2]);
+      if (below) {
+        violations.push(
+          `repo floor ${floor.join('.')} is below vite's ${viteFloor.join('.')} for Node ${major}.x`,
+        );
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('the Node running the tests satisfies the declared floor', () => {
+    // Otherwise a green suite says nothing about the version anyone is told to use.
+    const declaredFloors = floorsByMajor(declared.engines?.node as string);
+    const [major, minor, patch] = process.versions.node.split('.').map(Number) as [
+      number,
+      number,
+      number,
+    ];
+    const applicable = declaredFloors.get(major);
+    expect(
+      applicable,
+      `Node ${process.versions.node} is not a major the repo declares`,
+    ).toBeTruthy();
+    const [, floorMinor, floorPatch] = applicable as [number, number, number];
+    const satisfies = minor > floorMinor || (minor === floorMinor && patch >= floorPatch);
+    expect(satisfies, `Node ${process.versions.node} is below the declared floor`).toBe(true);
+  });
+});
+
+/**
  * Rule 10 — the answer key never leaves the database.
  *
  * This is the only architecture rule in the file that guards a single table,

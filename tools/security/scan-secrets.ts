@@ -9,12 +9,67 @@
  *
  * Exit code 1 on any finding.
  */
+import { execFileSync } from 'node:child_process';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { extname, join, relative, resolve } from 'node:path';
 
 const ROOT = resolve(import.meta.dirname, '../..');
 
 const SKIP_DIRS = new Set(['node_modules', '.git', 'dist', 'build', 'coverage', '.vitest']);
+
+/**
+ * Files git IGNORES and does NOT track.
+ *
+ * These are skipped, and the reasoning is the scanner's own stated purpose: it
+ * exists so that a secret cannot reach the REPOSITORY ("a committed .env", in
+ * the header above). A file that is ignored and untracked cannot be committed,
+ * so a finding in one is not the accident this gate is for.
+ *
+ * It matters because the documented local setup creates exactly such a file:
+ * `cp .env.example .env`, then fill in real local credentials. Failing the
+ * security gate for following the README teaches developers that the secret
+ * scanner cries wolf, which costs more than it buys.
+ *
+ * WHAT THIS DELIBERATELY DOES NOT DO: skip by filename. Tracked files are
+ * always scanned, whatever `.gitignore` says — so `git add -f .env`, or
+ * removing `.env` from `.gitignore`, puts the file straight back in scope. The
+ * check is "can this reach the repository?", not "is this called .env".
+ *
+ * Fails OPEN: if git is unavailable (a tarball, a container without git), the
+ * set is empty and everything is scanned, which is the safe direction.
+ */
+function ignoredAndUntracked(): { files: ReadonlySet<string>; dirs: readonly string[] } {
+  try {
+    // `--directory` collapses a wholly-ignored directory into ONE entry.
+    // Without it git enumerates every file under node_modules — over a
+    // megabyte here, which overruns execFileSync's default maxBuffer and
+    // throws ENOBUFS. The catch below would then swallow it and skip nothing,
+    // so the flag is what makes this work at all rather than a tidiness.
+    const output = execFileSync(
+      'git',
+      ['ls-files', '--others', '--ignored', '--exclude-standard', '--directory', '-z'],
+      {
+        cwd: ROOT,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+        maxBuffer: 16 * 1024 * 1024,
+      },
+    );
+    const entries = output.split('\0').filter((entry) => entry.length > 0);
+    return {
+      files: new Set(entries.filter((e) => !e.endsWith('/')).map((e) => resolve(ROOT, e))),
+      dirs: entries.filter((e) => e.endsWith('/')).map((e) => resolve(ROOT, e) + '/'),
+    };
+  } catch {
+    return { files: new Set<string>(), dirs: [] };
+  }
+}
+
+const SKIPPED = ignoredAndUntracked();
+
+function cannotReachRepository(file: string): boolean {
+  return SKIPPED.files.has(file) || SKIPPED.dirs.some((dir) => file.startsWith(dir));
+}
 
 const SCANNED_EXTENSIONS = new Set([
   '.ts',
@@ -109,6 +164,8 @@ function scan(): Finding[] {
   for (const file of walk(ROOT)) {
     // Never scan this file: it necessarily contains the patterns themselves.
     if (file === resolve(import.meta.dirname, 'scan-secrets.ts')) continue;
+    // Cannot reach the repository — see `ignoredAndUntracked`.
+    if (cannotReachRepository(file)) continue;
 
     const lines = readFileSync(file, 'utf8').split('\n');
     lines.forEach((line, index) => {

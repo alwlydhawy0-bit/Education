@@ -15,7 +15,7 @@ university, built around practical, evidence-based learning.
 
 ## Quick start
 
-Requires Node 22+, pnpm 10+, PostgreSQL 16+.
+Requires Node 22.12+ (vite 7 needs it), pnpm 10+, PostgreSQL 16+.
 
 ```bash
 pnpm install
@@ -25,18 +25,33 @@ read -rsp 'app password: '      APP_PW      && export APP_PW
 read -rsp 'migrator password: ' MIGRATOR_PW && export MIGRATOR_PW
 
 psql -v app_password="'$APP_PW'" -v migrator_password="'$MIGRATOR_PW'" -f db/bootstrap.sql
+
+# `-O edu_migrator` is not cosmetic. The migration role must OWN the database,
+# or `GRANT USAGE ON SCHEMA public TO edu_app` in migration 0001 cannot take
+# effect — PostgreSQL emits a WARNING, not an error, so the migration reports
+# success and the API then fails on every query with "relation does not exist".
 createdb -O edu_migrator edu_dev
 
+# The migration runner reads DATABASE_URL. Supply the MIGRATOR url inline here;
+# the .env file keeps DATABASE_URL pointed at the application role.
 DATABASE_URL="postgres://edu_migrator:$MIGRATOR_PW@127.0.0.1:5432/edu_dev" pnpm db:migrate
 
-cp .env.example .env      # then edit DATABASE_URL to use edu_app, not edu_migrator
-pnpm --filter @edu/api dev
-pnpm --filter @edu/web dev
+cp .env.example .env      # then set DATABASE_URL to the edu_app credentials
+pnpm --filter @edu/api dev   # http://127.0.0.1:3000 — loads ../../.env
+pnpm --filter @edu/web dev   # http://localhost:5173 — proxies /api to the API
 ```
+
+Open <http://localhost:5173>. The dev server proxies `/api` to the API, so both
+sides share one origin and the session cookie works without CORS.
 
 The application connects as `edu_app` (non-superuser, `NOBYPASSRLS`). Connecting
 as a superuser or as the migrator **disables Row-Level Security** and removes a
 whole security layer.
+
+Only `pnpm --filter @edu/api dev` loads `.env` (via Node's
+`--env-file-if-exists`). The `start` script deliberately does not: in a deployed
+environment configuration comes from the environment, and a missing value should
+fail loudly rather than be filled in from a stray file.
 
 ## Verification
 

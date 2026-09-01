@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { dirname, join, relative, resolve } from 'node:path';
 
 /**
  * The deployment build configuration must describe the repository it is in.
@@ -21,6 +21,7 @@ import { join, resolve } from 'node:path';
  * Nothing here contacts Vercel. It checks internal consistency only.
  */
 const ROOT = resolve(import.meta.dirname, '../..');
+const WEB_VITE_CONFIG = join(ROOT, 'apps/web/vite.config.ts');
 
 interface VercelConfig {
   framework?: string | null;
@@ -74,6 +75,37 @@ describe('vercel.json describes this repository', () => {
     expect(viteConfig).not.toMatch(/\broot\s*:/);
     expect(viteConfig).not.toMatch(/\boutDir\s*:/);
     expect(vercel.outputDirectory).toBe('apps/web/dist');
+  });
+
+  it('derives that path from where the vite config actually lives', () => {
+    // Task 009D: Vercel reported `No Output Directory named "dist" found`. The
+    // string assertion above would still have passed if the web app moved, so
+    // this DERIVES the expected path from the filesystem instead of restating
+    // it. Vite's root is the directory it runs in — which `pnpm --filter` makes
+    // the package directory — and with outDir unset the output is `<root>/dist`.
+    const webDir = relative(ROOT, dirname(WEB_VITE_CONFIG));
+    expect(vercel.outputDirectory).toBe(`${webDir}/dist`);
+  });
+
+  it('the output path is relative, never absolute or parent-escaping', () => {
+    // Vercel resolves outputDirectory relative to the Root Directory. A leading
+    // slash or `../` would resolve outside the deployment and fail in a way the
+    // build log describes only as "not found".
+    const out = vercel.outputDirectory ?? '';
+    expect(out.startsWith('/')).toBe(false);
+    expect(out.split('/')).not.toContain('..');
+  });
+
+  it('when a build output exists on disk, it is at exactly that path', () => {
+    // Runs no build of its own — that belongs to the build step, not the test
+    // suite. But after any local or CI build, this validates the real artifact
+    // rather than the claim about it.
+    const declared = join(ROOT, vercel.outputDirectory ?? '');
+    if (!existsSync(declared)) return;
+    expect(existsSync(join(declared, 'index.html'))).toBe(true);
+    // And nothing was emitted at the repository root, which is the location
+    // Vercel was looking in when it failed.
+    expect(existsSync(join(ROOT, 'dist'))).toBe(false);
   });
 
   it('there is exactly one index.html, and it is not at the repository root', () => {

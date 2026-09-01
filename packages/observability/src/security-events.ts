@@ -108,6 +108,37 @@ export const SecurityEventType = {
   EDUCATION_LEVEL_CHANGED: 'content.education_level_changed',
 
   /**
+   * Assessment attempts.
+   *
+   * An attempt is the moment the platform starts measuring a child, so the
+   * lifecycle is recorded for the same reason a roster change is: "why does
+   * this mark exist, and who was watching?" has to be answerable from the audit
+   * trail alone.
+   *
+   * ATTEMPT_LIMIT_EXCEEDED is separate from a plain `authz.denied` because it
+   * means something different. A denial says an actor reached for something
+   * they may not have; this says a learner is repeatedly re-attempting one
+   * assessment, which — on an assessment scored by exact answer match — is the
+   * shape of probing for the key rather than of studying.
+   *
+   * SUSPICIOUS_SUBMISSION is emitted for a payload NO INTERFACE CAN PRODUCE: a
+   * question belonging to another assessment, an option belonging to another
+   * question, or more selections than the question type permits. Each of those
+   * is refused by the database regardless; the event exists because the person
+   * sending them is doing something a learner sitting a test cannot do by
+   * accident.
+   *
+   * Deliberately NOT declared: an event per submission denial. `authz.denied`
+   * already carries those, and a second path to the same fact would split the
+   * detection rule that reads them (section 24 of the task, and the reason
+   * `RESERVED_SECURITY_EVENT_TYPES` exists at all).
+   */
+  ASSESSMENT_ATTEMPT_STARTED: 'assessment.attempt_started',
+  ASSESSMENT_SUBMITTED: 'assessment.submitted',
+  ASSESSMENT_ATTEMPT_LIMIT_EXCEEDED: 'assessment.attempt_limit_exceeded',
+  ASSESSMENT_SUSPICIOUS_SUBMISSION: 'assessment.suspicious_submission',
+
+  /**
    * Emitted on every authorization denial. A burst of these from one actor
    * across many resource ids is the primary IDOR/BOLA probing signal.
    */

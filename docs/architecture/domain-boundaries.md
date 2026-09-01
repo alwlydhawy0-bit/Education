@@ -74,6 +74,55 @@ model — only a **platform operator** (global `security_admin`) may create one,
 and every other domain treats an organization id as a value it was given, never
 one it may choose.
 
+### `assessment` — **[BUILT]**
+
+Owns `learning_activities`, `assessments`, `assessment_questions`,
+`assessment_options`, `assessment_answer_keys`, `assessment_attempts` and
+`assessment_attempt_answers`. The domain where the platform first computes a
+judgement about a child rather than recording one.
+
+**It owns the generic ACTIVITY boundary as well as assessments**, and that is a
+deliberate temporary arrangement rather than a permanent shape.
+`learning_activities` carries identity, a lesson, a type, ordering and a
+lifecycle, and knows nothing about what an activity DOES; `assessments` is a 1:1
+extension of an activity whose type is `assessment`. When a second activity type
+is implemented — the 2D experiment engine is the expected one — the activity
+table is extracted into its own `activities` module, which is a rename plus a
+policy split rather than a redesign, because nothing about the table presumes
+assessments.
+
+An assessment has **no lifecycle of its own**: the activity's status is its
+status. Two independently publishable rows describing one thing a learner sees
+can disagree, and every combination would then need a rule.
+
+**It reads no other domain's tables**, and one cross-domain write is arranged by
+dependency inversion: the module declares a `LessonEngagementRecorder` interface
+that the `progress` module happens to satisfy, and `app.ts` joins them. The
+interface has no parameter through which submitting an assessment could mark a
+lesson COMPLETE.
+
+The invariants live in the database:
+
+- **The answer key is a separate table** with a policy that has no learner
+  branch. Not a column, because row-level security cannot say "read this row but
+  not that column". A composite foreign key means a key row can only ever name
+  an option of its own question.
+- **The score is computed by a trigger**, from `app_score_attempt` — a SECURITY
+  DEFINER function granted to no role. The application sets `status` and nothing
+  else, so a forged score is overwritten rather than rejected.
+- **A submitted attempt is frozen**, and there is no DELETE grant anywhere in
+  the domain.
+- **Questions, options and keys are writable only while the activity is a
+  draft**, so the paper a learner sat is permanently the paper their mark was
+  computed against.
+- **Publication validates the whole question set**, once, which is the only
+  moment that means anything given the immutability above.
+
+Visibility is composed one level at a time through INVOKER SQL functions —
+activity asks `lessons_select`, assessment asks the activity, question asks the
+assessment — so there is exactly one definition of lesson visibility in the
+system and everything downstream inherits it.
+
 ### `progress` — **[BUILT]**
 
 Owns `lesson_progress`: one row per (learner, lesson), recording that a learner
@@ -207,7 +256,7 @@ written, not after.
 A domain can be extracted into its own service when its tables are touched only
 by it, its contract is explicit, it has no imports from sibling modules, and its
 tests do not depend on another domain's internals. `notebook`, `curriculum`,
-`class-courses`, `progress` and `organizations` meet this cleanly today; `relationships` meets it except for the
+`class-courses`, `progress`, `assessment` and `organizations` meet this cleanly today; `relationships` meets it except for the
 `display_name` join noted above, and `identity`/`users` share the `users` table.
 Both exceptions are recorded rather than papered over — enforced by `tests/architecture/dependency-rules.test.ts`, not by
 inspection.

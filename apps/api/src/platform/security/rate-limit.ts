@@ -98,6 +98,39 @@ export const RATE_LIMIT_POLICIES = {
     rationale: 'Reset-token flooding, inbox harassment, and account enumeration.',
   },
 
+  /**
+   * Starting an assessment attempt.
+   *
+   * The abuse this bounds is answer-key probing: start an attempt, submit a
+   * guess, read the score, vary one answer, repeat. It is a SECONDARY control
+   * and the number reflects that honestly.
+   *
+   * The primary control is the per-assessment attempt limit, which is per
+   * LEARNER and enforced by a database trigger over a definer count. This
+   * limiter is keyed by IP (see the header) and a classroom shares one, so a
+   * limit tight enough to stop a determined grinder would also stop a class of
+   * thirty sitting a test together. 200 in fifteen minutes leaves a full class
+   * ample room while cutting a scripted grinder from the global 300/minute to
+   * roughly 13/minute.
+   */
+  assessmentAttempt: {
+    name: 'assessment.attempt',
+    max: 200,
+    timeWindow: '15 minutes',
+    rationale: 'Answer-key probing through repeated attempts. Secondary to the per-learner limit.',
+  },
+
+  /**
+   * Submitting an attempt. Scoring runs a query per question inside a trigger,
+   * so a submission is also the most expensive request in this domain.
+   */
+  assessmentSubmit: {
+    name: 'assessment.submit',
+    max: 200,
+    timeWindow: '15 minutes',
+    rationale: 'Repeated scoring is the expensive half of answer-key probing.',
+  },
+
   /** Guessing a verification token is the attack this bounds. */
   authVerifyEmail: {
     name: 'auth.verify_email',

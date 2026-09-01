@@ -13,6 +13,9 @@ import {
   createEducationLevel,
   createLesson,
   createOrganization,
+  createActivity,
+  createAttempt,
+  createQuestion,
   createUnit,
   createUser,
   linkGuardian,
@@ -1025,5 +1028,292 @@ describe('learner progress, with RLS disabled', () => {
     });
     expect(response.statusCode).toBe(200);
     expect(response.json<{ items: unknown[] }>().items).toHaveLength(2);
+  });
+});
+
+/**
+ * Assessments and attempts, with the database gate removed.
+ *
+ * This is the half of Task 008's claim that is easiest to state and hardest to
+ * have earned. Migration 0019 is unusually load-bearing — the answer key has
+ * its own policy, the scorer is granted to nobody, submitted attempts are
+ * frozen by a trigger — so a suite that ran only with RLS active would prove
+ * that the DATABASE is careful and say nothing about the application.
+ *
+ * Here every row is visible to the client. Whatever still refuses, refuses
+ * because of the policy engine and `Guarded`.
+ *
+ * WHAT THIS BLOCK CANNOT SHOW, stated plainly rather than glossed:
+ *
+ * 1. The answer key's non-disclosure and the score's authorship are DATABASE
+ *    properties by design — the key lives behind a policy this role bypasses,
+ *    and the scorer runs inside a trigger. With RLS off, a direct query for the
+ *    key WOULD succeed. What is asserted below is that no ENDPOINT returns it
+ *    even then, which is the application-layer half of the guarantee and all
+ *    this suite can honestly claim. The other half is
+ *    `tests/integration/rls-assessment.test.ts`.
+ *
+ * 2. Two policy branches were verified by DEFECT INJECTION to be invisible to
+ *    this suite, and are recorded rather than counted as covered:
+ *
+ *    - Deleting the `isOwn` check from the attempt policy leaves these tests
+ *      green, because `learnerMayAttempt` is computed in SQL as
+ *      `user_id = app_current_actor() AND ...` and so already encodes
+ *      ownership. The branch IS load-bearing — removing it fails eight cases in
+ *      `tests/unit/assessment-policy.test.ts` — but this file is not where that
+ *      is demonstrated.
+ *    - Coarsening the teacher rule from "shares this class" to `teacherOf`
+ *      likewise leaves these green, because the repository scopes the class
+ *      listing in SQL before the policy is consulted. It fails the unit table.
+ *
+ *    Both are the same shape as the caveat recorded for learner progress in
+ *    Task 007: a redundant gate makes its neighbour hard to observe, which is
+ *    worth knowing when reading a green suite.
+ */
+describe('assessments, with RLS disabled', () => {
+  /**
+   * Publishes an activity outside the application, so the suite can construct a
+   * published assessment without exercising the authoring endpoints it is not
+   * testing. Uses the no-RLS role, which is what this whole file connects as.
+   */
+  async function publishDirectly(activityId: string): Promise<void> {
+    const client = new pg.Client({ connectionString: NO_RLS_URL });
+    await client.connect();
+    try {
+      await client.query(
+        `UPDATE learning_activities SET status='published', published_at=now() WHERE id=$1`,
+        [activityId],
+      );
+    } finally {
+      await client.end();
+    }
+  }
+
+  async function seedAndLogin(
+    email: string,
+    roles: readonly string[] | undefined,
+    organizationId: string | null,
+  ): Promise<{ id: string; cookie: string }> {
+    const user = await createUser({
+      email,
+      ...(roles ? { roles } : {}),
+      organizationId,
+      passwordHash: await hashPassword(PASSWORD),
+    });
+    const loggedIn = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: writeHeaders,
+      payload: { email, password: PASSWORD },
+    });
+    expect(loggedIn.statusCode).toBe(204);
+    return {
+      id: user.id,
+      cookie: `edu_session=${sessionCookieFrom(loggedIn.headers['set-cookie'])}`,
+    };
+  }
+
+  async function world() {
+    const orgA = await createOrganization('Assess School A');
+    const orgB = await createOrganization('Assess School B');
+    const levelId = await createEducationLevel();
+
+    const learner = await seedAndLogin('nrls-as-learner@test.local', undefined, orgA);
+    const peer = await seedAndLogin('nrls-as-peer@test.local', undefined, orgA);
+    const teacher = await seedAndLogin('nrls-as-teacher@test.local', ['teacher'], orgA);
+    const otherTeacher = await seedAndLogin('nrls-as-teacher2@test.local', ['teacher'], orgA);
+    const guardian = await seedAndLogin('nrls-as-guardian@test.local', ['guardian'], orgA);
+    const adminB = await seedAndLogin('nrls-as-admin-b@test.local', ['admin'], orgB);
+
+    const classA1 = await createClass(orgA, 'AA1');
+    const classA2 = await createClass(orgA, 'AA2');
+    await addClassMember(classA1, learner.id);
+    await addClassMember(classA2, peer.id);
+    await assignTeacher(teacher.id, classA1);
+    await assignTeacher(otherTeacher.id, classA2);
+    await linkGuardian(guardian.id, learner.id, 'verified');
+
+    const curriculumA = await createCurriculum({
+      organizationId: orgA,
+      code: 'assess',
+      status: 'published',
+    });
+    const course = await createCourse({
+      organizationId: orgA,
+      curriculumId: curriculumA,
+      levelId,
+      title: 'Assessed Course',
+      status: 'published',
+    });
+    const unit = await createUnit({ courseId: course, title: 'AU', status: 'published' });
+    const lesson = await createLesson({ unitId: unit, title: 'AL', status: 'published' });
+    await assignCourseToClass({ classId: classA1, courseId: course });
+
+    const { activityId, assessmentId } = await createActivity({
+      lessonId: lesson,
+      title: 'Guarded Quiz',
+      status: 'draft',
+      maxAttempts: 2,
+    });
+    const q = await createQuestion({
+      assessmentId: assessmentId!,
+      options: ['Right', 'Wrong'],
+      correctOptions: [0],
+    });
+    // Published in a second statement, as a reviewer would: the publication
+    // trigger validates the question set, which does not exist at insert time.
+    await publishDirectly(activityId);
+
+    // A DRAFT assessment on the SAME reachable lesson — the VULN-027 shape.
+    const draft = await createActivity({ lessonId: lesson, title: 'Draft', status: 'draft' });
+
+    const attemptId = await createAttempt({
+      assessmentId: assessmentId!,
+      userId: learner.id,
+      status: 'submitted',
+    });
+
+    return {
+      learner,
+      peer,
+      teacher,
+      otherTeacher,
+      guardian,
+      adminB,
+      classA1,
+      lesson,
+      activityId,
+      assessmentId: assessmentId!,
+      draftAssessmentId: draft.assessmentId!,
+      attemptId,
+      q,
+    };
+  }
+
+  it('still refuses a peer another learner’s attempt', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/attempts/${w.attemptId}`,
+      headers: { cookie: w.peer.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still refuses a peer submitting another learner’s attempt', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/attempts/${w.attemptId}/submit`,
+      headers: { ...writeHeaders, cookie: w.peer.cookie },
+      payload: { answers: [] },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still refuses a teacher of another class', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/attempts/${w.attemptId}`,
+      headers: { cookie: w.otherTeacher.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still refuses an administrator of another organization', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${w.classA1}/students/${w.learner.id}/attempts`,
+      headers: { cookie: w.adminB.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still refuses a guardian an unlinked child', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/guardians/children/${w.peer.id}/attempts`,
+      headers: { cookie: w.guardian.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still shows a verified guardian their own child', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/guardians/children/${w.learner.id}/attempts`,
+      headers: { cookie: w.guardian.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ items: unknown[] }>().items).toHaveLength(1);
+  });
+
+  it('still refuses a learner a DRAFT assessment, and an attempt at one', async () => {
+    // The application half of VULN-027's fix. With RLS off, the insert policy
+    // that refuses this is gone — so what refuses here is the policy's
+    // `learnerMayAttempt` check, computed from the activity's status.
+    const w = await world();
+    expect(
+      (
+        await app.inject({
+          method: 'GET',
+          url: `/api/v1/assessments/${w.draftAssessmentId}`,
+          headers: { cookie: w.learner.cookie },
+        })
+      ).statusCode,
+    ).toBe(404);
+    expect(
+      (
+        await app.inject({
+          method: 'POST',
+          url: `/api/v1/assessments/${w.draftAssessmentId}/attempts`,
+          headers: { ...writeHeaders, cookie: w.learner.cookie },
+          payload: {},
+        })
+      ).statusCode,
+    ).toBe(404);
+  });
+
+  it('still refuses a learner an assessment their class is not assigned', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/assessments/${w.assessmentId}/attempts`,
+      headers: { ...writeHeaders, cookie: w.peer.cookie },
+      payload: {},
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still returns no answer key, to anybody, on any endpoint', async () => {
+    // The key IS readable by this database role — it bypasses the policy that
+    // hides it. So this asserts the application-layer half: no endpoint puts it
+    // in a response, because no response schema has a field for it.
+    const w = await world();
+    for (const [url, cookie] of [
+      [`/api/v1/assessments/${w.assessmentId}`, w.learner.cookie],
+      [`/api/v1/attempts/${w.attemptId}`, w.learner.cookie],
+      [`/api/v1/me/attempts`, w.learner.cookie],
+      [`/api/v1/attempts/${w.attemptId}`, w.teacher.cookie],
+    ] as const) {
+      const response = await app.inject({ method: 'GET', url, headers: { cookie } });
+      expect(response.statusCode).toBe(200);
+      expect(response.body).not.toMatch(/isCorrect|answerKey|correctOption/i);
+    }
+  });
+
+  it('still refuses a learner authoring an activity', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/lessons/${w.lesson}/activities`,
+      headers: { ...writeHeaders, cookie: w.learner.cookie },
+      payload: { activityType: 'assessment', title: 'Mine', assessment: {} },
+    });
+    expect(response.statusCode).toBe(404);
   });
 });

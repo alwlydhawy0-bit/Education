@@ -254,6 +254,9 @@ describe('rule 6 — protected resources are returned guarded', () => {
       ['class-courses/class-courses.repository.ts', 'findById'],
       ['class-courses/class-courses.repository.ts', 'findActive'],
       ['progress/progress.repository.ts', 'find'],
+      ['assessment/assessment.repository.ts', 'findActivity'],
+      ['assessment/assessment.repository.ts', 'findActivityForAssessment'],
+      ['assessment/assessment.repository.ts', 'findAttempt'],
     ];
     const violations: string[] = [];
     for (const [file, method] of loaders) {
@@ -405,5 +408,83 @@ describe('rule 9 — the application must actually be runnable', () => {
       }
     }
     expect(violations).toEqual([]);
+  });
+});
+
+/**
+ * Rule 10 — the answer key never leaves the database.
+ *
+ * This is the only architecture rule in the file that guards a single table,
+ * and it earns that because the property it protects cannot be re-established
+ * by review once it is lost: a `SELECT` that pulls correctness into a repository
+ * is one careless spread away from a response body, and nobody reading the
+ * response schema would see it.
+ *
+ * The rule is mechanical rather than tasteful. `assessment_answer_keys` may
+ * appear in application CODE only in an INSERT — never after FROM or JOIN — and
+ * `app_score_attempt` may not appear at all, because it is granted to nobody
+ * and calling it would be a permission error at runtime rather than a design
+ * decision at review time.
+ *
+ * Comments are stripped first, for the same reason `importsOf` strips them:
+ * these files EXPLAIN the rule at length, and prose describing what must not
+ * happen is not the thing happening. Every assertion below was verified to fail
+ * when the corresponding query was actually reintroduced.
+ */
+describe('rule 10 — the answer key stays in the database', () => {
+  const apiCode = sourceFiles('apps/api/src').map(
+    (file) => [relative(ROOT, file), stripComments(readFileSync(file, 'utf8'))] as const,
+  );
+
+  it('no application query reads from assessment_answer_keys', () => {
+    // Matches `FROM assessment_answer_keys`, `JOIN assessment_answer_keys`, and
+    // the same with a schema qualifier or extra whitespace.
+    const reads = /\b(from|join)\s+(public\.)?assessment_answer_keys\b/i;
+    const violations = apiCode.filter(([, code]) => reads.test(code)).map(([name]) => name);
+    expect(violations).toEqual([]);
+  });
+
+  it('the answer key is written, and only written', () => {
+    // Every surviving mention must be part of an INSERT. This catches a
+    // subquery or CTE that reads the table under a name the regex above would
+    // miss, by requiring the mentioning line to be the writing one.
+    const violations: string[] = [];
+    for (const [name, code] of apiCode) {
+      for (const line of code.split('\n')) {
+        if (!/assessment_answer_keys/i.test(line)) continue;
+        if (!/insert\s+into\s+assessment_answer_keys/i.test(line)) {
+          violations.push(`${name}: ${line.trim()}`);
+        }
+      }
+    }
+    expect(violations).toEqual([]);
+  });
+
+  it('the scorer is never called from application code', () => {
+    // `app_score_attempt` is granted to no role. It is reachable only from the
+    // submit trigger, which is SECURITY DEFINER for exactly that reason. A call
+    // from here would be a runtime permission error — and, worse, an attempt to
+    // load marks for an attempt without consulting a policy first.
+    const violations = apiCode
+      .filter(([, code]) => /app_score_attempt/.test(code))
+      .map(([name]) => name);
+    expect(violations).toEqual([]);
+  });
+
+  it('no response schema carries a field that could hold a correct answer', () => {
+    // The contracts package is where a leak would have to surface, because
+    // every response in the assessment module is built field by field through
+    // one of these schemas. A property named for correctness is refused here
+    // rather than caught in review.
+    //
+    // `correctOptions` on the AUTHORING request is legitimate and different: it
+    // travels inbound, from an author who already holds the key. Only the
+    // response half of the file is scanned.
+    const forbidden = /\b(isCorrect|correctOptionIds|correctAnswers?|answerKey)\b/;
+    const contract = stripComments(
+      readFileSync(join(ROOT, 'packages/contracts/src/assessment.contract.ts'), 'utf8'),
+    );
+    const responses = contract.slice(contract.indexOf('export const activityResponseSchema'));
+    expect(responses).not.toMatch(forbidden);
   });
 });

@@ -160,3 +160,12 @@ Also absent: progress at course or unit level (only lessons are tracked, and any
 roll-up is the caller's arithmetic); time-on-task or any duration; a class-wide
 view for a teacher (one student at a time); an audit trail of reads; and any
 notification when a learner completes something.
+
+## Where a progress row can come from
+
+A learner writing one, and one other place: submitting an assessment marks its
+lesson ENGAGED. Never complete —
+[the activities & assessments API](assessment.md) is given an interface with no
+parameter through which it could claim otherwise. Passing an assessment is
+evidence about one paper on one day; completion is a claim only the learner may
+author.

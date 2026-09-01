@@ -1,13 +1,13 @@
 # Testing Strategy
 
-**1,098 tests, all executed and passing** as of Task 007.
+**1,288 tests, all executed and passing** as of Task 008.
 
 | Project        | Tests | Needs      | Proves                                                                                                                                |
 | -------------- | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `unit`         | 493   | nothing    | Policy decision tables, `Guarded`, redaction, contracts, config, query validation, security-event recorder, rate-limit policies, i18n |
-| `architecture` | 77    | nothing    | Dependency rules; every security event has an emitter; the app is runnable                                                            |
-| `integration`  | 185   | PostgreSQL | Schema, constraints, RLS, query safety, and that the process actually boots                                                           |
-| `security`     | 343   | PostgreSQL | IDOR/BOLA scenarios A–E, cross-organization isolation, layer isolation, session, CSRF, rate limiting, audit                           |
+| `unit`         | 550   | nothing    | Policy decision tables, `Guarded`, redaction, contracts, config, query validation, security-event recorder, rate-limit policies, i18n |
+| `architecture` | 86    | nothing    | Dependency rules; every security event has an emitter; the app is runnable                                                            |
+| `integration`  | 243   | PostgreSQL | Schema, constraints, RLS, query safety, and that the process actually boots                                                           |
+| `security`     | 409   | PostgreSQL | IDOR/BOLA scenarios A–E, cross-organization isolation, layer isolation, session, CSRF, rate limiting, audit                           |
 
 ```bash
 pnpm test                 # everything
@@ -84,8 +84,31 @@ including the platform operator, and `read`/`list` against every relationship �
 because collapsing them into a single matrix is exactly the mistake the
 asymmetry invites.
 
-**Architecture** — the nine dependency rules, by scanning imports in source,
-plus the rule that every declared security-event type has an emitter.
+Task 008 added three: the activity table (content, with the duty split), the
+attempt WRITE table, and the attempt READ table. Three rather than one for the
+same reason, and because the activity rule and the attempt rule are different in
+kind — one is about material, the other about a person.
+
+What is NOT in the unit project, and deliberately: the scoring rule. It lives in
+`app_score_attempt`, in SQL, granted to no role, precisely so the answer key
+never enters application memory. A TypeScript scorer would be unit-testable and
+would be a second implementation that could disagree with the one that actually
+marks children's work, so the rule is enumerated against a real database instead
+(below). The pure domain here holds only the payload validation and
+`selectionLimitFor`, which is disclosure-relevant in its own right: it must
+derive the number of selections from the question TYPE and never from the key.
+
+**Architecture** — the ten dependency rules, by scanning imports in source, plus
+the rule that every declared security-event type has an emitter.
+
+Rule 10 (Task 008) is the odd one: it guards a single table rather than a
+layer. `assessment_answer_keys` may appear in application code only in an
+`INSERT`, `app_score_attempt` may not appear at all, and no response schema may
+carry a field named for correctness. It earns its place because the property
+cannot be re-established by review once lost — a `SELECT` that pulls correctness
+into a repository is one careless spread from a response body. All four
+assertions were verified to fail when the corresponding query or field was
+actually reintroduced.
 
 **Integration** — RLS by attack (read/update/delete/forge by exact id, unfiltered
 `SELECT *`, no actor set, pool-reuse leakage), privilege boundaries (`user_roles`
@@ -98,6 +121,23 @@ instant revocation on all three triggers. Three of them FORCE rows the database
 normally refuses — by disabling the scope trigger for the insert — because a
 read-path defence that is only ever reached through a write-path trigger has
 not actually been tested.
+
+`rls-assessment.test.ts` (Task 008) is 58 checks and is the ONLY place the
+scoring rule is tested, for the reason given above: an entirely correct paper, a
+blank one, a partly-correct multiple-choice answer (no partial credit), a
+correct set plus one wrong option, order-independence, and a pass exactly AT the
+threshold rather than above it. It also asserts the answer key is invisible to a
+learner with arbitrary SQL — including through a join and a per-question count,
+so even the SIZE of a key is not disclosed — that the scorer is
+permission-denied to the application role, that a forged score is overwritten on
+both INSERT and UPDATE, and that each of the five score CHECK constraints fires
+with the sanitising trigger disabled.
+
+Two of its assertions use a `changedRows` helper rather than a thrown error, and
+the distinction is worth stating: an RLS `USING` clause does not raise, it makes
+the row invisible, so the statement matches ZERO rows and SUCCEEDS. A suite that
+treated "no error" as "allowed" would report a blocked write as an allowed one.
+That was found by these tests failing against a database behaving correctly.
 
 `rls-progress.test.ts` (Task 007) is 29 checks over the read/write asymmetry as
 `edu_app`: the owner writing and every third party failing to, the four reader
@@ -145,6 +185,17 @@ coarsening the teacher rule from "shares this class" to "teaches any class"
 leaves layered-defence green, because the repository's SQL scoping fires before
 the policy. That is recorded in a comment in the file rather than presented as
 coverage the suite does not have.
+
+Task 008 added 66 more: `assessment.test.ts`, in which each of the fifteen
+scenarios the task names is marked A to O in the test NAME so the report's
+matrix traces back to a test that ran rather than to a claim; plus an
+`assessments, with RLS disabled` block. Two further branches were verified by
+injection to be invisible to the layered-defence suite and are recorded in a
+comment there rather than counted: deleting the attempt policy's ownership check
+leaves it green (the SQL-computed `learnerMayAttempt` already encodes ownership,
+and the branch fails eight UNIT cases instead), and coarsening the teacher rule
+does the same. A redundant gate makes its neighbour hard to observe, which is
+worth knowing when reading a green suite.
 
 **The two gates are tested with the other removed.** This is the claim that
 would be easiest to state and hardest to have earned, so it has a test on each

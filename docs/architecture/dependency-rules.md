@@ -77,7 +77,7 @@ protected resource means adding a line — which is the moment somebody asks
 whether the new loader is guarded. Covered today: `notebook`, `users` (user and
 profile), `organizations`, `relationships` (classes and teacher assignments),
 guardian links, the four levels of the content tree, class–course assignments,
-and lesson progress.
+lesson progress, learning activities and assessment attempts.
 
 ### 7. Only `platform/db.ts` constructs a connection pool
 
@@ -109,6 +109,19 @@ because Vitest resolved them through a plugin (VULN-004). The second half of the
 rule was added minutes later, when a bulk rename pointed `.tsx` components at
 `.ts` paths: `tsc` accepted it, Rollup did not. Both halves check the filesystem,
 which is what Node and Rollup actually do.
+
+### 10. The answer key never leaves the database
+
+`assessment_answer_keys` may appear in application code ONLY in an `INSERT` —
+never after `FROM` or `JOIN` — and `app_score_attempt` may not appear at all.
+No response schema may carry a field named for correctness.
+
+The only rule here that guards a single table, and it earns that: the property
+cannot be re-established by review once lost. A `SELECT` that pulls correctness
+into a repository is one careless spread away from a response body, and nobody
+reading the response schema would see it. The test strips comments first — these
+files explain the rule at length, and prose about what must not happen is not
+the thing happening.
 
 ## Allowed dependencies, in one table
 

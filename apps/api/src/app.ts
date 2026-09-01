@@ -34,6 +34,9 @@ import { createGuardiansService } from './modules/relationships/guardians.servic
 import { progressRepository } from './modules/progress/progress.repository.ts';
 import { createProgressService } from './modules/progress/progress.service.ts';
 import { registerProgressRoutes } from './modules/progress/progress.routes.ts';
+import { assessmentRepository } from './modules/assessment/assessment.repository.ts';
+import { createAssessmentService } from './modules/assessment/assessment.service.ts';
+import { registerAssessmentRoutes } from './modules/assessment/assessment.routes.ts';
 import { classCoursesRepository } from './modules/class-courses/class-courses.repository.ts';
 import { createClassCoursesService } from './modules/class-courses/class-courses.service.ts';
 import { registerClassCourseRoutes } from './modules/class-courses/class-courses.routes.ts';
@@ -254,6 +257,23 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     securityEvents,
   });
 
+  const assessment = createAssessmentService({
+    db,
+    repository: assessmentRepository,
+    engine,
+    securityEvents,
+    /**
+     * The one place the assessment domain and the progress domain meet.
+     *
+     * `assessment` declares a `LessonEngagementRecorder` it needs; `progress`
+     * happens to satisfy it. Neither imports the other — dependency rule 3
+     * forbids it and rule 4 says this file is where they are joined — and the
+     * interface is narrow enough that submitting an assessment can only touch
+     * a lesson's "last seen", never claim it was completed.
+     */
+    progress: { noteEngagement: progressRepository.noteEngagement },
+  });
+
   const notebook = createNotebookService({
     db,
     repository: notebookRepository,
@@ -290,6 +310,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerCurriculumRoutes(app, curriculum);
   registerClassCourseRoutes(app, classCourses);
   registerProgressRoutes(app, progress);
+  registerAssessmentRoutes(app, assessment);
 
   return { app, db };
 }

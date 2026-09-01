@@ -174,4 +174,7 @@ units and lessons are in
 [the curriculum & course API](curriculum.md), and course-to-class assignment in
 [the class–course assignment API](class-courses.md). What a learner has studied
 is in [the learner progress API](progress.md) — the first surface where a user
-authors a record about themselves that other people may read.
+authors a record about themselves that other people may read — and what they
+can DO inside a lesson, including assessments and the marks they produce, is in
+[the activities & assessments API](assessment.md), the first surface where the
+platform authors a record about a user.

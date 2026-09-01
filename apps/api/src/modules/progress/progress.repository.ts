@@ -166,6 +166,29 @@ export interface ProgressRepository {
     classId: string,
     query: ListProgressQuery,
   ): Promise<Guarded<ProgressRecord>[]>;
+  /**
+   * Records that the learner engaged with a lesson, WITHOUT advancing status.
+   *
+   * Added in Task 008 so that submitting an assessment leaves a mark on the
+   * lesson's progress row. It satisfies the `LessonEngagementRecorder`
+   * interface the assessment module declares; the two modules never import each
+   * other, they are joined in `app.ts` (dependency rules 3 and 4).
+   *
+   * WHAT IT CANNOT DO, and why the signature has no status parameter:
+   *
+   *   - It cannot mark a lesson COMPLETE. Passing an assessment is evidence
+   *     about one paper on one day, and inferring completion from it is exactly
+   *     the mastery reasoning the platform does not do. Completion is a claim
+   *     only the learner may author.
+   *   - It cannot move a status backwards, or forwards. An existing row has
+   *     only its timestamps touched, so a learner who had already completed the
+   *     lesson stays completed and the forward-only trigger has nothing to
+   *     refuse.
+   *   - It cannot write for anybody else: `user_id` is the parameter the caller
+   *     takes from the session, and the RLS insert policy requires it to equal
+   *     `app_current_actor()` regardless.
+   */
+  noteEngagement(tx: Tx, learnerId: string, lessonId: string): Promise<void>;
 }
 
 async function readOne(tx: Tx, id: string): Promise<ProgressRecord | null> {
@@ -272,6 +295,20 @@ export const progressRepository: ProgressRepository = {
       [learnerId, query.limit, query.offset, query.status ?? null, query.courseId ?? null],
     );
     return rows.map((row) => Guarded.of(toRecord(row), toResource(row)));
+  },
+
+  async noteEngagement(tx, learnerId, lessonId) {
+    // `DO UPDATE ... SET last_accessed_at` rather than `DO NOTHING`, because a
+    // returning learner's re-engagement is worth recording; and it touches no
+    // status column, so `lesson_progress_guard` sees nothing to refuse even on
+    // a row that is already `completed`.
+    await tx.query(
+      `INSERT INTO lesson_progress (user_id, lesson_id, status, last_accessed_at)
+       VALUES ($1, $2, 'in_progress', now())
+       ON CONFLICT (user_id, lesson_id) DO UPDATE
+          SET last_accessed_at = now(), updated_at = now()`,
+      [learnerId, lessonId],
+    );
   },
 
   async listForLearnerInClass(tx, learnerId, classId, query) {

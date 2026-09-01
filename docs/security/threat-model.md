@@ -380,6 +380,115 @@ through `withActor`/`withoutActor`.
   archived or edited underneath it. The stored titles are read live, not
   snapshotted, so a renamed lesson renames history.
 
+### T3o — Answer-key disclosure (added in Task 008)
+
+- **Attack surface:** every read path that touches an assessment — the metadata
+  endpoint, the paper handed out at the start of an attempt, the result, a
+  teacher's or guardian's view, the audit trail, and a learner's own database
+  connection.
+- **Why it matters:** a disclosed key makes the whole assessment worthless as
+  evidence, silently and retroactively — every mark already awarded becomes
+  unreliable, and nobody can tell which ones. It is the one defect in this
+  domain that cannot be repaired after the fact.
+- **Mitigations [BUILT]:** the key is a SEPARATE TABLE, not a column, because
+  row-level security cannot say "read this row but not that column". Its policy
+  admits only a platform operator or an actor holding a content permission in
+  the owning school — there is no learner branch to narrow. Nothing in
+  `apps/api` reads the table (architecture rule 10 asserts it mechanically: it
+  may appear only in an INSERT, never after FROM or JOIN). No response schema
+  has a field that could hold correctness, and rule 10 refuses one that grows
+  a field named for it. The scorer, `app_score_attempt`, compares the key inside
+  the database and returns two integers; it is granted to NO role. Per-question
+  correctness is not returned even after submission, because on a two-option
+  question it _is_ the key. `selectionLimit` is derived from the question type,
+  never the key, so the size of a multiple-choice key is not published either.
+- **Verification:** RLS tests reading the table as a learner, a guardian, a
+  security administrator and a foreign teacher with arbitrary SQL, including a
+  join and a per-question count; a permission-denied assertion on the scorer;
+  end-to-end response-body scans on every endpoint; defect injection confirming
+  that widening the policy fails three tests and that a key-reading join or an
+  `isCorrect` field fails the architecture rule; and a live log scan for every
+  option body and every key option id after driving the API.
+- **Residual risk:** every teacher in a school can read every key in it, because
+  `teacher` carries `content:author` (RISK-ASSESS-02). Nothing records that they
+  did (RISK-ASSESS-03).
+
+### T3p — Forged or tampered marks (added in Task 008)
+
+- **Attack surface:** `POST /api/v1/attempts/:id/submit`, and any statement that
+  could write a result column.
+- **Why it matters:** a mark is a claim the platform makes about a child. If a
+  score can be supplied, the record stops being evidence — and the interested
+  party is exactly the person best placed to supply one.
+- **Mitigations [BUILT]:** the application computes no score and has none to
+  send; the submission statement sets `status` alone. A BEFORE UPDATE trigger
+  assigns score, maximum, percentage, pass flag and submission time from
+  `app_score_attempt`, so a forged value is OVERWRITTEN rather than rejected —
+  there is no code path, correct or compromised, that writes one. The strict
+  contract refuses a `score` field outright at the edge. `attempt_number` is
+  likewise assigned by an insert trigger from a definer count. CHECK constraints
+  refuse a negative score, a score above the maximum, a percentage outside
+  0–100, and a result on a row that is not submitted. A submitted attempt is
+  frozen by the trigger and, independently, by the RLS update policy; no table
+  in the domain has a DELETE grant.
+- **Verification:** forged score and forged result asserted on both INSERT and
+  UPDATE, in SQL and over HTTP; the freeze asserted twice, once through RLS
+  (zero rows changed) and once as superuser with RLS irrelevant (the trigger
+  raises); each CHECK constraint verified to fire with the sanitising trigger
+  disabled; defect injection confirming that letting the trigger keep a supplied
+  score fails the test.
+- **Residual risk:** an operator with direct database access can disable a
+  trigger. That is true of every table and is bounded by infrastructure
+  controls, not by this model.
+
+### T3q — Answer-key probing through repeated attempts (added in Task 008)
+
+- **Attack surface:** `POST /api/v1/assessments/:id/attempts` followed by a
+  submission, in a loop.
+- **Why it matters:** an assessment scored by exact match is an oracle. Submit,
+  read the score, vary one answer, repeat — and with enough attempts the key
+  falls out without ever reading it.
+- **Mitigations [BUILT]:** `max_attempts` has NO unlimited value (1–50), and the
+  limit is enforced by a trigger over a SECURITY DEFINER count, so an attempt
+  RLS had hidden still counts. Questions are handed out only when an attempt is
+  STARTED, so harvesting the bank is bounded by the same limit; re-reading a
+  submitted attempt returns no questions. Exceeding the limit emits
+  `assessment.attempt_limit_exceeded` rather than a plain denial, because
+  repeated re-attempts at one assessment mean something different from a refused
+  reach. A payload naming another assessment's question, another question's
+  option, or more selections than the type permits emits
+  `assessment.suspicious_submission` — no interface produces one.
+- **Verification:** the limit asserted at the boundary and one beyond it, in SQL
+  and over HTTP; the event asserted in the audit trail; the submitted-attempt
+  paper assertion.
+- **Residual risk:** rate limiting is a SECONDARY control here and is honestly
+  weak — it is per-IP, and a classroom shares an IP, so the limit is set where a
+  class of thirty is unaffected (RISK-ASSESS-01). A learner with several
+  accounts, or an assessment configured with 50 attempts, is bounded only by the
+  limit an author chose.
+
+### T3r — Assessment of unreviewed material (added in Task 008)
+
+- **Attack surface:** an assessment id belonging to a DRAFT activity, on a
+  lesson the learner legitimately reaches.
+- **Why it matters:** a draft is unreviewed by definition (ADR 0009). A learner
+  scored against one has been measured by material nobody approved — and a
+  successful attempt confirms the draft's id is real, which is an oracle for
+  content that is meant to be invisible.
+- **Mitigations [BUILT]:** the attempt insert policy requires BOTH
+  `app_actor_sees_assessment` (the publication chain: assessment → activity →
+  lesson) AND `app_actor_may_study_lesson` (the Task 006 class chain). Neither
+  is redundant, and having only the second is exactly the hole probing found —
+  see VULN-027. The policy engine carries the same conjunction as
+  `learnerMayAttempt`, so the gates agree. Publication additionally validates
+  the whole question set, so a learner can never meet a question that cannot be
+  scored fairly.
+- **Verification:** an RLS test starting an attempt at a draft assessment on a
+  reachable lesson; the same over HTTP; the same again with RLS disabled; defect
+  injection confirming that removing the fix fails the RLS test.
+- **Residual risk:** none identified beyond the general one that a reviewer may
+  publish material they did not read (RISK-CONTENT-02).
+
 ### T3 — Account takeover
 
 - **Mitigations [BUILT]:** Argon2id with pinned OWASP parameters; login rate
@@ -494,27 +603,32 @@ ranking, counts, and latency. Semantic similarity must never widen access.
 
 ## 5. Risk register
 
-| ID                 | Risk                                                                                                              | Severity                        | Status                                                                 |
-| ------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------- | ---------------------------------------------------------------------- |
-| RISK-ENUM-01       | Registration discloses whether an email is registered                                                             | Medium                          | Accepted; rate-limited; needs an email pipeline to fix                 |
-| RISK-UPLOAD-01     | No malware scanning                                                                                               | High                            | Surface does not exist yet                                             |
-| RISK-RAG-01        | Retrieval could bypass authorization                                                                              | Critical                        | Design only                                                            |
-| RISK-MFA-01        | No second factor                                                                                                  | Medium                          | Open                                                                   |
-| RISK-RATE-01       | Rate limiting is per-process                                                                                      | Medium                          | Open; needs shared state at >1 replica                                 |
-| RISK-ORG-01        | `notes.organization_id` may go stale on transfer                                                                  | Medium                          | Open; no transfer flow exists                                          |
-| RISK-AUDIT-01      | Audit writes are best-effort                                                                                      | Low now, High once grades exist | Accepted for auth events only                                          |
-| RISK-BREAKGLASS-01 | No audited emergency access path                                                                                  | Low                             | Deliberate                                                             |
-| RISK-GUARD-01      | Guardian verification relies on an administrator's judgement; nothing checks the claim against an external source | Medium                          | Accepted; process control, no technical mitigation                     |
-| RISK-ORGADMIN-01   | A school administrator has full authority over every class, roster and family link in their school                | Medium                          | Accepted; the organization is the smallest unit of trust in the model  |
-| RISK-CONTENT-01    | Lesson bodies are stored verbatim; escaping is the renderer's job, and no renderer exists yet to audit            | Medium                          | Open; HTML is refused as a format, which bounds but does not remove it |
-| RISK-CONTENT-02    | A single account holding both content roles publishes with no second person involved                              | Medium                          | Accepted; recorded in the audit trail                                  |
-| RISK-CONTENT-03    | Any editor in a school can read every draft in that school                                                        | Low                             | Accepted; no smaller unit of trust exists                              |
-| RISK-ASSIGN-01     | A teacher of a class may assign any published course in their school without a second person                      | Low                             | Accepted; the content itself was already reviewed to be published      |
-| RISK-ASSIGN-02     | The unit of assignment is the class; no per-learner differentiation exists                                        | Low                             | Accepted; deliberate scope                                             |
-| RISK-ASSIGN-03     | Reachability is recomputed per request and never cached; untested at scale                                        | Low                             | Open; correctness chosen over throughput                               |
-| RISK-PROGRESS-01   | A school `admin` can read every learning record in their school                                                   | Medium                          | Accepted; the organization is the smallest unit of trust in the model  |
-| RISK-PROGRESS-02   | Reads of a child's progress are not recorded; there is no audit trail of who looked                               | Medium                          | Open; deliberate for now, see limitations.md                           |
-| RISK-PROGRESS-03   | Progress is forward-only; an accidental completion cannot be retracted through the API                            | Low                             | Accepted; integrity of the record chosen over correctability           |
+| ID                 | Risk                                                                                                              | Severity                        | Status                                                                   |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------ |
+| RISK-ENUM-01       | Registration discloses whether an email is registered                                                             | Medium                          | Accepted; rate-limited; needs an email pipeline to fix                   |
+| RISK-UPLOAD-01     | No malware scanning                                                                                               | High                            | Surface does not exist yet                                               |
+| RISK-RAG-01        | Retrieval could bypass authorization                                                                              | Critical                        | Design only                                                              |
+| RISK-MFA-01        | No second factor                                                                                                  | Medium                          | Open                                                                     |
+| RISK-RATE-01       | Rate limiting is per-process                                                                                      | Medium                          | Open; needs shared state at >1 replica                                   |
+| RISK-ORG-01        | `notes.organization_id` may go stale on transfer                                                                  | Medium                          | Open; no transfer flow exists                                            |
+| RISK-AUDIT-01      | Audit writes are best-effort                                                                                      | Low now, High once grades exist | Accepted for auth events only                                            |
+| RISK-BREAKGLASS-01 | No audited emergency access path                                                                                  | Low                             | Deliberate                                                               |
+| RISK-GUARD-01      | Guardian verification relies on an administrator's judgement; nothing checks the claim against an external source | Medium                          | Accepted; process control, no technical mitigation                       |
+| RISK-ORGADMIN-01   | A school administrator has full authority over every class, roster and family link in their school                | Medium                          | Accepted; the organization is the smallest unit of trust in the model    |
+| RISK-CONTENT-01    | Lesson bodies are stored verbatim; escaping is the renderer's job, and no renderer exists yet to audit            | Medium                          | Open; HTML is refused as a format, which bounds but does not remove it   |
+| RISK-CONTENT-02    | A single account holding both content roles publishes with no second person involved                              | Medium                          | Accepted; recorded in the audit trail                                    |
+| RISK-CONTENT-03    | Any editor in a school can read every draft in that school                                                        | Low                             | Accepted; no smaller unit of trust exists                                |
+| RISK-ASSIGN-01     | A teacher of a class may assign any published course in their school without a second person                      | Low                             | Accepted; the content itself was already reviewed to be published        |
+| RISK-ASSIGN-02     | The unit of assignment is the class; no per-learner differentiation exists                                        | Low                             | Accepted; deliberate scope                                               |
+| RISK-ASSIGN-03     | Reachability is recomputed per request and never cached; untested at scale                                        | Low                             | Open; correctness chosen over throughput                                 |
+| RISK-PROGRESS-01   | A school `admin` can read every learning record in their school                                                   | Medium                          | Accepted; the organization is the smallest unit of trust in the model    |
+| RISK-PROGRESS-02   | Reads of a child's progress are not recorded; there is no audit trail of who looked                               | Medium                          | Open; deliberate for now, see limitations.md                             |
+| RISK-PROGRESS-03   | Progress is forward-only; an accidental completion cannot be retracted through the API                            | Low                             | Accepted; integrity of the record chosen over correctability             |
+| RISK-ASSESS-01     | Rate limiting on assessment endpoints is per-IP; a classroom shares one, so the limit is set generously           | Medium                          | Accepted; the per-learner attempt limit is the primary control           |
+| RISK-ASSESS-02     | Every teacher in a school can read every answer key in it, because `teacher` carries `content:author`             | Medium                          | Accepted; a teacher needs the answers, but the audience is wide          |
+| RISK-ASSESS-03     | Nothing records who read an answer key or a child's marks                                                         | Medium                          | Open; same gap as RISK-PROGRESS-02, see limitations.md                   |
+| RISK-ASSESS-04     | An attempt left in progress when access is revoked can never be submitted or cleared                              | Low                             | Accepted; writes require current access, consistently with progress      |
+| RISK-ASSESS-05     | A question cannot be corrected after creation; a typo means publishing a new assessment                           | Low                             | Accepted; immutability chosen so a mark always names the paper it scored |
 
 ## 6. What was NOT threat-modelled
 

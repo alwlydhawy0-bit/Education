@@ -7,17 +7,17 @@ of the documentation — it states what was **not** done.
 ## The headline
 
 **This system is not proven secure, and no such claim is made anywhere in this
-repository.** 1,098 automated tests passed against a real PostgreSQL database.
+repository.** 1,288 automated tests passed against a real PostgreSQL database.
 That establishes that specific, enumerated properties held at a point in time. It
 does not establish the absence of vulnerabilities.
 
 ## What was actually verified
 
-**Updated for Task 007.** The counts and the "not verified" list below reflect
+**Updated for Task 008.** The counts and the "not verified" list below reflect
 the current state.
 
-- 1,098 tests executed and passing: 493 unit, 77 architecture, 185 integration,
-  343 security.
+- 1,288 tests executed and passing: 550 unit, 86 architecture, 243 integration,
+  409 security.
 - Migrations applied cleanly from empty to full schema, repeatedly.
 - RLS enforced against a real non-superuser role — verified by attack, not by
   reading the policy.
@@ -25,6 +25,15 @@ the current state.
   role with `BYPASSRLS`.
 - Secret scan and dependency audit executed; the audit found two real advisories
   (vite high, vitest critical), which were fixed by upgrading, not exempted.
+- **The assessment surface was driven over HTTP against a booted server** — 47
+  checks covering authoring and the duty split, publication validation, the
+  learner flow end to end, server-side scoring, every refused write shape, the
+  teacher, guardian and administrator read paths, the attempt limit, and
+  revocation — with the server log then searched for passwords, database
+  credentials, session tokens, every option body, every question prompt, and
+  every answer-key option id. **None were present.** The only match for
+  `correctOption` was a validation-error field PATH from an author's own
+  rejected request, carrying no values.
 - **The learner progress surface was driven over HTTP against a booted
   server** — 39 checks covering the write asymmetry, every refused write shape,
   the learner's own history, the teacher, guardian and administrator read paths,
@@ -108,6 +117,72 @@ the current state.
   authorization: the caller must authorize first. The service does, and a test
   covers it, but the function itself would return any user's grants if called
   directly by application code.
+
+## Added in Task 008
+
+- **Per-question correctness is never returned, even after submission.** A
+  learner is told their score, not which questions they got wrong. On a
+  two-option question "you got this wrong" IS the answer key, so returning it
+  would undo the control the whole domain is built around. This is a real
+  reduction in what a learner can learn from their own result, and it is the
+  right trade only until a review-after-close feature exists with a teacher's
+  control over when a paper is released. That feature is not built.
+- **A question cannot be corrected once created.** There is no UPDATE grant on
+  `assessment_questions`, `assessment_options` or `assessment_answer_keys`, and
+  no endpoint. A typo in a prompt means creating a new assessment. Immutability
+  was chosen so that a mark always names the exact paper it scored
+  (RISK-ASSESS-05); the cost falls on authors, and it is a real cost.
+- **An attempt left in progress when access is revoked can never be closed.**
+  Writes require current access, consistently with progress, so a learner
+  removed from a class mid-attempt keeps an `in_progress` row forever. Nothing
+  cleans it up and no endpoint can (RISK-ASSESS-04).
+- **Every teacher in a school can read every answer key in it.** The `teacher`
+  role carries `content:author`, which is what the key policy admits. Intended,
+  but a much wider audience than "the person who wrote it" (RISK-ASSESS-02).
+- **Nothing records who read an answer key, or whose marks were looked at.** The
+  same gap as RISK-PROGRESS-02, now over higher-stakes data. An audit event per
+  read remains unbuilt for the same reason: a per-touch event stream on the
+  highest-volume read path needs a retention and access policy that does not
+  exist yet (RISK-ASSESS-03).
+- **Rate limiting on these endpoints is honestly weak.** It is per-IP and a
+  classroom shares an IP, so the limits (200 per 15 minutes) are set where a
+  class of thirty is unaffected. The real control against answer-key probing is
+  the per-learner attempt limit; the limiter is a backstop, and it is still
+  per-process, not distributed (RISK-ASSESS-01, RISK-RATE-01).
+- **The scoring rule is enforced in SQL and has no TypeScript counterpart.**
+  That is deliberate — the answer key never enters application memory — but it
+  means the rule cannot be unit-tested and is only ever exercised against a real
+  PostgreSQL. If the integration suite were skipped, nothing would check how
+  children are marked.
+- **No partial credit, and no negative marking.** A multiple-choice question is
+  all-or-nothing on exact set equality. That is a pedagogical decision with no
+  obvious right answer, made here by fiat and stated rather than buried.
+- **`app_assessment_label` is a SECURITY DEFINER function returning activity,
+  lesson and course titles plus the passing percentage for any assessment id to
+  any authenticated caller.** It is what makes retention work, and it is a
+  deliberate hole in the row-level model — bounded to titles, no question, no
+  option, no key. Same shape and same caveat as `app_lesson_label` in Task 007.
+- **Timing, deadlines and time limits do not exist.** An attempt can be left
+  open indefinitely. `startsOn` and `dueOn` on a course assignment still gate
+  nothing.
+- **No gradebook, transcript, GPA, roll-up or cohort view.** A result is one
+  attempt at one assessment. Nothing aggregates them.
+- **No essay, free-text, oral, code-execution, AI or teacher-graded questions.**
+  Only the three objective types the server can mark without judgement, which is
+  the only reason a score can be computed at all.
+- **Assessment results are evidence, not mastery.** Nothing infers competence,
+  readiness or understanding from a score, and this system makes no claim that a
+  passing mark means a child has learned anything.
+- **The web build emits source maps** (`vite.config.ts`, `sourcemap: true`,
+  unchanged since Task 001), and they embed the full TypeScript source of
+  `@edu/contracts` — including the comments explaining what the assessment
+  contracts deliberately do NOT contain. Noticed while scanning the bundle for
+  answer-key leakage in this task: the emitted JavaScript has zero occurrences
+  of `isCorrect`, and the only matches anywhere are prose in the `.map` saying
+  the field does not exist. No key and no correctness field is present in either
+  file. It is recorded because shipping source maps to production is a
+  disclosure decision that was never explicitly made, and it is out of this
+  task's scope to change.
 
 ## Added in Task 007
 

@@ -195,7 +195,9 @@ export type ResourceKind =
   | 'course_unit'
   | 'lesson'
   | 'class_course_assignment'
-  | 'lesson_progress';
+  | 'lesson_progress'
+  | 'learning_activity'
+  | 'assessment_attempt';
 
 export interface BaseResource {
   readonly kind: ResourceKind;
@@ -386,7 +388,7 @@ export interface ClassCourseAssignmentResource extends BaseResource {
   readonly state: 'active' | 'inactive' | 'archived';
 }
 
-/** A learner's running record for one lesson. Forward-only; see ADR 0010. */
+/** A learner's running record for one lesson. Forward-only; see migration 0018. */
 export type LessonProgressState = 'not_started' | 'in_progress' | 'completed';
 
 /**
@@ -418,6 +420,89 @@ export interface LessonProgressResource extends BaseResource {
   readonly observableByActorAsTeacher: boolean;
 }
 
+/**
+ * The kinds of activity a lesson can carry.
+ *
+ * Only `assessment` has an implementation. The rest are declared so the
+ * vocabulary is settled once — a 2D chemistry simulation and a physics
+ * experiment are different `activity_type` values on the same table, not a new
+ * shape for the lesson model — and so that a policy written today cannot
+ * accidentally assume there is only ever one kind.
+ */
+export type ActivityType =
+  'assessment' | 'practice' | 'exercise' | 'simulation' | 'experiment' | 'research_task';
+
+/**
+ * A learning activity: the generic thing a learner DOES inside a lesson.
+ *
+ * It is a content node, and it is authorized as one — the same two axes, the
+ * same duty split, the same disclosure rule. What it adds is that an activity
+ * is only ever as visible as the lesson above it, which the caller answers in
+ * `lessonVisible` rather than the policy walking the tree.
+ *
+ * `learnerReachesLesson` is the Task 006 chain for the ACTOR: is this lesson
+ * assigned to a class they are in? It separates a learner (who needs the
+ * assignment) from content staff (who do not), exactly as `contentPolicy` does
+ * — and it is what a learner needs in order to START an assessment rather than
+ * merely read about one.
+ *
+ * There is deliberately no separate `assessment` resource kind. An assessment
+ * has no lifecycle of its own — its activity's status IS its status — so
+ * modelling it separately would create two rules for one visible object, and
+ * two rules can disagree.
+ */
+export interface LearningActivityResource extends BaseResource {
+  readonly kind: 'learning_activity';
+  readonly lessonId: string;
+  readonly courseId: string;
+  /** Null for the global catalog, exactly as on a content node. */
+  readonly organizationId: string | null;
+  readonly activityType: ActivityType;
+  readonly status: ContentStatus;
+  /** Whether the actor can see the lesson this hangs off. Computed in SQL. */
+  readonly lessonVisible: boolean;
+  /** Whether the actor reaches that lesson AS A LEARNER, through a class. */
+  readonly learnerReachesLesson: boolean;
+}
+
+export type AttemptState = 'in_progress' | 'submitted';
+
+/**
+ * One learner's attempt at one assessment.
+ *
+ * Shaped after `LessonProgressResource`, because it answers the same question
+ * about the same child and a different answer here would be a second opinion,
+ * not extra safety. The asymmetry is the same and so is its reason:
+ *
+ *   WRITE — start and submit are the learner's alone, and only while they still
+ *           reach the assessment through a class.
+ *   READ  — the learner's own attempts, always, with no access check. Losing a
+ *           class must not erase the record of what they sat.
+ *
+ * NOTHING HERE IS A SCORE. The policy decides who may look at a result; it
+ * plays no part in computing one, and it is never given the marks. Passing them
+ * in would invite a future branch that decided something based on whether a
+ * child had done well.
+ */
+export interface AssessmentAttemptResource extends BaseResource {
+  readonly kind: 'assessment_attempt';
+  readonly learnerId: string;
+  readonly learnerOrganizationId: string | null;
+  readonly assessmentId: string;
+  readonly lessonId: string;
+  readonly state: AttemptState;
+  /** Whether the SUBJECT still reaches this assessment through a class. */
+  readonly learnerMayAttempt: boolean;
+  /**
+   * ACTOR-RELATIVE. The learner is enrolled in a class the actor teaches AND
+   * this assessment's lesson belongs to a course assigned to THAT SAME class.
+   * The conjunction is computed in SQL for the reason given on
+   * `LessonProgressResource`: teaching a class must never imply reading a
+   * student, and two coarser edges cannot express "the same class".
+   */
+  readonly observableByActorAsTeacher: boolean;
+}
+
 export type Resource =
   | NoteResource
   | UserResource
@@ -434,7 +519,9 @@ export type Resource =
   | CourseUnitResource
   | LessonResource
   | ClassCourseAssignmentResource
-  | LessonProgressResource;
+  | LessonProgressResource
+  | LearningActivityResource
+  | AssessmentAttemptResource;
 
 // --- Actions -------------------------------------------------------------
 // An action is `<resourceKind>:<verb>`. The engine enforces that the prefix
@@ -547,6 +634,43 @@ export const LESSON_PROGRESS_ACTIONS = [
 
 export type LessonProgressAction = (typeof LESSON_PROGRESS_ACTIONS)[number];
 
+/**
+ * The same content verbs an activity actually supports.
+ *
+ * `delete` is absent because there is no DELETE grant on `learning_activities`
+ * and no endpoint that would use one: deleting an activity would cascade its
+ * assessment, its questions and every learner's attempt into nothing. Archiving
+ * is the supported way to withdraw one, and it keeps the attempts already
+ * recorded against it interpretable.
+ */
+export const LEARNING_ACTIVITY_ACTIONS = [
+  'learning_activity:create',
+  'learning_activity:read',
+  'learning_activity:list',
+  'learning_activity:update',
+  'learning_activity:publish',
+  'learning_activity:archive',
+] as const;
+
+export type LearningActivityAction = (typeof LEARNING_ACTIVITY_ACTIONS)[number];
+
+/**
+ * `start` and `submit` are separate actions, not one `write`.
+ *
+ * They are different authorities over different objects: `start` is asked about
+ * an assessment before any attempt exists, `submit` about an attempt that does.
+ * Collapsing them would mean the decision that opened an attempt could be
+ * replayed to close somebody else's.
+ */
+export const ASSESSMENT_ATTEMPT_ACTIONS = [
+  'assessment_attempt:start',
+  'assessment_attempt:read',
+  'assessment_attempt:list',
+  'assessment_attempt:submit',
+] as const;
+
+export type AssessmentAttemptAction = (typeof ASSESSMENT_ATTEMPT_ACTIONS)[number];
+
 export type NoteAction = (typeof NOTE_ACTIONS)[number];
 export type UserAction = (typeof USER_ACTIONS)[number];
 export type ProfileAction = (typeof PROFILE_ACTIONS)[number];
@@ -570,7 +694,9 @@ export type Action =
   | EducationLevelAction
   | ContentAction
   | ClassCourseAssignmentAction
-  | LessonProgressAction;
+  | LessonProgressAction
+  | LearningActivityAction
+  | AssessmentAttemptAction;
 
 export const ALL_ACTIONS: readonly Action[] = [
   ...NOTE_ACTIONS,
@@ -589,6 +715,8 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...LESSON_ACTIONS,
   ...CLASS_COURSE_ASSIGNMENT_ACTIONS,
   ...LESSON_PROGRESS_ACTIONS,
+  ...LEARNING_ACTIVITY_ACTIONS,
+  ...ASSESSMENT_ATTEMPT_ACTIONS,
 ];
 
 /** The two permissions that split authoring from publishing. See ADR 0009. */

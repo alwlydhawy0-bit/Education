@@ -337,6 +337,60 @@ Every denial in this domain is `hide` (404). A learner cannot distinguish
 was withdrawn" — and should not be able to, since the difference is a fact about
 their school's administration, not about them.
 
+### Activities and assessments (Task 008)
+
+The first domain where **the server authors a fact about a child**. Everything
+before it recorded assertions; a score is computed, and somebody acts on it.
+
+**Access inherits the content graph rather than restating it.** Activity
+visibility asks `lessons_select` itself, through an INVOKER SQL function;
+assessment visibility asks the activity; questions ask the assessment; options
+ask the question. Each link reads exactly one level up, so the graph stays
+acyclic and there is exactly one definition of "may this actor see a lesson?" in
+the system. Task 006's narrowing therefore applies to every one of them on the
+next request, with nothing to remember to update.
+
+**One resource kind covers the activity, its assessment, its questions and its
+options.** They share a lifecycle — the activity's status _is_ the assessment's
+status — so a second policy could only ever disagree with the first about
+whether a child may see it. Adding a question is `learning_activity:update`,
+gated on `content:author`, because a question is the activity's content.
+
+**A published activity cannot be edited**, which is stricter than
+`contentPolicy` allows for a lesson. An activity's content is the paper a
+learner sits; changing it after publication would mean two attempts at "the same
+assessment" had been marked against different papers. The database enforces the
+same rule for questions, options and keys, and grants no UPDATE on any of them.
+
+**The answer key has its own policy with no learner branch.** Not a narrowed
+one — none. Being able to see the question, the assessment, the activity or the
+lesson grants nothing there; the only ways in are a platform operator, or an
+actor holding a content permission in the school that owns the content. This is
+why the key is a separate table: row-level security cannot say "read this row
+but not that column", and the alternative would have been a convention every
+`SELECT` list in the codebase had to honour forever. It does admit **every
+teacher in the school**, since `teacher` carries `content:author`
+(RISK-ASSESS-02).
+
+**The score is computed by the database, not submitted to it.** The application
+issues `UPDATE assessment_attempts SET status = 'submitted'` and a trigger
+assigns every result column from `app_score_attempt` — a function granted to no
+role, so the application cannot execute it. A forged score is not rejected but
+**overwritten**, which means no code path, correct or compromised, can write
+one. That is a stronger property than validation, and it is why the logic lives
+in SQL rather than in a service.
+
+**Reading an attempt uses the same five branches as `lesson_progress`, through
+the same helpers** — owner, verified guardian, teacher of the shared class,
+`admin` of the school, platform operator. It is the same question about the same
+child, and a second, subtly different answer would be a disagreement rather than
+extra safety. Writing follows the same asymmetry: `start` and `submit` are the
+learner's alone, checked _before_ the platform-operator branch.
+
+Individual answers are held narrower than the attempt: owner only. A teacher may
+read a score, and no endpoint returns selections at all, so widening that later
+is a visible decision in a migration.
+
 ### Profiles
 
 Several roles can read a profile they have a relationship with. **Nobody may

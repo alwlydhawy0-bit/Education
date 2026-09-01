@@ -40,7 +40,10 @@ export async function truncateAll(): Promise<void> {
   // created by migration 0007 — truncating them would leave registration unable
   // to grant the default role.
   await db.query(
-    `TRUNCATE notes, lesson_progress, guardian_relationships, teacher_assignments,
+    `TRUNCATE notes, assessment_attempt_answers, assessment_attempts,
+              assessment_answer_keys, assessment_options, assessment_questions,
+              assessments, learning_activities,
+              lesson_progress, guardian_relationships, teacher_assignments,
               class_course_assignments, class_memberships,
               classes, lessons, course_units, courses, curricula, education_levels,
               sessions, user_roles, email_verifications, password_reset_tokens,
@@ -495,5 +498,147 @@ export async function recordProgress(options: {
   );
   const id = rows[0]?.id;
   if (!id) throw new Error('Failed to seed progress');
+  return id;
+}
+
+/**
+ * Seeds an activity, and its assessment when the type calls for one.
+ *
+ * Seeding runs as SUPERUSER, so it can construct states the application could
+ * never create — a published assessment with a malformed question, a draft the
+ * author cannot reach — which is exactly what the negative tests need. The
+ * lifecycle timestamps are set to match the CHECK constraints rather than
+ * disabled, so a seeded row is a row the database would accept.
+ */
+export async function createActivity(options: {
+  lessonId: string;
+  activityType?:
+    'assessment' | 'practice' | 'exercise' | 'simulation' | 'experiment' | 'research_task';
+  title?: string;
+  instructions?: string;
+  status?: ContentStatus;
+  createdBy?: string | null;
+  position?: number;
+  /** Assessment configuration. Required in practice for `assessment` activities. */
+  passingPercentage?: number;
+  maxAttempts?: number;
+}): Promise<{ activityId: string; assessmentId: string | null }> {
+  const db = await seedDb();
+  const status = options.status ?? 'draft';
+  const [publishedAt, archivedAt] = lifecycleStamps(status);
+  const type = options.activityType ?? 'assessment';
+
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO learning_activities
+       (lesson_id, position, activity_type, title, instructions, status, published_at, archived_at, created_by)
+     VALUES ($1,
+             COALESCE($2, (SELECT coalesce(max(position), 0) + 1 FROM learning_activities WHERE lesson_id = $1)),
+             $3, $4, $5, $6, $7, $8, $9)
+     RETURNING id`,
+    [
+      options.lessonId,
+      options.position ?? null,
+      type,
+      options.title ?? 'Activity',
+      options.instructions ?? '',
+      status,
+      publishedAt,
+      archivedAt,
+      options.createdBy ?? null,
+    ],
+  );
+  const activityId = rows[0]?.id;
+  if (!activityId) throw new Error('Failed to seed activity');
+
+  let assessmentId: string | null = null;
+  if (type === 'assessment') {
+    const { rows: aRows } = await db.query<{ id: string }>(
+      `INSERT INTO assessments (activity_id, passing_percentage, max_attempts)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [activityId, options.passingPercentage ?? 50, options.maxAttempts ?? 1],
+    );
+    assessmentId = aRows[0]?.id ?? null;
+    if (!assessmentId) throw new Error('Failed to seed assessment');
+  }
+  return { activityId, assessmentId };
+}
+
+/**
+ * Seeds a question with its options AND its answer key.
+ *
+ * `correctOptions` are INDEXES into `options`, matching the API contract, so a
+ * fixture can never accidentally point a key at another question's option.
+ * Returns the option ids in order, which the submission tests need in order to
+ * answer correctly — and which no learner-facing endpoint ever returns
+ * alongside their correctness.
+ */
+export async function createQuestion(options: {
+  assessmentId: string;
+  questionType?: 'single_choice' | 'multiple_choice' | 'true_false';
+  prompt?: string;
+  points?: number;
+  options: readonly string[];
+  correctOptions: readonly number[];
+  position?: number;
+}): Promise<{ questionId: string; optionIds: string[]; correctOptionIds: string[] }> {
+  const db = await seedDb();
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO assessment_questions (assessment_id, position, question_type, prompt, points)
+     VALUES ($1,
+             COALESCE($2, (SELECT coalesce(max(position), 0) + 1 FROM assessment_questions WHERE assessment_id = $1)),
+             $3, $4, $5)
+     RETURNING id`,
+    [
+      options.assessmentId,
+      options.position ?? null,
+      options.questionType ?? 'single_choice',
+      options.prompt ?? 'Question?',
+      options.points ?? 1,
+    ],
+  );
+  const questionId = rows[0]?.id;
+  if (!questionId) throw new Error('Failed to seed question');
+
+  const { rows: optionRows } = await db.query<{ id: string }>(
+    `INSERT INTO assessment_options (question_id, position, body)
+     SELECT $1, ordinality, body FROM unnest($2::text[]) WITH ORDINALITY AS t(body, ordinality)
+     RETURNING id`,
+    [questionId, options.options],
+  );
+  const optionIds = optionRows.map((r) => r.id);
+
+  const correctOptionIds = options.correctOptions.map((index) => {
+    const id = optionIds[index];
+    if (!id) throw new Error(`correctOptions index ${index} names no option`);
+    return id;
+  });
+  if (correctOptionIds.length > 0) {
+    await db.query(
+      `INSERT INTO assessment_answer_keys (question_id, option_id) SELECT $1, unnest($2::uuid[])`,
+      [questionId, correctOptionIds],
+    );
+  }
+  return { questionId, optionIds, correctOptionIds };
+}
+
+/** Seeds an attempt directly. Used to construct states a learner could not. */
+export async function createAttempt(options: {
+  assessmentId: string;
+  userId: string;
+  status?: 'in_progress' | 'submitted';
+}): Promise<string> {
+  const db = await seedDb();
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO assessment_attempts (assessment_id, user_id) VALUES ($1, $2) RETURNING id`,
+    [options.assessmentId, options.userId],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed attempt');
+  if (options.status === 'submitted') {
+    // Through the real submit path, so the score is the one the database
+    // computes. A fixture that wrote a score directly would be testing against
+    // a number no learner could ever have received.
+    await db.query(`UPDATE assessment_attempts SET status = 'submitted' WHERE id = $1`, [id]);
+  }
   return id;
 }

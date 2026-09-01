@@ -201,3 +201,10 @@ any ordering constraint between courses. Copying or forking global content into
 a school. Bulk import. Learner-facing progress and mastery. (A course IS now
 connected to a class — Task 006 — but nothing records whether anybody studied
 it.)
+
+## What hangs off a lesson
+
+A lesson is content to read. What a learner DOES with it — an assessment today,
+a simulation or an experiment later — is a learning activity, documented in
+[the activities & assessments API](assessment.md). An activity inherits this
+tree's visibility exactly, by asking it rather than restating it.

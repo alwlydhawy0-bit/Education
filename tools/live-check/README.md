@@ -29,5 +29,10 @@ node --experimental-strip-types tools/live-check/seed.ts
 #    teacher's comment, the password and any session token. None should appear.
 ```
 
-The result of the run made for Task 009 is recorded under "What was actually
-verified" in `docs/security/limitations.md`.
+`seed-mastery.ts` does the same for Task 010: a course with two objectives and
+two assessments, so the `demonstrated` → `mastered` transition (which needs two
+DIFFERENT assessments passed, not two attempts at one) can be walked through the
+real endpoints.
+
+The results of both runs are recorded under "What was actually verified" in
+`docs/security/limitations.md`.

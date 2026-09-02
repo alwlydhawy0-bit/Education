@@ -196,6 +196,7 @@ export type ResourceKind =
   | 'lesson'
   | 'class_course_assignment'
   | 'lesson_progress'
+  | 'objective_progress'
   | 'learning_activity'
   | 'assessment_attempt';
 
@@ -421,6 +422,33 @@ export interface LessonProgressResource extends BaseResource {
 }
 
 /**
+ * A learner's standing against ONE learning objective.
+ *
+ * Deliberately shaped after `LessonProgressResource`, because it answers the
+ * same question about the same child — "who may look at what this learner
+ * did?" — and a second, subtly different answer would be a disagreement waiting
+ * to be exploited from whichever side is looser.
+ *
+ * IT CARRIES NO MASTERY STATE, and that absence is the point. Authorization
+ * decides who may look; it takes no part in judging what a child understands.
+ * A policy that could read the mastery level would invite a branch that
+ * disclosed more to a learner who had done well, or less to one who had not.
+ *
+ * There is no WRITE action either (see `OBJECTIVE_PROGRESS_ACTIONS`). Evidence
+ * is emitted by database triggers on events that already happened, so there is
+ * no request through which anyone — learner, teacher, administrator or platform
+ * operator — could author a claim about what another person understands.
+ */
+export interface ObjectiveProgressResource extends BaseResource {
+  readonly kind: 'objective_progress';
+  readonly learnerId: string;
+  readonly learnerOrganizationId: string | null;
+  readonly objectiveId: string;
+  readonly lessonId: string;
+  readonly observableByActorAsTeacher: boolean;
+}
+
+/**
  * The kinds of activity a lesson can carry.
  *
  * Only `assessment` has an implementation. The rest are declared so the
@@ -533,6 +561,7 @@ export type Resource =
   | LessonResource
   | ClassCourseAssignmentResource
   | LessonProgressResource
+  | ObjectiveProgressResource
   | LearningActivityResource
   | AssessmentAttemptResource;
 
@@ -639,6 +668,21 @@ export type ClassCourseAssignmentAction = (typeof CLASS_COURSE_ASSIGNMENT_ACTION
  * the distinction carries no authority: whoever may start a record may continue
  * it, and nobody else may do either.
  */
+/**
+ * Reading a learner's objective progress. READS ONLY.
+ *
+ * There is no `record`, no `set`, and no `override`. Mastery is derived from
+ * evidence, evidence is emitted by triggers, and neither is reachable through a
+ * request — so the vocabulary has no word for writing one, and a future
+ * endpoint that wanted to would have to add the action here in a visible diff.
+ */
+export const OBJECTIVE_PROGRESS_ACTIONS = [
+  'objective_progress:read',
+  'objective_progress:list',
+] as const;
+
+export type ObjectiveProgressAction = (typeof OBJECTIVE_PROGRESS_ACTIONS)[number];
+
 export const LESSON_PROGRESS_ACTIONS = [
   'lesson_progress:read',
   'lesson_progress:list',
@@ -724,6 +768,7 @@ export type Action =
   | ContentAction
   | ClassCourseAssignmentAction
   | LessonProgressAction
+  | ObjectiveProgressAction
   | LearningActivityAction
   | AssessmentAttemptAction;
 
@@ -744,6 +789,7 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...LESSON_ACTIONS,
   ...CLASS_COURSE_ASSIGNMENT_ACTIONS,
   ...LESSON_PROGRESS_ACTIONS,
+  ...OBJECTIVE_PROGRESS_ACTIONS,
   ...LEARNING_ACTIVITY_ACTIONS,
   ...ASSESSMENT_ATTEMPT_ACTIONS,
 ];

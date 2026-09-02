@@ -264,7 +264,16 @@ const UNIT_SELECT = `SELECT u.id, u.course_id, u.position, u.title, u.summary, u
          JOIN courses c ON c.id = u.course_id`;
 
 const LESSON_SELECT = `SELECT l.id, l.unit_id, l.position, l.title, l.summary, l.content_format,
-              l.content_body, l.external_url, l.estimated_minutes, l.objectives,
+              l.content_body, l.external_url, l.estimated_minutes,
+              -- Derived from learning_objectives (0021), which replaced the
+              -- array column. The response shape is unchanged for every reader;
+              -- what changed underneath is that each statement now has a stable
+              -- id that a learner's evidence can point at.
+              COALESCE(
+                (SELECT array_agg(o.statement ORDER BY o.position)
+                   FROM learning_objectives o WHERE o.lesson_id = l.id),
+                '{}'::text[]
+              ) AS objectives,
               l.status, l.created_at, l.published_at,
               c.id AS course_id, c.organization_id AS course_organization_id,
               (u.status = 'published' AND c.status = 'published') AS ancestors_published
@@ -306,6 +315,35 @@ async function readUnit(tx: Tx, id: string): Promise<UnitRecord | null> {
   const { rows } = await tx.query<UnitRow>(`${UNIT_SELECT} WHERE u.id = $1`, [id]);
   const row = rows[0];
   return row ? toUnit(row) : null;
+}
+
+/**
+ * Rewrites a lesson's objectives to exactly the statements supplied.
+ *
+ * DELETE-THEN-INSERT, and the consequence is stated rather than hidden: an
+ * objective removed from the list loses its identity, and with it any evidence
+ * that pointed at it. That is safe only because 0021 confines the DELETE policy
+ * to DRAFT lessons — once a lesson is published, the delete matches zero rows
+ * and a rewrite that dropped a statement is refused by the database rather than
+ * silently erasing a child's record.
+ *
+ * Rewording is therefore the safe operation and reordering is not, which is the
+ * honest shape of a text-list authoring surface promoted to entities. A future
+ * task that lets an author edit objectives individually should carry their ids.
+ */
+async function replaceObjectives(
+  tx: Tx,
+  lessonId: string,
+  statements: readonly string[],
+): Promise<void> {
+  await tx.query(`DELETE FROM learning_objectives WHERE lesson_id = $1`, [lessonId]);
+  if (statements.length === 0) return;
+  await tx.query(
+    `INSERT INTO learning_objectives (lesson_id, position, statement)
+     SELECT $1, ord, statement
+       FROM unnest($2::text[]) WITH ORDINALITY AS t(statement, ord)`,
+    [lessonId, [...statements]],
+  );
 }
 
 async function readLesson(tx: Tx, id: string): Promise<LessonRecord | null> {
@@ -824,10 +862,10 @@ export const curriculumRepository: CurriculumRepository = {
   async insertLesson(tx, input) {
     const { rows } = await tx.query<{ id: string }>(
       `INSERT INTO lessons (unit_id, position, title, summary, content_format, content_body,
-                            external_url, estimated_minutes, objectives, created_by)
+                            external_url, estimated_minutes, created_by)
        VALUES ($1,
                (SELECT COALESCE(MAX(position), 0) + 1 FROM lessons WHERE unit_id = $1),
-               $2, $3, $4, $5, $6, $7, $8, $9)
+               $2, $3, $4, $5, $6, $7, $8)
        RETURNING id`,
       [
         input.unitId,
@@ -837,12 +875,12 @@ export const curriculumRepository: CurriculumRepository = {
         input.contentBody,
         input.externalUrl,
         input.estimatedMinutes,
-        [...input.objectives],
         input.createdBy,
       ],
     );
     const id = rows[0]?.id;
     if (!id) throw new Error('Insert returned no row');
+    await replaceObjectives(tx, id, input.objectives);
     const created = await readLesson(tx, id);
     if (!created) throw new Error('Created lesson is not readable by its author');
     return created;
@@ -861,7 +899,6 @@ export const curriculumRepository: CurriculumRepository = {
               -- present in the request at all, which is the real question.
               external_url = CASE WHEN $6 THEN $7 ELSE external_url END,
               estimated_minutes = CASE WHEN $8 THEN $9 ELSE estimated_minutes END,
-              objectives = COALESCE($10, objectives),
               updated_at = now()
         WHERE id = $1 RETURNING id`,
       [
@@ -874,10 +911,12 @@ export const curriculumRepository: CurriculumRepository = {
         patch.externalUrl ?? null,
         'estimatedMinutes' in patch,
         patch.estimatedMinutes ?? null,
-        patch.objectives ? [...patch.objectives] : null,
       ],
     );
     if (!rows[0]) return null;
+    // Only when the field was supplied. An omitted `objectives` leaves the rows
+    // alone, matching the COALESCE the array column used to rely on.
+    if (patch.objectives) await replaceObjectives(tx, id, patch.objectives);
     return readLesson(tx, id);
   },
 

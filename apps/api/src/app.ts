@@ -34,6 +34,9 @@ import { createGuardiansService } from './modules/relationships/guardians.servic
 import { progressRepository } from './modules/progress/progress.repository.ts';
 import { createProgressService } from './modules/progress/progress.service.ts';
 import { registerProgressRoutes } from './modules/progress/progress.routes.ts';
+import { masteryRepository } from './modules/mastery/mastery.repository.ts';
+import { createMasteryService } from './modules/mastery/mastery.service.ts';
+import { registerMasteryRoutes } from './modules/mastery/mastery.routes.ts';
 import { assessmentRepository } from './modules/assessment/assessment.repository.ts';
 import { createAssessmentService } from './modules/assessment/assessment.service.ts';
 import { registerAssessmentRoutes } from './modules/assessment/assessment.routes.ts';
@@ -257,6 +260,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     securityEvents,
   });
 
+  const mastery = createMasteryService({
+    db,
+    repository: masteryRepository,
+    engine,
+    securityEvents,
+  });
+
   const assessment = createAssessmentService({
     db,
     repository: assessmentRepository,
@@ -310,6 +320,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerCurriculumRoutes(app, curriculum);
   registerClassCourseRoutes(app, classCourses);
   registerProgressRoutes(app, progress);
+  registerMasteryRoutes(app, mastery);
   registerAssessmentRoutes(app, assessment);
 
   return { app, db };

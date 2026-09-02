@@ -40,7 +40,8 @@ export async function truncateAll(): Promise<void> {
   // created by migration 0007 — truncating them would leave registration unable
   // to grant the default role.
   await db.query(
-    `TRUNCATE notes, assessment_attempt_answers, assessment_attempts,
+    `TRUNCATE notes, objective_evidence, learning_objectives,
+              assessment_attempt_answers, assessment_attempts,
               assessment_answer_keys, assessment_options, assessment_questions,
               assessments, learning_activities,
               lesson_progress, guardian_relationships, teacher_assignments,
@@ -367,6 +368,13 @@ export async function createLesson(options: {
   contentBody?: string;
   status?: ContentStatus;
   createdBy?: string | null;
+  /**
+   * Objective statements, seeded as rows in `learning_objectives` (0021).
+   *
+   * They were an array column on the lesson until 0021 promoted them, which is
+   * why this reads like a lesson field and writes to a different table.
+   */
+  objectives?: readonly string[];
 }): Promise<string> {
   const db = await seedDb();
   const status = options.status ?? 'draft';
@@ -391,7 +399,28 @@ export async function createLesson(options: {
   );
   const id = rows[0]?.id;
   if (!id) throw new Error('Failed to seed lesson');
+  if (options.objectives && options.objectives.length > 0) {
+    await db.query(
+      `INSERT INTO learning_objectives (lesson_id, position, statement)
+       SELECT $1, ord, statement
+         FROM unnest($2::text[]) WITH ORDINALITY AS t(statement, ord)`,
+      [id, [...options.objectives]],
+    );
+  }
   return id;
+}
+
+/** The objectives of a lesson, in authored order, with their ids. */
+export async function objectivesOf(
+  lessonId: string,
+): Promise<Array<{ id: string; position: number; statement: string }>> {
+  const db = await seedDb();
+  const { rows } = await db.query<{ id: string; position: number; statement: string }>(
+    `SELECT id, position, statement FROM learning_objectives
+      WHERE lesson_id = $1 ORDER BY position`,
+    [lessonId],
+  );
+  return rows;
 }
 
 /**

@@ -7,13 +7,13 @@ of the documentation — it states what was **not** done.
 ## The headline
 
 **This system is not proven secure, and no such claim is made anywhere in this
-repository.** 1,422 automated tests passed against a real PostgreSQL database.
+repository.** 1,560 automated tests passed against a real PostgreSQL database.
 That establishes that specific, enumerated properties held at a point in time. It
 does not establish the absence of vulnerabilities.
 
 ## What was actually verified
 
-**Updated for Task 009.** The counts and the "not verified" list below reflect
+**Updated for Task 010.** The counts and the "not verified" list below reflect
 the current state.
 
 - 1,422 tests executed and passing: 574 unit, 107 architecture, 282 integration,
@@ -47,6 +47,17 @@ the current state.
   **None were present.** The `assessment.result_released` event carried the
   attempt, assessment and learner ids and `hasComment: true` — no mark, no
   comment text.
+- **The Task 010 mastery surface was driven over HTTP against a booted server**,
+  through the real endpoints on a seeded course: `no_evidence` before anything;
+  `attempted` after completing the lesson; `demonstrated` after passing one
+  assessment; **still `demonstrated` after passing the SAME assessment a second
+  time**; `mastered` only after passing a DIFFERENT one; the teacher's view of
+  the same learner matching; a forged `?learnerId=` on `/me/objectives` returning
+  the caller's own (empty) record; and `POST /me/objectives/:id/mastery`
+  returning **404**, because no such route exists. The server log was then
+  searched for the password, a session token, any mastery state, and the
+  objective statements. **None were present.** `tools/live-check/seed-mastery.ts`
+  makes the run repeatable.
 - **The learner progress surface was driven over HTTP against a booted
   server** — 39 checks covering the write asymmetry, every refused write shape,
   the learner's own history, the teacher, guardian and administrator read paths,
@@ -195,6 +206,53 @@ the current state.
   file. It is recorded because shipping source maps to production is a
   disclosure decision that was never explicitly made, and it is out of this
   task's scope to change.
+
+## Added in Task 010
+
+- **Mastery cannot tell one objective of a lesson from another.** An assessment
+  attaches evidence to EVERY objective of its lesson, because nothing in the
+  schema says which question tested which objective. Within a lesson, objectives
+  assessed by the same quiz move together. Per-question tagging would fix it and
+  would also let the platform claim a precision it has not earned; the coarse
+  version is documented rather than dressed up (RISK-MASTERY-01).
+- **The mastery thresholds are chosen by fiat.** `demonstrated` is one passed
+  assessment and `mastered` is two distinct ones. Those numbers are defensible
+  and they are not validated against anything — no learning-science literature,
+  no outcome data, no pilot. They are stated in `docs/api/mastery.md` precisely
+  so a teacher can argue with them (RISK-MASTERY-02).
+- **`mastered` is not a claim that a child has mastered anything.** It is a claim
+  that two different assessments covering the objective were passed. The name is
+  the most misleading thing in this task, and it is used because the task
+  specified the vocabulary; the rule behind it is deliberately weak.
+- **Rewriting a draft lesson's objectives deletes and re-inserts them.** An
+  objective removed from the list loses its identity, and evidence pointing at it
+  cascades away. That is bounded to DRAFT lessons by the delete policy — a
+  published lesson refuses the delete, so no learner's record can be erased this
+  way — but authoring is therefore rewording-safe and reordering-unsafe. A future
+  task that lets an author edit objectives individually should carry their ids
+  (RISK-MASTERY-03).
+- **Nothing records who READ a learner's mastery or evidence.** Only denials are
+  audited. Same gap as RISK-PROGRESS-02 and RISK-ASSESS-07, over data that is now
+  a judgement about a child rather than a record of what they did
+  (RISK-MASTERY-04).
+- **`app_objective_label` is a SECURITY DEFINER function returning objective
+  statements and lesson, unit and course names for any objective id to any
+  authenticated caller.** It is what makes retention work for a guardian, who has
+  no content access at all, and it is a deliberate hole in the row-level model —
+  bounded to names, no lesson body, no links. Same shape and same caveat as
+  `app_lesson_label` in Task 007 (RISK-MASTERY-05).
+- **Course mastery is computed per request, with no caching or materialization.**
+  One statement per course rather than N+1, but still a full recomputation every
+  time. It has not been tested at catalogue scale. Caching was deliberately not
+  introduced: a stale mastery state is worse than a slow one, and the task
+  forbids premature optimization (RISK-MASTERY-06).
+- **The learner's own mastery view depends on result release.** The stored
+  evidence and the authoritative state do not — a teacher sees the truth
+  immediately — but a learner is shown `attempted` for an attempt whose result
+  Task 009 is still withholding. This is a deliberate reading of the task's "do
+  not make mastery depend on result visibility": the alternative announces a
+  withheld mark through a second endpoint. Recorded because it is a choice, not
+  an implementation detail.
 
 ## Added in Task 009
 

@@ -635,6 +635,13 @@ ranking, counts, and latency. Semantic similarity must never widen access.
 | RISK-ASSESS-09     | A platform operator may release a result, so an operator can disclose a mark a school intended to withhold        | Low                             | Accepted; the act discloses, it does not fabricate — see authorization.md  |
 | RISK-ASSESS-10     | `teacherComment` is free text stored and rendered as written; nothing moderates what a teacher writes to a child  | Low                             | Accepted; bounded at 2000 chars and escaped on render, not content-checked |
 
+| RISK-MASTERY-01 | An assessment's evidence attaches to every objective of its lesson; nothing says which question tested which objective | Medium | Accepted and documented; per-question tagging would be an invented precision |
+| RISK-MASTERY-02 | `mastered` means two distinct assessments passed — a threshold chosen by fiat, not validated against learning outcomes | Medium | Accepted; stated explicitly so it can be argued with rather than inferred |
+| RISK-MASTERY-03 | Rewriting a lesson's objectives on a DRAFT lesson deletes rows, and with them any evidence pointing at them | Low | Accepted; the delete policy confines it to drafts, where no learner has studied |
+| RISK-MASTERY-04 | Nothing records who READ a learner's mastery or evidence; only denials are audited | Medium | Open; the same gap as RISK-PROGRESS-02 and RISK-ASSESS-07 |
+| RISK-MASTERY-05 | `app_objective_label` returns objective statements and lesson names to any caller holding an objective id | Low | Accepted; bounded to names, same shape and caveat as `app_lesson_label` |
+| RISK-MASTERY-06 | A course mastery view is computed per request with no caching; untested at catalogue scale | Low | Open; correctness chosen over throughput, as in RISK-ASSIGN-03 |
+
 ## 6. What was NOT threat-modelled
 
 Honestly and specifically: payments; third-party integrations; mobile clients;

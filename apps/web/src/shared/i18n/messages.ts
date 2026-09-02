@@ -30,6 +30,20 @@ const ar = {
   'release.pending': 'جارٍ الإعلان…',
   'release.done': 'أُعلنت النتيجة',
   'release.failed': 'تعذّر إعلان النتيجة',
+  'mastery.loading': 'جارٍ تحميل التقدّم…',
+  'mastery.unavailable': 'تعذّر عرض التقدّم',
+  'mastery.heading': 'الأهداف التعليمية',
+  'mastery.objectivesDemonstrated': 'أهداف مُثبَتة',
+  'mastery.lessonsCompleted': 'دروس مكتملة',
+  'mastery.evidenceCount': 'عدد الأدلة',
+  'mastery.state.no_evidence': 'لا توجد أدلة بعد',
+  'mastery.state.attempted': 'بدأ التعلّم',
+  'mastery.state.developing': 'قيد التطوّر',
+  'mastery.state.demonstrated': 'مُثبَت',
+  'mastery.state.mastered': 'مُتقَن',
+  'mastery.lesson.not_started': 'لم يبدأ',
+  'mastery.lesson.in_progress': 'قيد التقدّم',
+  'mastery.lesson.completed': 'مكتمل',
 } as const;
 
 export type MessageKey = keyof typeof ar;
@@ -55,6 +69,20 @@ const en: Record<MessageKey, string> = {
   'release.pending': 'Releasing…',
   'release.done': 'Result released',
   'release.failed': 'The result could not be released',
+  'mastery.loading': 'Loading progress…',
+  'mastery.unavailable': 'Progress cannot be shown',
+  'mastery.heading': 'Learning objectives',
+  'mastery.objectivesDemonstrated': 'objectives demonstrated',
+  'mastery.lessonsCompleted': 'lessons completed',
+  'mastery.evidenceCount': 'pieces of evidence',
+  'mastery.state.no_evidence': 'No evidence yet',
+  'mastery.state.attempted': 'Started',
+  'mastery.state.developing': 'Developing',
+  'mastery.state.demonstrated': 'Demonstrated',
+  'mastery.state.mastered': 'Mastered',
+  'mastery.lesson.not_started': 'Not started',
+  'mastery.lesson.in_progress': 'In progress',
+  'mastery.lesson.completed': 'Completed',
 };
 
 const CATALOGUES: Record<Locale, Record<MessageKey, string>> = { ar, en };

@@ -12,6 +12,7 @@ import { contentPolicy } from './policies/content.policy.ts';
 import { educationLevelPolicy } from './policies/education-level.policy.ts';
 import { classCourseAssignmentPolicy } from './policies/class-course-assignment.policy.ts';
 import { lessonProgressPolicy } from './policies/lesson-progress.policy.ts';
+import { objectiveProgressPolicy } from './policies/objective-progress.policy.ts';
 import { learningActivityPolicy } from './policies/learning-activity.policy.ts';
 import { assessmentAttemptPolicy } from './policies/assessment-attempt.policy.ts';
 import {
@@ -71,6 +72,7 @@ const DEFAULT_POLICIES: Readonly<Record<ResourceKind, PolicyFn>> = Object.freeze
   lesson: contentPolicy as unknown as PolicyFn,
   class_course_assignment: classCourseAssignmentPolicy as unknown as PolicyFn,
   lesson_progress: lessonProgressPolicy as unknown as PolicyFn,
+  objective_progress: objectiveProgressPolicy as unknown as PolicyFn,
   // One policy for the activity AND the assessment, questions and options it
   // carries: they share a lifecycle, so they must share a rule.
   learning_activity: learningActivityPolicy as unknown as PolicyFn,

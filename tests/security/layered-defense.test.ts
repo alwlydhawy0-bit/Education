@@ -1317,3 +1317,202 @@ describe('assessments, with RLS disabled', () => {
     expect(response.statusCode).toBe(404);
   });
 });
+
+/**
+ * Mastery, with RLS disabled.
+ *
+ * The mastery reads pass THREE gates in production: the RLS policy on
+ * `objective_evidence`, the self-authorizing `app_objective_mastery`, and the
+ * policy engine's per-row pass in `keepReadable`. That redundancy is deliberate
+ * and it makes each gate hard to observe — a suite with all three active cannot
+ * say which one refused.
+ *
+ * Here the first is gone (BYPASSRLS) and the second answers for the row anyway,
+ * so what remains to be shown is that the APPLICATION refuses on its own. Where
+ * it cannot be shown, that is recorded below rather than counted as coverage.
+ */
+describe('mastery, with RLS disabled', () => {
+  async function seedAndLogin(
+    email: string,
+    roles: readonly string[] | undefined,
+    organizationId: string | null,
+  ): Promise<{ id: string; cookie: string }> {
+    const user = await createUser({
+      email,
+      ...(roles ? { roles } : {}),
+      organizationId,
+      passwordHash: await hashPassword(PASSWORD),
+    });
+    const loggedIn = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: writeHeaders,
+      payload: { email, password: PASSWORD },
+    });
+    expect(loggedIn.statusCode).toBe(204);
+    return {
+      id: user.id,
+      cookie: `edu_session=${sessionCookieFrom(loggedIn.headers['set-cookie'])}`,
+    };
+  }
+
+  async function world() {
+    const orgA = await createOrganization('Mastery School A');
+    const orgB = await createOrganization('Mastery School B');
+    const levelId = await createEducationLevel();
+
+    const learner = await seedAndLogin('nrls-m-learner@test.local', undefined, orgA);
+    const peer = await seedAndLogin('nrls-m-peer@test.local', undefined, orgA);
+    const teacher = await seedAndLogin('nrls-m-teacher@test.local', ['teacher'], orgA);
+    const otherTeacher = await seedAndLogin('nrls-m-teacher2@test.local', ['teacher'], orgA);
+    const guardian = await seedAndLogin('nrls-m-guardian@test.local', ['guardian'], orgA);
+    const otherGuardian = await seedAndLogin('nrls-m-guardian2@test.local', ['guardian'], orgA);
+    const adminB = await seedAndLogin('nrls-m-admin-b@test.local', ['admin'], orgB);
+
+    const classA1 = await createClass(orgA, 'MA1');
+    const classA2 = await createClass(orgA, 'MA2');
+    await addClassMember(classA1, learner.id);
+    await addClassMember(classA2, peer.id);
+    await assignTeacher(teacher.id, classA1);
+    await assignTeacher(otherTeacher.id, classA2);
+    await linkGuardian(guardian.id, learner.id, 'verified');
+    await linkGuardian(otherGuardian.id, peer.id, 'verified');
+
+    const curriculumId = await createCurriculum({
+      organizationId: orgA,
+      code: 'mastery',
+      status: 'published',
+    });
+    const courseId = await createCourse({
+      organizationId: orgA,
+      curriculumId,
+      levelId,
+      title: 'Mastery Course',
+      status: 'published',
+    });
+    const unitId = await createUnit({ courseId, title: 'M Unit', status: 'published' });
+    const lessonId = await createLesson({
+      unitId,
+      title: 'M Lesson',
+      status: 'published',
+      objectives: ['M objective one'],
+    });
+    await assignCourseToClass({ classId: classA1, courseId });
+
+    // Evidence, created through the real progress path so the trigger fires.
+    await recordProgress({ userId: learner.id, lessonId, status: 'completed' });
+
+    return {
+      orgA,
+      orgB,
+      learner,
+      peer,
+      teacher,
+      otherTeacher,
+      guardian,
+      otherGuardian,
+      adminB,
+      classA1,
+      classA2,
+      courseId,
+      lessonId,
+    };
+  }
+
+  it('STILL REFUSES A PEER THE GUARDIAN VIEW of another learner', async () => {
+    // `objectivesForChild` checks the relationship snapshot in the SERVICE,
+    // before any query runs. With RLS gone that check is the only thing standing
+    // between a peer and another child's record.
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/guardians/children/${w.learner.id}/objectives`,
+      headers: { cookie: w.peer.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('STILL REFUSES A GUARDIAN AN UNLINKED CHILD', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/guardians/children/${w.learner.id}/objectives`,
+      headers: { cookie: w.otherGuardian.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('STILL REFUSES A TEACHER A LEARNER OUTSIDE THEIR CLASS', async () => {
+    // `courseForStudentInClass` establishes class standing in the service, from
+    // definer helpers that do not depend on RLS at all.
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${w.classA1}/students/${w.learner.id}/courses/${w.courseId}/mastery`,
+      headers: { cookie: w.otherTeacher.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('STILL REFUSES AN ADMINISTRATOR OF ANOTHER ORGANIZATION', async () => {
+    const w = await world();
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${w.classA1}/students/${w.learner.id}/courses/${w.courseId}/mastery`,
+      headers: { cookie: w.adminB.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still admits the people who should be admitted', async () => {
+    // The positive control. A suite of refusals passes when everything is
+    // broken; this is what says the refusals above are selective.
+    const w = await world();
+    for (const [url, cookie] of [
+      [`/api/v1/me/objectives`, w.learner.cookie],
+      [`/api/v1/guardians/children/${w.learner.id}/objectives`, w.guardian.cookie],
+      [
+        `/api/v1/classes/${w.classA1}/students/${w.learner.id}/courses/${w.courseId}/mastery`,
+        w.teacher.cookie,
+      ],
+    ] as const) {
+      const response = await app.inject({ method: 'GET', url, headers: { cookie } });
+      expect(response.statusCode).toBe(200);
+    }
+  });
+
+  it('still exposes no way to write a mastery state or an evidence row', async () => {
+    // With RLS gone the `edu_app_norls` role CAN write `objective_evidence`.
+    // What stops a client is that no route accepts one — the application half of
+    // the defence, which is what this file exists to isolate.
+    const w = await world();
+    for (const [method, url] of [
+      ['POST', `/api/v1/me/objectives/${w.lessonId}/mastery`],
+      ['PUT', `/api/v1/me/objectives/${w.lessonId}/mastery`],
+      ['POST', `/api/v1/me/objectives/${w.lessonId}/evidence`],
+    ] as const) {
+      const response = await app.inject({
+        method,
+        url,
+        headers: { ...writeHeaders, cookie: w.learner.cookie },
+        payload: { mastery: 'mastered', masteryScore: 100 },
+      });
+      expect(response.statusCode).toBe(404);
+    }
+  });
+
+  /**
+   * WHAT THIS BLOCK CANNOT SHOW, recorded rather than counted:
+   *
+   * `/me/objectives` and `/me/courses/:id/mastery` are scoped by the SESSION in
+   * the repository query, so a forged `?learnerId=` is ignored before any gate
+   * is consulted. Injecting a handler that read the query parameter instead was
+   * still refused with RLS active — the database filtered the rows — and is
+   * caught here only through the guardian route above. The direct assertion
+   * lives in `tests/security/mastery.test.ts`, where a peer supplies another
+   * learner's id and receives their own empty record.
+   *
+   * Same shape as the caveat recorded for assessments above: a redundant gate
+   * makes its neighbour hard to observe.
+   */
+});

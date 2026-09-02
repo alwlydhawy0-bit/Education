@@ -429,6 +429,36 @@ release control is drawn from the server's own answer — a review that loaded
 while `released` is false can only belong to a staff reader — not from a
 role check in the browser.
 
+### Objectives, evidence and mastery — Task 010
+
+**Reading is the same five-branch rule as learner progress**, through the same
+helpers, over a resource that reaches its lesson through an objective. It is the
+same question about the same child, and a second answer would be a disagreement
+rather than extra safety.
+
+**THERE IS NO WRITE BRANCH, AND NO WRITE ACTION TO PUT IN ONE.**
+`ObjectiveProgressAction` is `read` and `list`. Mastery is derived from evidence
+on every read; evidence is emitted by database triggers on events that already
+happened; and `edu_app` holds `SELECT` on `objective_evidence` and nothing else.
+
+So the manipulation cases — a client submitting a mastery state or a score,
+inserting an evidence row, changing its owner, timestamp or objective — are not
+refusals this layer performs. They are requests the vocabulary cannot express,
+sent to routes that do not exist, against a table the application cannot write.
+That is a stronger property than validation, and it is why the policy file has no
+branch to review for them.
+
+**The policy never sees a mastery state.** `ObjectiveProgressResource` carries
+none, deliberately: authorization decides who may look at a judgement and takes
+no part in making one. A policy that could read the level would invite a branch
+that behaved differently for a child who had done well.
+
+**Reading your own is unconditional**, exactly as in Task 007 — a learner who has
+left a class keeps the record of what they demonstrated. The retention rule
+required one extra piece: `app_objective_label`, a definer function, because a
+verified guardian has no content access at all and a join to the content tree
+would have returned nothing for the very readers retention protects.
+
 ### Profiles
 
 Several roles can read a profile they have a relationship with. **Nobody may

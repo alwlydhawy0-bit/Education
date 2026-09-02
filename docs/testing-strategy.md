@@ -1,6 +1,6 @@
 # Testing Strategy
 
-**1,422 tests, all executed and passing** as of Task 009.
+**1,560 tests, all executed and passing** as of Task 010.
 
 | Project        | Tests | Needs      | Proves                                                                                                                                |
 | -------------- | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -88,6 +88,12 @@ Task 008 added three: the activity table (content, with the duty split), the
 attempt WRITE table, and the attempt READ table. Three rather than one for the
 same reason, and because the activity rule and the attempt rule are different in
 kind — one is about material, the other about a person.
+
+Task 010 added a fifth resource, `objective_progress`, with READ and LIST and
+nothing else. Its unit table is short and its most interesting property is what
+is absent: there is no write case to test, because the action vocabulary has no
+word for asserting what a child understands. The mastery RULES are not there
+either — they live in SQL, for the same reason the scorer does.
 
 Task 009 added two more over the SAME resource: RELEASE and REVIEW. That makes
 four tables for one object, which is the point rather than an accident — the
@@ -180,6 +186,30 @@ carry other column changes, trusting the caller's timestamp, ignoring the review
 policy, and removing the configuration freeze — and every one was caught, by
 between one and fourteen tests.
 
+`rls-mastery.test.ts` (Task 010) owns the MASTERY RULES, for the same reason
+`rls-assessment.test.ts` owns the scoring rule: they live in
+`app_objective_mastery`, in SQL, so a TypeScript re-implementation would be a
+second answer to "what does this child understand?" that could disagree about a
+real learner. It enumerates all five states, the distinct-assessment rule, the
+never-goes-down property, the absence of decay, and the withheld-result
+interaction with Task 009 — plus the evidence table's central claim, that
+`edu_app` cannot write it by any statement.
+
+Eleven defects were injected into migration 0021 and every one was caught, but
+TWO OF THEM ONLY AFTER THE SUITE WAS FIXED, which is the part worth recording:
+
+- Removing the organization boundary from the read predicate passed all 64
+  tests. There was no foreign-ADMIN in the world — only a foreign teacher — so
+  an `admin` role held anywhere would have reached every child on the platform
+  and nothing would have failed. Two tests were added.
+- The "an objective cannot be moved to another lesson" test passed with the
+  immutability trigger deleted, because the destination lesson already had an
+  objective at position 1 and the UNIQUE constraint refused the move instead.
+  The test proved nothing; it now moves into an empty lesson.
+
+Neither was a defect in the migration. Both were defects in the tests, found
+only because the injection was actually performed rather than assumed.
+
 `rls-progress.test.ts` (Task 007) is 29 checks over the read/write asymmetry as
 `edu_app`: the owner writing and every third party failing to, the four reader
 relationships, the forward-only trigger, the immutability of `completed_at` and
@@ -250,6 +280,20 @@ which is the distinction `.strict()` exists to make. Three application-layer
 defects were injected and all three were caught: letting the policy admit a
 learner's own release, dropping the review release gate, and removing the
 repository's SQL redaction of the withheld marks.
+
+Task 010 added `mastery.test.ts` over the same HTTP stack: the learner flow end
+to end, IDOR across learners, cross-class and cross-organization refusal in BOTH
+directions, forged `learnerId`/`userId`/`organizationId`/`classId` query
+parameters, forged objective ids, the three-ways-to-one-404 rule on the teacher
+route, retention after enrolment ends, and the withheld-result interaction.
+
+Six defects were injected at the application layer. Four were caught. The other
+two are recorded rather than counted, and the reason is instructive: injecting a
+handler that read `?learnerId=` instead of the session was STILL refused, because
+RLS filtered the rows independently. The application bug was real and not
+exploitable, which is the layered defence working — but it means this suite
+cannot demonstrate that half alone. `layered-defense.test.ts` gained a mastery
+block for exactly that, and the caveat is written into the file.
 
 **The two gates are tested with the other removed.** This is the claim that
 would be easiest to state and hardest to have earned, so it has a test on each

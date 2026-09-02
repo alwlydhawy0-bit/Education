@@ -1,6 +1,7 @@
 import { useLocale } from './LocaleProvider.tsx';
 import { HealthIndicator } from '../features/health/HealthIndicator.tsx';
 import { AttemptPanel } from '../features/assessment/index.ts';
+import { CourseMasteryView } from '../features/mastery/index.ts';
 
 /**
  * Reads `?attempt=<id>` from the address bar.
@@ -11,17 +12,22 @@ import { AttemptPanel } from '../features/assessment/index.ts';
  * navigation arrives with the router, and this reads a single parameter until
  * then.
  */
-function attemptIdFromLocation(): string | null {
+function idFromLocation(parameter: string): string | null {
   if (typeof window === 'undefined') return null;
-  const value = new URLSearchParams(window.location.search).get('attempt');
+  const value = new URLSearchParams(window.location.search).get(parameter);
   // Validated here rather than trusted to the API: a malformed id would produce
   // a 400 the user cannot act on, and the shape is public knowledge anyway.
+  //
+  // It is NOT an authorization check. Whose record this is comes from the
+  // session, and every one of these views is scoped server-side — the parameter
+  // names an attempt or a course, never a learner.
   return value !== null && /^[0-9a-f-]{36}$/i.test(value) ? value : null;
 }
 
 export function App(): JSX.Element {
   const { t, locale, setLocale } = useLocale();
-  const attemptId = attemptIdFromLocation();
+  const attemptId = idFromLocation('attempt');
+  const courseId = idFromLocation('course');
 
   return (
     <main>
@@ -29,6 +35,7 @@ export function App(): JSX.Element {
       <p>{t('app.tagline')}</p>
       <HealthIndicator />
       {attemptId !== null && <AttemptPanel attemptId={attemptId} />}
+      {courseId !== null && <CourseMasteryView courseId={courseId} />}
       <button type="button" onClick={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
         {t('language.switch')}
       </button>

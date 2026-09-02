@@ -5,12 +5,14 @@ import {
   assessmentResponseSchema,
   attemptQuestionSchema,
   attemptResponseSchema,
+  attemptReviewSchema,
   createActivityRequestSchema,
   createQuestionRequestSchema,
   emptyRequestSchema,
   idSchema,
   listActivitiesQuerySchema,
   listAttemptsQuerySchema,
+  releaseAttemptRequestSchema,
   submitAttemptRequestSchema,
 } from '@edu/contracts';
 import { requireActor } from '../../platform/http/authentication.ts';
@@ -55,6 +57,7 @@ const toAssessment = (s: AssessmentRecord): unknown =>
     passingPercentage: s.passingPercentage,
     maxAttempts: s.maxAttempts,
     attemptsUsed: s.attemptsUsed,
+    reviewPolicy: s.reviewPolicy,
   });
 
 const toAttempt = (t: AttemptRecord): unknown =>
@@ -75,6 +78,8 @@ const toAttempt = (t: AttemptRecord): unknown =>
     percentage: t.percentage,
     passed: t.passed,
     passingPercentage: t.passingPercentage,
+    released: t.released,
+    releasedAt: t.releasedAt?.toISOString() ?? null,
   });
 
 export function registerAssessmentRoutes(
@@ -223,6 +228,58 @@ export function registerAssessmentRoutes(
         attempt: toAttempt(attempt),
         questions: questions.map((q) => attemptQuestionSchema.parse(q)),
       });
+    },
+  });
+
+  /**
+   * The MARKED PAPER: correctness, the learner's own selections, the correct
+   * answers and the authored explanation.
+   *
+   * A separate endpoint from `GET /attempts/:id`, not a flag on it, because
+   * they are different disclosures that open at different moments. Reading an
+   * attempt returns a result; reviewing it returns the answer key for that one
+   * paper, and only once the result has been released.
+   */
+  app.get('/api/v1/attempts/:id/review', {
+    preHandler: requireActor,
+    handler: async (request, reply) => {
+      const { id } = idParams.parse(request.params);
+      const { attempt, questions } = await assessment.reviewAttempt(contextOf(request), id);
+      // Through the `.strict()` envelope, like every other response in this
+      // file. This is the one payload in the system that carries correct
+      // answers, so it is the last place to hand-assemble an object literal and
+      // trust it to stay minimal.
+      return reply.status(200).send(
+        attemptReviewSchema.parse({
+          attempt: toAttempt(attempt),
+          released: attempt.released,
+          releasedAt: attempt.releasedAt?.toISOString() ?? null,
+          teacherComment: attempt.teacherComment,
+          questions,
+        }),
+      );
+    },
+  });
+
+  /**
+   * Releasing a result to the learner.
+   *
+   * The body carries an optional comment and nothing else — no learner, no
+   * class, no organization, and no score. The attempt is the URL and the actor
+   * is the session; `.strict()` turns anything else into a 400 rather than a
+   * silently ignored field.
+   *
+   * No dedicated rate-limit policy: this is a low-volume teacher action already
+   * covered by the global limiter, and inventing a named policy for it would
+   * imply a threat the attempt limit does not already bound.
+   */
+  app.post('/api/v1/attempts/:id/release', {
+    preHandler: requireActor,
+    handler: async (request, reply) => {
+      const { id } = idParams.parse(request.params);
+      const input = releaseAttemptRequestSchema.parse(request.body ?? {});
+      const released = await assessment.releaseAttempt(contextOf(request), id, input);
+      return reply.status(200).send(toAttempt(released));
     },
   });
 

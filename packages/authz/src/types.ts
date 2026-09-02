@@ -491,6 +491,19 @@ export interface AssessmentAttemptResource extends BaseResource {
   readonly assessmentId: string;
   readonly lessonId: string;
   readonly state: AttemptState;
+  /**
+   * Whether the RESULT has been released to the learner (Task 009).
+   *
+   * Scoring and disclosure are separate events. An attempt is scored the
+   * instant it is submitted; whether the learner may see that score and review
+   * the paper is a second decision with its own authority. `false` here means
+   * the marks exist but are withheld.
+   *
+   * A third party who may read the attempt is NOT gated on this — a teacher
+   * decides whether to release, so they must be able to see what they are
+   * deciding about.
+   */
+  readonly released: boolean;
   /** Whether the SUBJECT still reaches this assessment through a class. */
   readonly learnerMayAttempt: boolean;
   /**
@@ -667,6 +680,22 @@ export const ASSESSMENT_ATTEMPT_ACTIONS = [
   'assessment_attempt:read',
   'assessment_attempt:list',
   'assessment_attempt:submit',
+  /**
+   * Reading the MARKED PAPER — per-question correctness, the learner's own
+   * selections, the correct answers and the explanation.
+   *
+   * Separate from `:read`, which returns the attempt and its marks. They are
+   * different disclosures and they open at different moments: a teacher may
+   * read an unreleased attempt in order to decide about it, while nobody may
+   * review one. Collapsing them would make the release gate unreachable.
+   */
+  'assessment_attempt:review',
+  /**
+   * Deciding that the learner may see their result. Held by the teacher of the
+   * shared class or an administrator of the learner's school — never by the
+   * learner, and never by their guardian.
+   */
+  'assessment_attempt:release',
 ] as const;
 
 export type AssessmentAttemptAction = (typeof ASSESSMENT_ATTEMPT_ACTIONS)[number];

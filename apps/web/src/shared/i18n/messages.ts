@@ -16,6 +16,20 @@ const ar = {
   'health.ok': 'الخدمة تعمل',
   'health.unavailable': 'تعذّر الوصول إلى الخدمة',
   'language.switch': 'English',
+  'attempt.loading': 'جارٍ التحميل…',
+  'attempt.unavailable': 'تعذّر عرض هذه المحاولة',
+  'attempt.inProgress': 'المحاولة قيد التنفيذ',
+  'attempt.resultWithheld': 'لم تُعلَن النتيجة بعد. سيعلنها معلّمك.',
+  'attempt.passed': 'ناجح',
+  'attempt.failed': 'لم تجتز',
+  'review.notReleased': 'ستظهر الإجابات الصحيحة بعد إعلان النتيجة.',
+  'review.correct': 'إجابة صحيحة',
+  'review.incorrect': 'إجابة غير صحيحة',
+  'release.action': 'إعلان النتيجة',
+  'release.comment': 'ملاحظة للطالب (اختياري)',
+  'release.pending': 'جارٍ الإعلان…',
+  'release.done': 'أُعلنت النتيجة',
+  'release.failed': 'تعذّر إعلان النتيجة',
 } as const;
 
 export type MessageKey = keyof typeof ar;
@@ -27,6 +41,20 @@ const en: Record<MessageKey, string> = {
   'health.ok': 'Service is running',
   'health.unavailable': 'Service is unreachable',
   'language.switch': 'العربية',
+  'attempt.loading': 'Loading…',
+  'attempt.unavailable': 'This attempt cannot be shown',
+  'attempt.inProgress': 'Attempt in progress',
+  'attempt.resultWithheld': 'Your result has not been released yet. Your teacher will release it.',
+  'attempt.passed': 'Passed',
+  'attempt.failed': 'Not passed',
+  'review.notReleased': 'The correct answers appear once your result is released.',
+  'review.correct': 'Correct',
+  'review.incorrect': 'Incorrect',
+  'release.action': 'Release result',
+  'release.comment': 'Note for the learner (optional)',
+  'release.pending': 'Releasing…',
+  'release.done': 'Result released',
+  'release.failed': 'The result could not be released',
 };
 
 const CATALOGUES: Record<Locale, Record<MessageKey, string>> = { ar, en };

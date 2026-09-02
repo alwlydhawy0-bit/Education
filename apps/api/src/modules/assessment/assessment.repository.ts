@@ -11,6 +11,7 @@ import {
   type ListActivitiesQuery,
   type ListAttemptsQuery,
   type QuestionType,
+  type ReviewPolicy,
 } from '@edu/contracts';
 import type { Tx } from '../../platform/db.ts';
 
@@ -61,6 +62,7 @@ export interface AssessmentRecord {
   readonly passingPercentage: number;
   readonly maxAttempts: number;
   readonly attemptsUsed: number;
+  readonly reviewPolicy: ReviewPolicy;
 }
 
 export interface AttemptRecord {
@@ -80,6 +82,24 @@ export interface AttemptRecord {
   readonly percentage: number | null;
   readonly passed: boolean | null;
   readonly passingPercentage: number;
+  readonly released: boolean;
+  readonly releasedAt: Date | null;
+  readonly teacherComment: string | null;
+}
+
+/** One question of a released paper, as `app_attempt_review` returns it. */
+export interface ReviewedQuestionRecord {
+  readonly questionId: string;
+  readonly position: number;
+  readonly questionType: QuestionType;
+  readonly prompt: string;
+  readonly points: number;
+  readonly awarded: number;
+  readonly isCorrect: boolean;
+  readonly selectedOptionIds: string[];
+  readonly correctOptionIds: string[];
+  readonly explanation: string;
+  readonly options: Array<{ id: string; position: number; body: string }>;
 }
 
 /** What the policy needs about a lesson before any activity exists on it. */
@@ -140,6 +160,8 @@ interface AttemptRow {
   learner_organization_id: string | null;
   learner_may_attempt: boolean;
   observable_by_actor_as_teacher: boolean;
+  released_at: Date | null;
+  teacher_comment: string | null;
 }
 
 const toActivity = (row: ActivityRow): ActivityRecord => ({
@@ -180,6 +202,10 @@ const toAttempt = (row: AttemptRow): AttemptRecord => ({
   status: row.status,
   startedAt: row.started_at,
   submittedAt: row.submitted_at,
+  // THE MARKS ARE REDACTED IN SQL, not here — `marks_visible` is computed in
+  // the query and these columns already arrive null when the reader must not
+  // see them. This mapping only carries that through, so a future change to the
+  // DTO cannot re-expose a withheld score: the value never left the database.
   score: row.score,
   maxScore: row.max_score,
   // `numeric` arrives as a string from `pg`; parsing here keeps the boundary in
@@ -187,6 +213,9 @@ const toAttempt = (row: AttemptRow): AttemptRecord => ({
   percentage: row.percentage === null ? null : Number(row.percentage),
   passed: row.passed,
   passingPercentage: row.passing_percentage,
+  released: row.released_at !== null,
+  releasedAt: row.released_at,
+  teacherComment: row.teacher_comment,
 });
 
 const toAttemptResource = (row: AttemptRow): AssessmentAttemptResource => ({
@@ -197,6 +226,7 @@ const toAttemptResource = (row: AttemptRow): AssessmentAttemptResource => ({
   assessmentId: row.assessment_id,
   lessonId: row.lesson_id,
   state: row.status,
+  released: row.released_at !== null,
   learnerMayAttempt: row.learner_may_attempt,
   observableByActorAsTeacher: row.observable_by_actor_as_teacher,
 });
@@ -212,6 +242,22 @@ const ACTIVITY_SELECT = `SELECT a.id, a.lesson_id, a.position, a.activity_type, 
          LEFT JOIN assessments s ON s.activity_id = a.id`;
 
 /**
+ * WHO MAY SEE THE MARKS, decided in SQL.
+ *
+ * A released attempt is visible to everyone who may read it. An UNRELEASED one
+ * shows its marks to a teacher or an administrator — they have to see what they
+ * are deciding about — but not to the learner or their guardian, who are the
+ * people the withholding is for.
+ *
+ * Written as a CASE in the projection rather than as a filter in TypeScript, so
+ * a withheld score never crosses the process boundary at all. Row-level
+ * security cannot hide a column; this is the equivalent, done where it cannot
+ * be forgotten by a serializer.
+ */
+const MARKS_VISIBLE = `(t.released_at IS NOT NULL
+        OR NOT (t.user_id = app_current_actor() OR app_actor_guards(t.user_id)))`;
+
+/**
  * Every attempt read carries the two facts the pure policy cannot derive,
  * resolved in the same statement as the row so the two can never disagree.
  *
@@ -221,7 +267,12 @@ const ACTIVITY_SELECT = `SELECT a.id, a.lesson_id, a.position, a.activity_type, 
  * third-party read the policy ignores it, which is the retention rule.
  */
 const ATTEMPT_SELECT = `SELECT t.id, t.assessment_id, t.user_id, t.attempt_number, t.status,
-              t.started_at, t.submitted_at, t.score, t.max_score, t.percentage, t.passed,
+              t.started_at, t.submitted_at,
+              CASE WHEN ${MARKS_VISIBLE} THEN t.score      END AS score,
+              CASE WHEN ${MARKS_VISIBLE} THEN t.max_score  END AS max_score,
+              CASE WHEN ${MARKS_VISIBLE} THEN t.percentage END AS percentage,
+              CASE WHEN ${MARKS_VISIBLE} THEN t.passed     END AS passed,
+              t.released_at, t.teacher_comment,
               lb.activity_title, lb.lesson_id, lb.lesson_title,
               lb.course_id, lb.course_title, lb.passing_percentage,
               app_user_organization(t.user_id) AS learner_organization_id,
@@ -275,6 +326,16 @@ export interface AssessmentRepository {
     rows: ReadonlyArray<readonly [questionId: string, optionId: string]>,
   ): Promise<void>;
   submitAttempt(tx: Tx, attemptId: string): Promise<AttemptRecord>;
+  /** The marked paper. Empty when the attempt is not released to this reader. */
+  reviewFor(tx: Tx, attemptId: string): Promise<ReviewedQuestionRecord[]>;
+  /**
+   * Records the release. Returns the attempt as it now stands.
+   *
+   * IDEMPOTENT: the RLS release policy carries `released_at IS NULL` in its
+   * USING clause, so a second release matches zero rows and changes nothing
+   * rather than erroring. The caller treats that as success.
+   */
+  releaseAttempt(tx: Tx, attemptId: string, comment: string | null): Promise<AttemptRecord>;
   listAttemptsForLearner(
     tx: Tx,
     learnerId: string,
@@ -377,9 +438,14 @@ export const assessmentRepository: AssessmentRepository = {
 
     if (input.assessment) {
       await tx.query(
-        `INSERT INTO assessments (activity_id, passing_percentage, max_attempts)
-         VALUES ($1, $2, $3)`,
-        [id, input.assessment.passingPercentage, input.assessment.maxAttempts],
+        `INSERT INTO assessments (activity_id, passing_percentage, max_attempts, review_policy)
+         VALUES ($1, $2, $3, $4)`,
+        [
+          id,
+          input.assessment.passingPercentage,
+          input.assessment.maxAttempts,
+          input.assessment.reviewPolicy,
+        ],
       );
     }
 
@@ -443,12 +509,12 @@ export const assessmentRepository: AssessmentRepository = {
 
   async addQuestion(tx, assessmentId, input) {
     const { rows } = await tx.query<{ id: string }>(
-      `INSERT INTO assessment_questions (assessment_id, position, question_type, prompt, points)
+      `INSERT INTO assessment_questions (assessment_id, position, question_type, prompt, points, explanation)
        VALUES ($1,
                (SELECT coalesce(max(position), 0) + 1 FROM assessment_questions WHERE assessment_id = $1),
-               $2, $3, $4)
+               $2, $3, $4, $5)
        RETURNING id`,
-      [assessmentId, input.questionType, input.prompt, input.points],
+      [assessmentId, input.questionType, input.prompt, input.points, input.explanation],
     );
     const questionId = rows[0]?.id;
     if (!questionId) throw new Error('Question insert returned no row');
@@ -495,11 +561,12 @@ export const assessmentRepository: AssessmentRepository = {
       passing_percentage: number;
       max_attempts: number;
       attempts_used: number;
+      review_policy: ReviewPolicy;
     }>(
       `SELECT s.id, s.activity_id, a.lesson_id, a.title, a.instructions,
               (SELECT count(*)            FROM assessment_questions q WHERE q.assessment_id = s.id) AS question_count,
               (SELECT coalesce(sum(q.points), 0) FROM assessment_questions q WHERE q.assessment_id = s.id) AS max_score,
-              s.passing_percentage, s.max_attempts,
+              s.passing_percentage, s.max_attempts, s.review_policy,
               app_attempt_count(s.id, $2) AS attempts_used
          FROM assessments s
          JOIN learning_activities a ON a.id = s.activity_id
@@ -519,6 +586,10 @@ export const assessmentRepository: AssessmentRepository = {
       passingPercentage: row.passing_percentage,
       maxAttempts: row.max_attempts,
       attemptsUsed: row.attempts_used,
+      // Told to the learner BEFORE they sit, so a client can say "your teacher
+      // releases these results" up front. It discloses nothing about the paper
+      // or the mark — only when the mark will be shown.
+      reviewPolicy: row.review_policy,
     };
   },
 
@@ -601,6 +672,64 @@ export const assessmentRepository: AssessmentRepository = {
     ]);
     const saved = await readAttempt(tx, attemptId);
     if (!saved) throw new Error('The submitted attempt is not readable by its owner');
+    return saved;
+  },
+
+  async reviewFor(tx, attemptId) {
+    // `app_attempt_review` re-checks BOTH the release and the readership itself
+    // — it is granted to `edu_app`, so an id alone must buy nothing. The options
+    // are joined here because the review needs their text to be legible, and
+    // they are already readable by anyone who can see the assessment.
+    const { rows } = await tx.query<{
+      question_id: string;
+      question_position: number;
+      question_type: QuestionType;
+      prompt: string;
+      explanation: string;
+      points: number;
+      awarded: number;
+      is_correct: boolean;
+      selected_option_ids: string[];
+      correct_option_ids: string[];
+      options: Array<{ id: string; position: number; body: string }> | null;
+    }>(
+      `SELECT r.*,
+              (
+                SELECT json_agg(json_build_object('id', o.id, 'position', o.position, 'body', o.body)
+                                ORDER BY o.position)
+                  FROM assessment_options o WHERE o.question_id = r.question_id
+              ) AS options
+         FROM app_attempt_review($1) r
+        ORDER BY r.question_position ASC`,
+      [attemptId],
+    );
+    return rows.map((row) => ({
+      questionId: row.question_id,
+      position: row.question_position,
+      questionType: row.question_type,
+      prompt: row.prompt,
+      points: row.points,
+      awarded: row.awarded,
+      isCorrect: row.is_correct,
+      selectedOptionIds: row.selected_option_ids,
+      correctOptionIds: row.correct_option_ids,
+      explanation: row.explanation,
+      options: row.options ?? [],
+    }));
+  },
+
+  async releaseAttempt(tx, attemptId, comment) {
+    // The ENTIRE release statement. `released_at` is overwritten by the trigger
+    // with the server clock, so a caller cannot backdate one, and every other
+    // column must be byte-identical or the trigger refuses the update outright.
+    await tx.query(
+      `UPDATE assessment_attempts
+          SET released_at = now(), released_by = app_current_actor(), teacher_comment = $2
+        WHERE id = $1`,
+      [attemptId, comment],
+    );
+    const saved = await readAttempt(tx, attemptId);
+    if (!saved) throw new Error('The released attempt is not readable');
     return saved;
   },
 

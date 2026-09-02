@@ -215,7 +215,11 @@ async function world() {
   const mkAssessment = async (
     lessonId: string,
     title: string,
-    options: { maxAttempts?: number; status?: 'draft' | 'published' } = {},
+    options: {
+      maxAttempts?: number;
+      status?: 'draft' | 'published';
+      reviewPolicy?: 'on_submission' | 'on_release';
+    } = {},
   ) => {
     const { activityId, assessmentId } = await createActivity({
       lessonId,
@@ -223,6 +227,7 @@ async function world() {
       status: 'draft',
       maxAttempts: options.maxAttempts ?? 2,
       passingPercentage: 50,
+      ...(options.reviewPolicy ? { reviewPolicy: options.reviewPolicy } : {}),
     });
     const q = await createQuestion({
       assessmentId: assessmentId!,
@@ -231,6 +236,7 @@ async function world() {
       points: 2,
       options: ['Right', 'Wrong'],
       correctOptions: [0],
+      explanation: 'Because Right is right.',
     });
     if ((options.status ?? 'published') === 'published') {
       await asSuperuser(
@@ -245,6 +251,14 @@ async function world() {
   const quizQ = await mkAssessment(courseQ.lessonId, 'Q Quiz');
   const quizB = await mkAssessment(courseB.lessonId, 'B Quiz');
   const draftQuiz = await mkAssessment(courseP.lessonId, 'Draft Quiz', { status: 'draft' });
+  /** Same lesson, same class — but its results are WITHHELD until released. */
+  const withheldQuiz = await mkAssessment(courseP.lessonId, 'Withheld Quiz', {
+    reviewPolicy: 'on_release',
+  });
+  /** In class A2's course, so `otherTeacher` is its teacher and `teacher` is not. */
+  const withheldQuizQ = await mkAssessment(courseQ.lessonId, 'Withheld Q Quiz', {
+    reviewPolicy: 'on_release',
+  });
 
   return {
     orgA,
@@ -272,6 +286,8 @@ async function world() {
     quizQ,
     quizB,
     draftQuiz,
+    withheldQuiz,
+    withheldQuizQ,
   };
 }
 
@@ -845,7 +861,11 @@ describe('activity listing', () => {
       w.learner.cookie,
     );
     expect(response.statusCode).toBe(200);
-    expect(items<{ title: string }>(response).map((a) => a.title)).toEqual(['P Quiz']);
+    expect(
+      items<{ title: string }>(response)
+        .map((a) => a.title)
+        .sort(),
+    ).toEqual(['P Quiz', 'Withheld Quiz']);
   });
 
   it('an author sees the drafts too', async () => {
@@ -854,7 +874,7 @@ describe('activity listing', () => {
       items<{ title: string }>(response)
         .map((a) => a.title)
         .sort(),
-    ).toEqual(['Draft Quiz', 'P Quiz']);
+    ).toEqual(['Draft Quiz', 'P Quiz', 'Withheld Quiz']);
   });
 
   it('a learner cannot list activities on a lesson they cannot reach', async () => {
@@ -1024,5 +1044,469 @@ describe('the audit trail', () => {
     const { attempt } = await startAttempt(w.learner, w.quizP.assessmentId);
     await get(`/api/v1/attempts/${attempt.id}`, w.peer.cookie);
     expect(await auditTypes()).toContain('authz.denied');
+  });
+});
+
+// =====================================================================
+// TASK 009 — result release, review and educational feedback
+//
+// Over the real HTTP stack, with both authorization gates live. The named
+// adversarial cases from the task brief are marked in the test names so the
+// report's matrix traces back to a test that ran rather than to a claim.
+// =====================================================================
+
+/** Sits an assessment through the real endpoints and returns the attempt id. */
+async function sitAndSubmit(
+  session: Session,
+  assessmentId: string,
+  answer: 'right' | 'wrong' | 'blank' = 'right',
+): Promise<string> {
+  const { attempt, questions } = await startAttempt(session, assessmentId);
+  const question = questions[0]!;
+  const chosen =
+    answer === 'blank'
+      ? []
+      : [
+          question.options.find((o) =>
+            answer === 'right' ? o.body === 'Right' : o.body === 'Wrong',
+          )!.id,
+        ];
+  const submitted = await post(`/api/v1/attempts/${attempt.id}/submit`, session.cookie, {
+    answers: [{ questionId: question.id, selectedOptionIds: chosen }],
+  });
+  if (submitted.statusCode !== 200) {
+    throw new Error(`submit failed: ${submitted.statusCode} ${submitted.body}`);
+  }
+  return attempt.id;
+}
+
+/**
+ * The result block of `GET /attempts/:id`, which wraps the attempt alongside
+ * the paper. The list endpoints return the attempt flat, so the two are read
+ * differently on purpose rather than by a shared shortcut that could hide a
+ * difference between them.
+ */
+const resultOf = (r: { json: <U>() => U }) => r.json<{ attempt: ResultBody }>().attempt;
+
+interface ResultBody {
+  score: number | null;
+  maxScore: number | null;
+  percentage: number | null;
+  passed: boolean | null;
+  released: boolean;
+  releasedAt: string | null;
+}
+
+describe('withholding a result', () => {
+  it('an `on_submission` assessment still returns the mark immediately', async () => {
+    // Task 008's behaviour, unchanged. The default must not alter what any
+    // existing assessment does.
+    const id = await sitAndSubmit(w.learner, w.quizP.assessmentId);
+    const read = await get(`/api/v1/attempts/${id}`, w.learner.cookie);
+    expect(resultOf(read)).toMatchObject({ score: 2, passed: true, released: true });
+  });
+
+  it('and says so up front, before the learner sits', async () => {
+    const meta = await get(`/api/v1/assessments/${w.withheldQuiz.assessmentId}`, w.learner.cookie);
+    expect(meta.statusCode).toBe(200);
+    expect(meta.json<{ reviewPolicy: string }>().reviewPolicy).toBe('on_release');
+  });
+
+  it('AN `on_release` ASSESSMENT RETURNS NO MARK AT ALL — not zero, not null-with-a-hint', async () => {
+    // The submission response itself must not carry the mark, because that is
+    // the first place a withheld result would leak: the learner already has an
+    // authenticated request in flight at the moment of scoring.
+    const { attempt, questions } = await startAttempt(w.learner, w.withheldQuiz.assessmentId);
+    const correct = questions[0]!.options.find((o) => o.body === 'Right')!;
+    const submitted = await post(`/api/v1/attempts/${attempt.id}/submit`, w.learner.cookie, {
+      answers: [{ questionId: questions[0]!.id, selectedOptionIds: [correct.id] }],
+    });
+    expect(submitted.statusCode).toBe(200);
+    expect(submitted.json<ResultBody>()).toMatchObject({
+      score: null,
+      maxScore: null,
+      percentage: null,
+      passed: null,
+      released: false,
+      releasedAt: null,
+    });
+  });
+
+  it('and re-reading the attempt does not reveal it either', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const read = await get(`/api/v1/attempts/${id}`, w.learner.cookie);
+    expect(resultOf(read)).toMatchObject({ score: null, passed: null, released: false });
+  });
+
+  it('nor does the learner’s own attempt LIST', async () => {
+    // The list is a different query with a different shape, and a redaction
+    // applied only to the single-record read would leak through it.
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const list = items<ResultBody & { id: string }>(
+      await get('/api/v1/me/attempts', w.learner.cookie),
+    );
+    const row = list.find((r) => r.id === id)!;
+    expect(row).toMatchObject({ score: null, passed: null, released: false });
+  });
+
+  it('nor the GUARDIAN’s view of their child', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const list = items<ResultBody & { id: string }>(
+      await get(`/api/v1/guardians/children/${w.learner.id}/attempts`, w.guardian.cookie),
+    );
+    expect(list.find((r) => r.id === id)).toMatchObject({ score: null, released: false });
+  });
+
+  it('BUT THE TEACHER SEES THE MARK — withholding is from the subject, not from staff', async () => {
+    // The positive case, and the one that makes release possible at all: a
+    // teacher cannot decide whether to release a result they cannot see.
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const read = await get(`/api/v1/attempts/${id}`, w.teacher.cookie);
+    expect(resultOf(read)).toMatchObject({ score: 2, passed: true, released: false });
+  });
+
+  it('the mark is withheld in the RESPONSE, not merely hidden by the client', async () => {
+    // The number must not appear anywhere in the payload under any name. A
+    // field the frontend is trusted to hide is not a control.
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const read = await get(`/api/v1/attempts/${id}`, w.learner.cookie);
+    const body = resultOf(read) as unknown as Record<string, unknown>;
+    for (const [key, value] of Object.entries(body)) {
+      if (key === 'passingPercentage') continue; // a property of the assessment, not the result
+      expect(typeof value === 'number' && value === 2).toBe(false);
+    }
+  });
+});
+
+describe('releasing a result', () => {
+  const release = (session: Session, attemptId: string, payload?: Record<string, unknown>) =>
+    post(`/api/v1/attempts/${attemptId}/release`, session.cookie, payload);
+
+  it('A LEARNER CANNOT RELEASE THEIR OWN RESULT', async () => {
+    // The single most important refusal in this task.
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const response = await release(w.learner, id);
+    expect(response.statusCode).toBe(403);
+    // And nothing moved.
+    const read = await get(`/api/v1/attempts/${id}`, w.learner.cookie);
+    expect(resultOf(read)).toMatchObject({ released: false, score: null });
+  });
+
+  it('A LEARNER CANNOT RELEASE ANOTHER LEARNER’S RESULT', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const response = await release(w.peer, id);
+    // 404, not 403: a peer has no standing to know the attempt exists.
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('AN UNAUTHORIZED TEACHER CANNOT RELEASE — another class, same school', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const response = await release(w.otherTeacher, id);
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('A TEACHER CANNOT RELEASE A RESULT FROM ANOTHER CLASS they do teach', async () => {
+    // The mirror of the case above, from the other side: `otherTeacher` teaches
+    // A2, so they may release A2's results and not A1's. Both directions are
+    // asserted, because a rule that admitted everyone would pass one of them.
+    const theirs = await sitAndSubmit(w.otherClassLearner, w.withheldQuizQ.assessmentId);
+    expect((await release(w.otherTeacher, theirs)).statusCode).toBe(200);
+    const mine = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    expect((await release(w.otherTeacher, mine)).statusCode).toBe(404);
+  });
+
+  it('A TEACHER FROM ANOTHER ORGANIZATION CANNOT RELEASE', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    expect((await release(w.foreignAdmin, id)).statusCode).toBe(404);
+  });
+
+  it('A GUARDIAN CANNOT RELEASE, though they may read the attempt', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    expect((await get(`/api/v1/attempts/${id}`, w.guardian.cookie)).statusCode).toBe(200);
+    expect((await release(w.guardian, id)).statusCode).toBe(404);
+  });
+
+  it('A SECURITY ADMINISTRATOR CANNOT RELEASE', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    expect((await release(w.securityAdmin, id)).statusCode).toBe(404);
+  });
+
+  it('the teacher of the class CAN release, and the learner then sees the mark', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const released = await release(w.teacher, id);
+    expect(released.statusCode).toBe(200);
+    expect(released.json<ResultBody>()).toMatchObject({ released: true });
+
+    const read = await get(`/api/v1/attempts/${id}`, w.learner.cookie);
+    expect(resultOf(read)).toMatchObject({
+      score: 2,
+      maxScore: 2,
+      passed: true,
+      released: true,
+    });
+    expect(resultOf(read).releasedAt).not.toBeNull();
+  });
+
+  it('an administrator of the school can release too', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    expect((await release(w.admin, id)).statusCode).toBe(200);
+  });
+
+  it('releasing twice is idempotent and does not move the timestamp', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const first = await release(w.teacher, id);
+    const firstAt = first.json<{ releasedAt: string }>().releasedAt;
+    const second = await release(w.admin, id);
+    expect(second.statusCode).toBe(200);
+    expect(second.json<{ releasedAt: string }>().releasedAt).toBe(firstAt);
+  });
+
+  it('an in-progress attempt has nothing to release', async () => {
+    const { attempt } = await startAttempt(w.learner, w.withheldQuiz.assessmentId);
+    expect((await release(w.teacher, attempt.id)).statusCode).toBe(403);
+  });
+
+  it('a release carries a teacher comment, and the learner reads it', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    await release(w.teacher, id, { teacherComment: 'راجع الوحدة الثانية قبل المحاولة القادمة' });
+    const review = await get(`/api/v1/attempts/${id}/review`, w.learner.cookie);
+    expect(review.json<{ teacherComment: string }>().teacherComment).toBe(
+      'راجع الوحدة الثانية قبل المحاولة القادمة',
+    );
+  });
+
+  it('the release is recorded in the audit trail', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    await release(w.teacher, id);
+    expect(await auditTypes()).toContain('assessment.result_released');
+  });
+});
+
+describe('parameter tampering on release', () => {
+  const releaseRaw = (session: Session, attemptId: string, payload: Record<string, unknown>) =>
+    post(`/api/v1/attempts/${attemptId}/release`, session.cookie, payload);
+
+  it.each([
+    ['a score', { score: 10 }],
+    ['a percentage', { percentage: 100 }],
+    ['a pass flag', { passed: true }],
+    ['a learner id', { userId: '00000000-0000-4000-8000-000000000000' }],
+    ['a learner id under another name', { learnerId: '00000000-0000-4000-8000-000000000000' }],
+    ['an organization', { organizationId: '00000000-0000-4000-8000-000000000000' }],
+    ['a class', { classId: '00000000-0000-4000-8000-000000000000' }],
+    ['a release timestamp', { releasedAt: '2001-01-01T00:00:00.000Z' }],
+    ['a releaser', { releasedBy: '00000000-0000-4000-8000-000000000000' }],
+  ])('a release body carrying %s is REFUSED, not silently ignored', async (_label, extra) => {
+    // `.strict()` turns an unexpected field into a 400. Silently dropping it
+    // would leave a caller believing the platform accepted their number.
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const response = await releaseRaw(w.teacher, id, extra);
+    expect(response.statusCode).toBe(400);
+    const read = await get(`/api/v1/attempts/${id}`, w.learner.cookie);
+    expect(resultOf(read).released).toBe(false);
+  });
+
+  it('a comment longer than the limit is refused', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const response = await releaseRaw(w.teacher, id, { teacherComment: 'x'.repeat(2001) });
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('a release aimed at an attempt that does not exist is a 404', async () => {
+    const response = await post(
+      `/api/v1/attempts/00000000-0000-4000-8000-000000000000/release`,
+      w.teacher.cookie,
+    );
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('a release aimed at a malformed id is a 400, not a 500', async () => {
+    expect((await post('/api/v1/attempts/not-a-uuid/release', w.teacher.cookie)).statusCode).toBe(
+      400,
+    );
+  });
+
+  it('an unauthenticated release is refused', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const response = await testApp.app.inject({
+      method: 'POST',
+      url: `/api/v1/attempts/${id}/release`,
+      headers: writeHeaders,
+      payload: {},
+    });
+    expect(response.statusCode).toBe(401);
+  });
+});
+
+describe('reviewing the marked paper', () => {
+  const review = (session: Session, attemptId: string) =>
+    get(`/api/v1/attempts/${attemptId}/review`, session.cookie);
+
+  interface Review {
+    questions: Array<{
+      questionId: string;
+      isCorrect: boolean;
+      awarded: number;
+      explanation: string;
+      correctOptionIds: string[];
+      selectedOptionIds: string[];
+    }>;
+    released: boolean;
+    teacherComment: string | null;
+  }
+
+  it('THE LEARNER CANNOT REVIEW AN UNRELEASED PAPER', async () => {
+    // The answer key is the payload here, so this is the refusal that matters
+    // most: a review endpoint that ignored release would be a key oracle for
+    // every learner who had sat the paper once.
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const response = await review(w.learner, id);
+    expect(response.statusCode).toBe(403);
+    expect(response.body).not.toContain(w.withheldQuiz.q.correctOptionIds[0]);
+  });
+
+  it('nor can their guardian', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    expect((await review(w.guardian, id)).statusCode).toBe(403);
+  });
+
+  it('the learner reviews it once released, and is told WHY', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId, 'wrong');
+    await post(`/api/v1/attempts/${id}/release`, w.teacher.cookie, {});
+    const response = await review(w.learner, id);
+    expect(response.statusCode).toBe(200);
+    const body = response.json<Review>();
+    expect(body.released).toBe(true);
+    expect(body.questions).toHaveLength(1);
+    expect(body.questions[0]).toMatchObject({
+      isCorrect: false,
+      awarded: 0,
+      explanation: 'Because Right is right.',
+    });
+    // The educational point: a wrong answer that teaches nothing is worth less
+    // than one that does, so the learner is told what the right answer WAS.
+    expect(body.questions[0]!.correctOptionIds).toEqual(w.withheldQuiz.q.correctOptionIds);
+  });
+
+  it('an `on_submission` paper is reviewable straight away', async () => {
+    const id = await sitAndSubmit(w.learner, w.quizP.assessmentId);
+    expect((await review(w.learner, id)).statusCode).toBe(200);
+  });
+
+  it('A PEER CANNOT REVIEW A RELEASED PAPER — release is not publication', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    await post(`/api/v1/attempts/${id}/release`, w.teacher.cookie, {});
+    const response = await review(w.peer, id);
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain(w.withheldQuiz.q.correctOptionIds[0]);
+  });
+
+  it.each([
+    ['a teacher of another class', () => w.otherTeacher],
+    ['an administrator of another organization', () => w.foreignAdmin],
+    ['a security administrator', () => w.securityAdmin],
+  ])('%s cannot review a released paper either', async (_label, who) => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    await post(`/api/v1/attempts/${id}/release`, w.teacher.cookie, {});
+    const response = await review(who(), id);
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain(w.withheldQuiz.q.correctOptionIds[0]);
+  });
+
+  it('THE TEACHER MAY REVIEW BEFORE RELEASE — that is how the decision is made', async () => {
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    const response = await review(w.teacher, id);
+    expect(response.statusCode).toBe(200);
+    expect(response.json<Review>().questions).toHaveLength(1);
+  });
+
+  it('an IN-PROGRESS attempt cannot be reviewed by its own learner', async () => {
+    // Otherwise the review endpoint is a way to read the key mid-attempt, which
+    // would make every assessment scoreable at full marks on the second try.
+    const { attempt } = await startAttempt(w.learner, w.withheldQuiz.assessmentId);
+    const response = await review(w.learner, attempt.id);
+    expect(response.statusCode).toBe(403);
+    expect(response.body).not.toContain(w.withheldQuiz.q.correctOptionIds[0]);
+  });
+
+  it('reviewing an attempt that does not exist is a 404', async () => {
+    const response = await get(
+      '/api/v1/attempts/00000000-0000-4000-8000-000000000000/review',
+      w.learner.cookie,
+    );
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('an unauthenticated review is refused', async () => {
+    const id = await sitAndSubmit(w.learner, w.quizP.assessmentId);
+    const response = await testApp.app.inject({
+      method: 'GET',
+      url: `/api/v1/attempts/${id}/review`,
+    });
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('the review carries no field that could name another learner', async () => {
+    const id = await sitAndSubmit(w.learner, w.quizP.assessmentId);
+    const body = (await review(w.learner, id)).json<Review>();
+    for (const q of body.questions) {
+      expect(Object.keys(q).sort()).toEqual(
+        [
+          'awarded',
+          'correctOptionIds',
+          'explanation',
+          'isCorrect',
+          'options',
+          'points',
+          'position',
+          'prompt',
+          'questionId',
+          'questionType',
+          'selectedOptionIds',
+        ].sort(),
+      );
+    }
+  });
+});
+
+describe('the result cannot be mutated', () => {
+  it('a teacher cannot change a mark by releasing it', async () => {
+    // There is no endpoint that accepts a score, and `.strict()` refuses one
+    // smuggled into the release body. This asserts the OUTCOME rather than the
+    // mechanism: the number a learner is shown is the number the database
+    // computed.
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId, 'wrong');
+    await post(`/api/v1/attempts/${id}/release`, w.teacher.cookie, {});
+    const read = await get(`/api/v1/attempts/${id}`, w.learner.cookie);
+    expect(resultOf(read)).toMatchObject({ score: 0, passed: false });
+  });
+
+  it('a submitted attempt cannot be re-submitted with better answers', async () => {
+    const { attempt, questions } = await startAttempt(w.learner, w.withheldQuiz.assessmentId);
+    const wrong = questions[0]!.options.find((o) => o.body === 'Wrong')!;
+    const right = questions[0]!.options.find((o) => o.body === 'Right')!;
+    await post(`/api/v1/attempts/${attempt.id}/submit`, w.learner.cookie, {
+      answers: [{ questionId: questions[0]!.id, selectedOptionIds: [wrong.id] }],
+    });
+    const again = await post(`/api/v1/attempts/${attempt.id}/submit`, w.learner.cookie, {
+      answers: [{ questionId: questions[0]!.id, selectedOptionIds: [right.id] }],
+    });
+    // 403 with `reveal`, not 404: it is their own attempt and they can already
+    // see it, so the policy refuses the second submission before the database
+    // is reached at all.
+    expect(again.statusCode).toBe(403);
+    await post(`/api/v1/attempts/${attempt.id}/release`, w.teacher.cookie, {});
+    const read = await get(`/api/v1/attempts/${attempt.id}`, w.learner.cookie);
+    expect(resultOf(read).score).toBe(0);
+  });
+
+  it('a released result cannot be un-released', async () => {
+    // There is no endpoint for it, and the database refuses it independently.
+    // Asserted here so that adding one later breaks a test rather than a child's
+    // expectation.
+    const id = await sitAndSubmit(w.learner, w.withheldQuiz.assessmentId);
+    await post(`/api/v1/attempts/${id}/release`, w.teacher.cookie, {});
+    const read = await get(`/api/v1/attempts/${id}`, w.learner.cookie);
+    expect(resultOf(read).released).toBe(true);
   });
 });

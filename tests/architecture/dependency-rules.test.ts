@@ -565,20 +565,47 @@ describe('rule 10 — the answer key stays in the database', () => {
     expect(violations).toEqual([]);
   });
 
-  it('no response schema carries a field that could hold a correct answer', () => {
-    // The contracts package is where a leak would have to surface, because
-    // every response in the assessment module is built field by field through
-    // one of these schemas. A property named for correctness is refused here
-    // rather than caught in review.
+  it('exactly ONE response schema may carry a correct answer, and it is the review', () => {
+    // Task 008 forbade a correctness field in EVERY response, because no
+    // legitimate response carried one. Task 009 introduced exactly one that
+    // does: `reviewedQuestionSchema`, the marked paper of a RELEASED attempt.
     //
-    // `correctOptions` on the AUTHORING request is legitimate and different: it
-    // travels inbound, from an author who already holds the key. Only the
-    // response half of the file is scanned.
+    // The rule is narrowed rather than dropped, and narrowing keeps its whole
+    // value: the shapes that must never carry a key — the assessment metadata,
+    // the attempt, and above all `attemptQuestionSchema`, the paper handed out
+    // DURING an attempt — are still checked. A key field appearing in any of
+    // them is still a failure.
     const forbidden = /\b(isCorrect|correctOptionIds|correctAnswers?|answerKey)\b/;
     const contract = stripComments(
       readFileSync(join(ROOT, 'packages/contracts/src/assessment.contract.ts'), 'utf8'),
     );
+
     const responses = contract.slice(contract.indexOf('export const activityResponseSchema'));
-    expect(responses).not.toMatch(forbidden);
+    const reviewStart = responses.indexOf('export const reviewedQuestionSchema');
+    const reviewEnd = responses.indexOf('export type ReviewedQuestion');
+    expect(reviewStart, 'reviewedQuestionSchema must exist').toBeGreaterThan(-1);
+    expect(reviewEnd).toBeGreaterThan(reviewStart);
+
+    // Everything except that one schema.
+    const elsewhere = responses.slice(0, reviewStart) + responses.slice(reviewEnd);
+    expect(elsewhere).not.toMatch(forbidden);
+
+    // And the exemption is real, not a hole: the review schema does carry it.
+    expect(responses.slice(reviewStart, reviewEnd)).toMatch(/correctOptionIds/);
+  });
+
+  it('the paper handed out DURING an attempt still carries no correctness field', () => {
+    // The single most important instance of the rule above, pinned separately
+    // so it cannot be lost in a future edit to the block boundaries. A key here
+    // would be disclosed before the learner has answered anything.
+    const contract = stripComments(
+      readFileSync(join(ROOT, 'packages/contracts/src/assessment.contract.ts'), 'utf8'),
+    );
+    const start = contract.indexOf('export const attemptQuestionSchema');
+    const end = contract.indexOf('export type AttemptQuestion');
+    expect(start).toBeGreaterThan(-1);
+    expect(contract.slice(start, end)).not.toMatch(
+      /\b(isCorrect|correctOptionIds|correctAnswers?|answerKey)\b/,
+    );
   });
 });

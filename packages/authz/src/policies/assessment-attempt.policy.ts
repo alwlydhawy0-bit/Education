@@ -64,6 +64,63 @@ export function assessmentAttemptPolicy(
     return allow(action, attempt.id, 'assessment_attempt.own_and_accessible');
   }
 
+  // --- Releasing ----------------------------------------------------------
+  // Checked BEFORE the read branches, because the set of people who may DECIDE
+  // that a learner sees their mark is strictly narrower than the set who may
+  // read it, and the two must not be reached through the same door.
+  if (action === 'assessment_attempt:release') {
+    if (isOwn) {
+      // The single most important denial in this task. A result the subject can
+      // release is not a result anyone else can rely on — withholding exists
+      // precisely so the decision belongs to somebody other than the person
+      // being measured. `reveal`: they can already see the attempt, so hiding
+      // it would only confuse.
+      return deny(action, attempt.id, 'assessment_attempt.learner_may_not_release', 'reveal');
+    }
+    if (attempt.state !== 'submitted') {
+      return deny(action, attempt.id, 'assessment_attempt.nothing_to_release', 'reveal');
+    }
+    if (attempt.observableByActorAsTeacher) {
+      return allow(action, attempt.id, 'assessment_attempt.teacher_of_shared_class');
+    }
+    if (
+      actor.roles.includes(Role.ADMIN) &&
+      actor.organizationId !== null &&
+      attempt.learnerOrganizationId === actor.organizationId
+    ) {
+      return allow(action, attempt.id, 'assessment_attempt.admin_same_organization');
+    }
+    if (isPlatformOperator(actor)) {
+      // Permitted, unlike `start` and `submit`. The direction of the act is what
+      // separates them: releasing DISCLOSES a mark the database already
+      // computed, it does not manufacture evidence about what a child did.
+      return allow(action, attempt.id, 'assessment_attempt.platform_operator');
+    }
+    // A guardian lands here deliberately. They may read what their child was
+    // told; deciding what a child is told about their own assessment is a
+    // teaching act, not a parental one.
+    return deny(action, attempt.id, 'assessment_attempt.not_a_releaser', 'hide');
+  }
+
+  // --- Reviewing the marked paper -----------------------------------------
+  // Everything the read branches admit, PLUS the release gate — and the gate
+  // binds only the learner and their guardian. A teacher must be able to look
+  // at an unreleased paper in order to decide whether to release it; a learner
+  // must not, because that is the whole point of withholding.
+  if (action === 'assessment_attempt:review') {
+    if (attempt.state !== 'submitted') {
+      return deny(action, attempt.id, 'assessment_attempt.not_submitted', 'reveal');
+    }
+    const readerIsSubject = isOwn || relationships.guardianOf.includes(attempt.learnerId);
+    if (readerIsSubject && !attempt.released) {
+      // `reveal`, not `hide`: the learner knows the attempt exists — they sat
+      // it. Pretending otherwise would be a worse experience for no security
+      // gain, and the disclosure is only that a result is pending.
+      return deny(action, attempt.id, 'assessment_attempt.result_not_released', 'reveal');
+    }
+    // Falls through to the read table below, which decides WHO may look at all.
+  }
+
   // --- Reading ------------------------------------------------------------
   if (isPlatformOperator(actor)) {
     return allow(action, attempt.id, 'assessment_attempt.platform_operator');

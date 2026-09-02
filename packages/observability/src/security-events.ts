@@ -139,6 +139,22 @@ export const SecurityEventType = {
   ASSESSMENT_SUSPICIOUS_SUBMISSION: 'assessment.suspicious_submission',
 
   /**
+   * A result was released to the learner (Task 009).
+   *
+   * Distinct from `assessment.submitted`, which records that a paper was
+   * scored. This records the separate DECISION that a child may see that
+   * score — an act with a named human behind it, taken over somebody else's
+   * data. "Who decided this learner could see their mark, and when?" has to be
+   * answerable from the audit trail alone, in the same way "who published this
+   * lesson?" is.
+   *
+   * Carries the attempt, the assessment, the learner and whether a comment was
+   * left. Never the score, never the comment's text, never any part of the
+   * paper — the audit trail is more widely readable than the result is.
+   */
+  ASSESSMENT_RESULT_RELEASED: 'assessment.result_released',
+
+  /**
    * Emitted on every authorization denial. A burst of these from one actor
    * across many resource ids is the primary IDOR/BOLA probing signal.
    */

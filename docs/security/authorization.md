@@ -391,6 +391,44 @@ Individual answers are held narrower than the attempt: owner only. A teacher may
 read a score, and no endpoint returns selections at all, so widening that later
 is a visible decision in a migration.
 
+### Releasing and reviewing a result — Task 009
+
+**Releasing is a narrower table than reading, and it is reached through a
+different door.** The `assessment_attempt:release` branch is checked _before_
+every read branch, because the set of people who may DECIDE that a learner sees
+their mark is strictly smaller than the set who may read it, and the two must
+not fall through into each other.
+
+Two names are absent from that table, and both absences are the point:
+
+- **The learner.** A result the subject can release is not a result anyone else
+  can rely on; withholding exists precisely so the decision belongs to somebody
+  other than the person being measured. Refused first, before the ownership
+  branch that would otherwise admit them, so holding a second role — a learner
+  who also teaches the class — changes nothing.
+- **The verified guardian.** They may read what their child was told. Deciding
+  what a child is told about their own assessment is a teaching act.
+
+A **platform operator may** release, unlike `start` and `submit`. The direction
+of the act separates them: releasing discloses a mark the database already
+computed; starting or submitting would manufacture evidence about what a child
+did. Recorded as an operator capability in the threat model.
+
+**Reviewing is the read table plus a gate that binds only the subject.** A
+learner and their guardian reach the marked paper only once it is released; a
+teacher or an administrator reaches it before, because that is how the release
+decision gets made. The same asymmetry is written three times — in the policy,
+in `app_attempt_review`'s `WHERE` clause, and in the repository's score
+redaction — as the same expression each time, so the three cannot drift into
+disagreeing about who is being withheld from.
+
+**Neither gate is a rendering decision.** The withheld score columns arrive as
+`null` from SQL and the unreleased paper arrives as zero rows, so there is
+nothing in a client's memory to reveal by editing the page. The frontend's
+release control is drawn from the server's own answer — a review that loaded
+while `released` is false can only belong to a staff reader — not from a
+role check in the browser.
+
 ### Profiles
 
 Several roles can read a profile they have a relationship with. **Nobody may

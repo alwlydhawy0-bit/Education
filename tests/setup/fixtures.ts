@@ -522,6 +522,12 @@ export async function createActivity(options: {
   /** Assessment configuration. Required in practice for `assessment` activities. */
   passingPercentage?: number;
   maxAttempts?: number;
+  /**
+   * `on_submission` (the default, and Task 008's behaviour) marks the result
+   * released the moment it is scored. `on_release` withholds it until somebody
+   * with the authority to do so decides otherwise.
+   */
+  reviewPolicy?: 'on_submission' | 'on_release';
 }): Promise<{ activityId: string; assessmentId: string | null }> {
   const db = await seedDb();
   const status = options.status ?? 'draft';
@@ -553,9 +559,14 @@ export async function createActivity(options: {
   let assessmentId: string | null = null;
   if (type === 'assessment') {
     const { rows: aRows } = await db.query<{ id: string }>(
-      `INSERT INTO assessments (activity_id, passing_percentage, max_attempts)
-       VALUES ($1, $2, $3) RETURNING id`,
-      [activityId, options.passingPercentage ?? 50, options.maxAttempts ?? 1],
+      `INSERT INTO assessments (activity_id, passing_percentage, max_attempts, review_policy)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [
+        activityId,
+        options.passingPercentage ?? 50,
+        options.maxAttempts ?? 1,
+        options.reviewPolicy ?? 'on_submission',
+      ],
     );
     assessmentId = aRows[0]?.id ?? null;
     if (!assessmentId) throw new Error('Failed to seed assessment');
@@ -580,13 +591,15 @@ export async function createQuestion(options: {
   options: readonly string[];
   correctOptions: readonly number[];
   position?: number;
+  /** Shown only in a released review — never in the paper handed out. */
+  explanation?: string;
 }): Promise<{ questionId: string; optionIds: string[]; correctOptionIds: string[] }> {
   const db = await seedDb();
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO assessment_questions (assessment_id, position, question_type, prompt, points)
+    `INSERT INTO assessment_questions (assessment_id, position, question_type, prompt, points, explanation)
      VALUES ($1,
              COALESCE($2, (SELECT coalesce(max(position), 0) + 1 FROM assessment_questions WHERE assessment_id = $1)),
-             $3, $4, $5)
+             $3, $4, $5, $6)
      RETURNING id`,
     [
       options.assessmentId,
@@ -594,6 +607,7 @@ export async function createQuestion(options: {
       options.questionType ?? 'single_choice',
       options.prompt ?? 'Question?',
       options.points ?? 1,
+      options.explanation ?? '',
     ],
   );
   const questionId = rows[0]?.id;

@@ -19,6 +19,7 @@ import type {
   CreateQuestionRequest,
   ListActivitiesQuery,
   ListAttemptsQuery,
+  ReleaseAttemptRequest,
   SubmitAttemptRequest,
 } from '@edu/contracts';
 import type { Database, Tx } from '../../platform/db.ts';
@@ -29,6 +30,7 @@ import type {
   AssessmentRecord,
   AssessmentRepository,
   AttemptRecord,
+  ReviewedQuestionRecord,
 } from './assessment.repository.ts';
 
 export interface ActorContext {
@@ -109,6 +111,15 @@ export interface AssessmentService {
     childId: string,
     query: ListAttemptsQuery,
   ): Promise<AttemptRecord[]>;
+  reviewAttempt(
+    ctx: ActorContext,
+    id: string,
+  ): Promise<{ attempt: AttemptRecord; questions: ReviewedQuestionRecord[] }>;
+  releaseAttempt(
+    ctx: ActorContext,
+    id: string,
+    input: ReleaseAttemptRequest,
+  ): Promise<AttemptRecord>;
 }
 
 /** PostgreSQL error codes the database raises through the guards in 0019. */
@@ -424,6 +435,8 @@ export function createAssessmentService(deps: AssessmentServiceDeps): Assessment
           assessmentId,
           lessonId: activity.lessonId,
           state: 'in_progress',
+          // An attempt that does not exist yet cannot have been released.
+          released: false,
           learnerMayAttempt: activity.status === 'published' && facts.learnerReaches,
           observableByActorAsTeacher: false,
         };
@@ -603,6 +616,59 @@ export function createAssessmentService(deps: AssessmentServiceDeps): Assessment
           await repository.listAttemptsForLearnerInClass(tx, studentId, classId, query),
           'assessment_attempt:list',
         );
+      });
+    },
+
+    async reviewAttempt(ctx, id) {
+      return db.withActor(ctx.actor.id, async (tx) => {
+        const attempt = await authorize(
+          ctx,
+          await repository.findAttempt(tx, id),
+          'assessment_attempt:review',
+          'assessment_attempt',
+          id,
+        );
+
+        // The policy has already refused an unreleased paper to the learner and
+        // their guardian, and refused everyone with no standing. This call is
+        // the SECOND gate: `app_attempt_review` re-checks release and
+        // readership in SQL and returns nothing if either fails, so a mistake
+        // in the branch above cannot by itself disclose an answer key.
+        const questions = await repository.reviewFor(tx, id);
+        return { attempt, questions };
+      });
+    },
+
+    async releaseAttempt(ctx, id, input) {
+      return db.withActor(ctx.actor.id, async (tx) => {
+        const guarded = await repository.findAttempt(tx, id);
+        const existing = await authorize(
+          ctx,
+          guarded,
+          'assessment_attempt:release',
+          'assessment_attempt',
+          id,
+        );
+
+        // IDEMPOTENT, and checked here rather than left to the database so the
+        // caller gets the current state instead of a conflict. Releasing twice
+        // is a retry, not an error — and it must not overwrite the original
+        // releaser or the moment it happened.
+        if (existing.released) return existing;
+
+        const released = await repository.releaseAttempt(tx, id, input.teacherComment ?? null);
+
+        await emit(ctx, SecurityEventType.ASSESSMENT_RESULT_RELEASED, {
+          attemptId: id,
+          assessmentId: released.assessmentId,
+          // The LEARNER whose result was disclosed, and nothing about the paper.
+          // "Who decided this child could see their mark, and when?" has to be
+          // answerable from the audit trail alone; the mark itself does not.
+          learnerId:
+            (guarded?.resource as AssessmentAttemptResource | undefined)?.learnerId ?? null,
+          hasComment: input.teacherComment !== undefined,
+        });
+        return released;
       });
     },
 

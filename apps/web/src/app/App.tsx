@@ -1,14 +1,34 @@
 import { useLocale } from './LocaleProvider.tsx';
 import { HealthIndicator } from '../features/health/HealthIndicator.tsx';
+import { AttemptPanel } from '../features/assessment/index.ts';
+
+/**
+ * Reads `?attempt=<id>` from the address bar.
+ *
+ * Not a router, and not the start of one — the foundation has no routing, and
+ * Task 009 is not the place to introduce it. This is the smallest wiring that
+ * makes the attempt views reachable in the running application; the real
+ * navigation arrives with the router, and this reads a single parameter until
+ * then.
+ */
+function attemptIdFromLocation(): string | null {
+  if (typeof window === 'undefined') return null;
+  const value = new URLSearchParams(window.location.search).get('attempt');
+  // Validated here rather than trusted to the API: a malformed id would produce
+  // a 400 the user cannot act on, and the shape is public knowledge anyway.
+  return value !== null && /^[0-9a-f-]{36}$/i.test(value) ? value : null;
+}
 
 export function App(): JSX.Element {
   const { t, locale, setLocale } = useLocale();
+  const attemptId = attemptIdFromLocation();
 
   return (
     <main>
       <h1>{t('app.title')}</h1>
       <p>{t('app.tagline')}</p>
       <HealthIndicator />
+      {attemptId !== null && <AttemptPanel attemptId={attemptId} />}
       <button type="button" onClick={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
         {t('language.switch')}
       </button>

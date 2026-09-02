@@ -1,6 +1,6 @@
 # Testing Strategy
 
-**1,288 tests, all executed and passing** as of Task 008.
+**1,422 tests, all executed and passing** as of Task 009.
 
 | Project        | Tests | Needs      | Proves                                                                                                                                |
 | -------------- | ----- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------- |
@@ -89,6 +89,15 @@ attempt WRITE table, and the attempt READ table. Three rather than one for the
 same reason, and because the activity rule and the attempt rule are different in
 kind — one is about material, the other about a person.
 
+Task 009 added two more over the SAME resource: RELEASE and REVIEW. That makes
+four tables for one object, which is the point rather than an accident — the
+four give different answers for the same actor and the same attempt. A verified
+guardian may read a result and may not release it; a learner may read their own
+attempt and may not review it before release; a platform operator may release
+but may not submit. Each of those disagreements is asserted explicitly, because
+a single collapsed matrix would invite somebody to "simplify" them into
+agreement and the looser answer is the one an attacker would find.
+
 What is NOT in the unit project, and deliberately: the scoring rule. It lives in
 `app_score_attempt`, in SQL, granted to no role, precisely so the answer key
 never enters application memory. A TypeScript scorer would be unit-testable and
@@ -110,6 +119,16 @@ into a repository is one careless spread from a response body. All four
 assertions were verified to fail when the corresponding query or field was
 actually reintroduced.
 
+Task 009 NARROWED that last assertion rather than deleting it, which is the more
+interesting half. `reviewedQuestionSchema` legitimately carries
+`correctOptionIds`, so the rule now scans every response shape EXCEPT that one,
+and adds two assertions to keep the exemption from becoming a hole: the review
+schema must actually carry the field (an exemption for a shape that no longer
+needs it is a gap), and `attemptQuestionSchema` — the paper handed out DURING an
+attempt — is pinned separately, because a key there would be disclosed before
+the learner has answered anything. A rule that had simply been dropped when it
+started failing would have taken both of those with it.
+
 **Integration** — RLS by attack (read/update/delete/forge by exact id, unfiltered
 `SELECT *`, no actor set, pool-reuse leakage), privilege boundaries (`user_roles`
 writes denied, `audit_log` reads denied), and constraint tests asserting the
@@ -122,7 +141,7 @@ normally refuses — by disabling the scope trigger for the insert — because a
 read-path defence that is only ever reached through a write-path trigger has
 not actually been tested.
 
-`rls-assessment.test.ts` (Task 008) is 58 checks and is the ONLY place the
+`rls-assessment.test.ts` (Task 008, extended in Task 009) is the ONLY place the
 scoring rule is tested, for the reason given above: an entirely correct paper, a
 blank one, a partly-correct multiple-choice answer (no partial credit), a
 correct set plus one wrong option, order-independence, and a pass exactly AT the
@@ -138,6 +157,28 @@ the distinction is worth stating: an RLS `USING` clause does not raise, it makes
 the row invisible, so the statement matches ZERO rows and SUCCEEDS. A suite that
 treated "no error" as "allowed" would report a blocked write as an allowed one.
 That was found by these tests failing against a database behaving correctly.
+
+Task 009 added the release and review boundaries to the same file, and three
+defects surfaced there before any of the new code shipped:
+
+- VULN-030 was caught by the UNCHANGED Task 008 scoring tests, which began
+  failing the moment migration 0020 was applied. They exercise the real learner
+  insert path rather than seeding attempts as superuser, and that is the only
+  reason they saw it: an extracted RLS predicate that could not see its own row
+  during `INSERT ... RETURNING`. A suite that seeded through the fixture would
+  have stayed green against an application nobody could use.
+- VULN-029 was caught by a new test written from the task's rule rather than
+  from the code — "a review policy cannot be changed once papers have been sat"
+  — which found the update accepted.
+- VULN-031 was caught by the two layers disagreeing: an RLS test asserting a
+  teacher may review before release returned zero rows while the unit decision
+  table asserted `allow`. Neither suite alone would have noticed.
+
+Seven separate defects were then injected into migration 0020 — learner
+self-release, dropping either gate from the review function, letting a release
+carry other column changes, trusting the caller's timestamp, ignoring the review
+policy, and removing the configuration freeze — and every one was caught, by
+between one and fourteen tests.
 
 `rls-progress.test.ts` (Task 007) is 29 checks over the read/write asymmetry as
 `edu_app`: the owner writing and every third party failing to, the four reader
@@ -196,6 +237,19 @@ leaves it green (the SQL-computed `learnerMayAttempt` already encodes ownership,
 and the branch fails eight UNIT cases instead), and coarsening the teacher rule
 does the same. A redundant gate makes its neighbour hard to observe, which is
 worth knowing when reading a green suite.
+
+Task 009 added the release and review scenarios the brief names, each marked in
+the test name: a learner releasing their own result, a learner releasing
+another's, an unauthorized teacher, a teacher from another class (asserted in
+BOTH directions, so a rule admitting everybody could not pass), a teacher from
+another organization, a guardian, and a security administrator. Alongside them:
+a parameter-tampering table sending a score, a percentage, a pass flag, a
+learner id under two names, an organization, a class, a release timestamp and a
+releaser — each expected to be REFUSED with a 400 rather than silently ignored,
+which is the distinction `.strict()` exists to make. Three application-layer
+defects were injected and all three were caught: letting the policy admit a
+learner's own release, dropping the review release gate, and removing the
+repository's SQL redaction of the withheld marks.
 
 **The two gates are tested with the other removed.** This is the claim that
 would be easiest to state and hardest to have earned, so it has a test on each

@@ -124,6 +124,7 @@ function attempt(overrides: Partial<AssessmentAttemptResource> = {}): Assessment
     assessmentId: ASSESSMENT,
     lessonId: LESSON,
     state: 'in_progress',
+    released: false,
     learnerMayAttempt: true,
     observableByActorAsTeacher: false,
     ...overrides,
@@ -425,6 +426,305 @@ describe('assessment attempt — reading', () => {
   it('the same table governs list as read', () => {
     expect(decide(peer, 'assessment_attempt:list', attempt()).effect).toBe('deny');
     expect(decide(learner, 'assessment_attempt:list', attempt()).effect).toBe('allow');
+  });
+});
+
+// =====================================================================
+// 3b. Attempts — RELEASING. A fourth table, and the narrowest of them all.
+//
+// Releasing is not reading. It is the act of deciding that a learner is now
+// told what they scored, and the whole reason results can be withheld is that
+// the decision belongs to somebody other than the person being measured. So
+// this table is enumerated separately from the read table even though several
+// rows agree with it — the agreement is a coincidence of the current rules,
+// not a property anyone should be able to rely on while editing them.
+// =====================================================================
+
+describe('assessment attempt — releasing the result', () => {
+  const submitted = (overrides: Partial<AssessmentAttemptResource> = {}) =>
+    attempt({ state: 'submitted', ...overrides });
+
+  it('THE LEARNER MAY NOT RELEASE THEIR OWN RESULT', () => {
+    // The single most important denial in Task 009. If this ever flips, the
+    // review policy `on_release` becomes decorative: every learner simply
+    // releases themselves and withholding means nothing.
+    const decision = decide(learner, 'assessment_attempt:release', submitted());
+    expect(decision.effect).toBe('deny');
+    expect(decision.effect === 'deny' && decision.reason).toBe(
+      'assessment_attempt.learner_may_not_release',
+    );
+  });
+
+  it('…not even when they are also a teacher of the class the attempt sits in', () => {
+    // The escalation path: hold a second role, mark yourself observable, and
+    // try to walk in through the teacher branch. `isOwn` is checked FIRST, so
+    // the teacher branch is never reached for your own paper.
+    const learnerWhoAlsoTeaches = actor({
+      id: LEARNER,
+      roles: [Role.STUDENT, Role.TEACHER],
+    });
+    const decision = decide(
+      learnerWhoAlsoTeaches,
+      'assessment_attempt:release',
+      submitted({ observableByActorAsTeacher: true }),
+      { teacherOf: [LEARNER] },
+    );
+    expect(decision.effect).toBe('deny');
+    expect(decision.effect === 'deny' && decision.reason).toBe(
+      'assessment_attempt.learner_may_not_release',
+    );
+  });
+
+  it('a teacher who shares the class may release', () => {
+    const teacher = actor({ id: OTHER, roles: [Role.TEACHER] });
+    expect(
+      decide(
+        teacher,
+        'assessment_attempt:release',
+        submitted({ observableByActorAsTeacher: true }),
+        {
+          teacherOf: [LEARNER],
+        },
+      ).effect,
+    ).toBe('allow');
+  });
+
+  it('a teacher who does NOT share the class may not — holding teacherOf is not enough', () => {
+    // `observableByActorAsTeacher` is computed by the database from the class
+    // roster. A relationship snapshot that says "teaches this learner
+    // somewhere" does not say "teaches THIS class", and only the latter grants
+    // authority over this paper.
+    const teacher = actor({ id: OTHER, roles: [Role.TEACHER] });
+    const decision = decide(
+      teacher,
+      'assessment_attempt:release',
+      submitted({ observableByActorAsTeacher: false }),
+      { teacherOf: [LEARNER] },
+    );
+    expect(decision.effect).toBe('deny');
+    expect(decision.effect === 'deny' && decision.reason).toBe('assessment_attempt.not_a_releaser');
+  });
+
+  it('an administrator of the learner’s school may release', () => {
+    expect(decide(admin, 'assessment_attempt:release', submitted()).effect).toBe('allow');
+  });
+
+  it('an administrator of ANOTHER school may not', () => {
+    expect(decide(foreignAdmin, 'assessment_attempt:release', submitted()).effect).toBe('deny');
+  });
+
+  it('an administrator with no organization matches nothing', () => {
+    expect(
+      decide(
+        actor({ id: OTHER, roles: [Role.ADMIN], organizationId: null }),
+        'assessment_attempt:release',
+        submitted({ learnerOrganizationId: null }),
+      ).effect,
+    ).toBe('deny');
+  });
+
+  it('a school SECURITY administrator may not release', () => {
+    // Accounts and lockouts are their remit. Deciding what a child is told
+    // about their marks is not, and must not ride along with it.
+    expect(decide(securityAdmin, 'assessment_attempt:release', submitted()).effect).toBe('deny');
+  });
+
+  it('a VERIFIED guardian may READ the result but may NOT release it', () => {
+    // The two tables disagree for the same actor and the same object, which is
+    // exactly why they are enumerated separately. A parent may see what their
+    // child was told; deciding what the child is told is a teaching act.
+    const rel = { guardianOf: [LEARNER] };
+    expect(decide(guardian, 'assessment_attempt:read', submitted(), rel).effect).toBe('allow');
+    const decision = decide(guardian, 'assessment_attempt:release', submitted(), rel);
+    expect(decision.effect).toBe('deny');
+    expect(decision.effect === 'deny' && decision.reason).toBe('assessment_attempt.not_a_releaser');
+    // `hide`, because the guardian branch is a read branch they never reach
+    // here; they should not learn that a release decision is pending.
+    expect(decision.effect === 'deny' && decision.disclosure).toBe('hide');
+  });
+
+  it('a peer may not release', () => {
+    expect(decide(peer, 'assessment_attempt:release', submitted()).effect).toBe('deny');
+  });
+
+  it('a platform operator may release — unlike start and submit', () => {
+    // The direction of the act is what separates them. Releasing discloses a
+    // mark the database already computed; starting or submitting would
+    // manufacture evidence about what a child did.
+    expect(decide(operator, 'assessment_attempt:release', submitted()).effect).toBe('allow');
+  });
+
+  it('there is nothing to release on an in-progress attempt, even for a teacher', () => {
+    {
+      const state = 'in_progress' as const;
+      const teacher = actor({ id: OTHER, roles: [Role.TEACHER] });
+      const decision = decide(
+        teacher,
+        'assessment_attempt:release',
+        attempt({ state, observableByActorAsTeacher: true }),
+        { teacherOf: [LEARNER] },
+      );
+      expect(decision.effect).toBe('deny');
+      expect(decision.effect === 'deny' && decision.reason).toBe(
+        'assessment_attempt.nothing_to_release',
+      );
+    }
+  });
+
+  it('a suspended teacher may not release', () => {
+    expect(
+      decide(
+        actor({ id: OTHER, roles: [Role.TEACHER], status: 'suspended' }),
+        'assessment_attempt:release',
+        submitted({ observableByActorAsTeacher: true }),
+        { teacherOf: [LEARNER] },
+      ).effect,
+    ).toBe('deny');
+  });
+});
+
+// =====================================================================
+// 3c. Attempts — REVIEWING the marked paper.
+//
+// Review carries the correct answers and the explanations. It is the read
+// table PLUS the release gate — and the gate binds only the learner and their
+// guardian, because a teacher must be able to look at an unreleased paper in
+// order to decide whether to release it.
+// =====================================================================
+
+describe('assessment attempt — reviewing the marked paper', () => {
+  const teacher = actor({ id: OTHER, roles: [Role.TEACHER] });
+  const asTeacher = { teacherOf: [LEARNER] };
+
+  it('a learner may review their own RELEASED attempt', () => {
+    expect(
+      decide(learner, 'assessment_attempt:review', attempt({ state: 'submitted', released: true }))
+        .effect,
+    ).toBe('allow');
+  });
+
+  it('A LEARNER MAY NOT REVIEW THEIR OWN UNRELEASED ATTEMPT', () => {
+    // The withholding rule itself. Note this is a denial on the learner's OWN
+    // record — the one place in this file where ownership is not enough.
+    const decision = decide(
+      learner,
+      'assessment_attempt:review',
+      attempt({ state: 'submitted', released: false }),
+    );
+    expect(decision.effect).toBe('deny');
+    expect(decision.effect === 'deny' && decision.reason).toBe(
+      'assessment_attempt.result_not_released',
+    );
+    // `reveal`: they sat it, so they know it exists. The only thing disclosed
+    // is that a result is pending, which is what a learner should be told.
+    expect(decision.effect === 'deny' && decision.disclosure).toBe('reveal');
+  });
+
+  it('a guardian is bound by the same gate as the child', () => {
+    const rel = { guardianOf: [LEARNER] };
+    expect(
+      decide(guardian, 'assessment_attempt:review', attempt({ state: 'submitted' }), rel).effect,
+    ).toBe('deny');
+    expect(
+      decide(
+        guardian,
+        'assessment_attempt:review',
+        attempt({ state: 'submitted', released: true }),
+        rel,
+      ).effect,
+    ).toBe('allow');
+  });
+
+  it('A TEACHER MAY REVIEW AN UNRELEASED PAPER — that is how they decide', () => {
+    expect(
+      decide(
+        teacher,
+        'assessment_attempt:review',
+        attempt({ state: 'submitted', released: false, observableByActorAsTeacher: true }),
+        asTeacher,
+      ).effect,
+    ).toBe('allow');
+  });
+
+  it('an administrator of the school may review an unreleased paper', () => {
+    expect(
+      decide(admin, 'assessment_attempt:review', attempt({ state: 'submitted', released: false }))
+        .effect,
+    ).toBe('allow');
+  });
+
+  it('the release gate does not widen the read table', () => {
+    // Released does NOT mean public. A peer, a foreign administrator and a
+    // teacher of another class are refused a released paper exactly as they
+    // are refused an unreleased one.
+    const released = attempt({ state: 'submitted', released: true });
+    expect(decide(peer, 'assessment_attempt:review', released).effect).toBe('deny');
+    expect(decide(foreignAdmin, 'assessment_attempt:review', released).effect).toBe('deny');
+    expect(decide(securityAdmin, 'assessment_attempt:review', released).effect).toBe('deny');
+    expect(decide(teacher, 'assessment_attempt:review', released, asTeacher).effect).toBe('deny');
+  });
+
+  it('a guardian of a DIFFERENT child is refused a released paper', () => {
+    expect(
+      decide(
+        guardian,
+        'assessment_attempt:review',
+        attempt({ state: 'submitted', released: true }),
+        {
+          guardianOf: [OTHER],
+        },
+      ).effect,
+    ).toBe('deny');
+  });
+
+  it('there is no marked paper to review on an in-progress attempt', () => {
+    {
+      const state = 'in_progress' as const;
+      // Checked BEFORE the release gate, so a learner mid-attempt cannot use
+      // the review endpoint as a back door to the answer key.
+      const decision = decide(learner, 'assessment_attempt:review', attempt({ state }));
+      expect(decision.effect).toBe('deny');
+      expect(decision.effect === 'deny' && decision.reason).toBe(
+        'assessment_attempt.not_submitted',
+      );
+    }
+  });
+
+  it('an in-progress attempt is refused review even when the flag says released', () => {
+    // Defence in depth against a malformed resource: `released` is never
+    // consulted before `state`.
+    const decision = decide(
+      learner,
+      'assessment_attempt:review',
+      attempt({ state: 'in_progress', released: true }),
+    );
+    expect(decision.effect).toBe('deny');
+    expect(decision.effect === 'deny' && decision.reason).toBe('assessment_attempt.not_submitted');
+  });
+
+  it('a suspended learner may not review their own released attempt', () => {
+    expect(
+      decide(
+        actor({ id: LEARNER, roles: [Role.STUDENT], status: 'suspended' }),
+        'assessment_attempt:review',
+        attempt({ state: 'submitted', released: true }),
+      ).effect,
+    ).toBe('deny');
+  });
+
+  it('a released paper grants no write on itself', () => {
+    // Review is a read. Reaching a marked paper must not carry the right to
+    // change it or to decide its disclosure.
+    //
+    // `start` is absent from this list on purpose: it is decided against a
+    // PROSPECTIVE attempt the service synthesizes (see `startAttempt`), never
+    // against an existing row, so asserting it here would test a resource the
+    // engine is never handed. The attempt LIMIT, not this policy, is what
+    // stops a learner re-sitting an assessment, and it is enforced by a
+    // trigger over a definer count.
+    const released = attempt({ state: 'submitted', released: true });
+    expect(decide(learner, 'assessment_attempt:submit', released).effect).toBe('deny');
+    expect(decide(learner, 'assessment_attempt:release', released).effect).toBe('deny');
   });
 });
 

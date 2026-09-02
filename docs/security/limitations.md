@@ -7,17 +7,17 @@ of the documentation — it states what was **not** done.
 ## The headline
 
 **This system is not proven secure, and no such claim is made anywhere in this
-repository.** 1,288 automated tests passed against a real PostgreSQL database.
+repository.** 1,422 automated tests passed against a real PostgreSQL database.
 That establishes that specific, enumerated properties held at a point in time. It
 does not establish the absence of vulnerabilities.
 
 ## What was actually verified
 
-**Updated for Task 008.** The counts and the "not verified" list below reflect
+**Updated for Task 009.** The counts and the "not verified" list below reflect
 the current state.
 
-- 1,288 tests executed and passing: 550 unit, 86 architecture, 243 integration,
-  409 security.
+- 1,422 tests executed and passing: 574 unit, 107 architecture, 282 integration,
+  459 security.
 - Migrations applied cleanly from empty to full schema, repeatedly.
 - RLS enforced against a real non-superuser role — verified by attack, not by
   reading the policy.
@@ -34,6 +34,19 @@ the current state.
   every answer-key option id. **None were present.** The only match for
   `correctOption` was a validation-error field PATH from an author's own
   rejected request, carrying no values.
+- **The Task 009 release and review surface was driven over HTTP against a
+  booted server**, on a withheld assessment seeded through the real fixtures:
+  the submission response carried `score: null` for the learner while the
+  teacher's read of the same attempt showed `2`; the learner's review returned
+  403 and their attempt to release their own result returned 403; a release body
+  carrying `score` returned 400; the teacher's release returned the marks, the
+  explanation and the comment to the learner; and a second release returned the
+  SAME `releasedAt`. The server log was then searched for the correct option id,
+  the question prompt, the authored explanation, the teacher's comment, the
+  password, a session token, and the strings `isCorrect` and `correctOption`.
+  **None were present.** The `assessment.result_released` event carried the
+  attempt, assessment and learner ids and `hasComment: true` — no mark, no
+  comment text.
 - **The learner progress surface was driven over HTTP against a booted
   server** — 39 checks covering the write asymmetry, every refused write shape,
   the learner's own history, the teacher, guardian and administrator read paths,
@@ -120,13 +133,12 @@ the current state.
 
 ## Added in Task 008
 
-- **Per-question correctness is never returned, even after submission.** A
-  learner is told their score, not which questions they got wrong. On a
-  two-option question "you got this wrong" IS the answer key, so returning it
-  would undo the control the whole domain is built around. This is a real
-  reduction in what a learner can learn from their own result, and it is the
-  right trade only until a review-after-close feature exists with a teacher's
-  control over when a paper is released. That feature is not built.
+- **Per-question correctness is never returned, even after submission.**
+  **CLOSED IN TASK 009**, on the terms this entry set out: a learner is now shown
+  which questions they got wrong, the correct answers and the author's
+  explanation — but only through `GET /attempts/:id/review`, and only once the
+  result has been released. See "Added in Task 009" below for what that
+  introduced.
 - **A question cannot be corrected once created.** There is no UPDATE grant on
   `assessment_questions`, `assessment_options` or `assessment_answer_keys`, and
   no endpoint. A typo in a prompt means creating a new assessment. Immutability
@@ -183,6 +195,47 @@ the current state.
   file. It is recorded because shipping source maps to production is a
   disclosure decision that was never explicitly made, and it is out of this
   task's scope to change.
+
+## Added in Task 009
+
+- **A release cannot be undone.** There is no endpoint, and the database refuses
+  it. A result disclosed early stays disclosed, and the honest reason is that
+  un-releasing a mark a child has already read achieves nothing — the child
+  knows the number (RISK-ASSESS-06).
+- **Nothing records who READ a released result or a marked paper.** Only the
+  release itself is audited. This is the same gap as RISK-ASSESS-03, and Task
+  009 widened the data it applies to: the review endpoint returns answer keys,
+  and no event says who fetched one (RISK-ASSESS-07).
+- **Release authority follows the class roster, not the authorship of the
+  assessment.** Any teacher of the learner's class may release any of that
+  class's results, including for an assessment somebody else wrote. The class is
+  the platform's unit of teaching authority and no smaller one exists
+  (RISK-ASSESS-08).
+- **A platform operator may release a result.** Unlike `start` and `submit`,
+  which they may not perform, releasing is permitted, so an operator can
+  disclose a mark a school intended to withhold. The reasoning is in
+  authorization.md: the act discloses a number the database computed rather than
+  fabricating evidence about a child. It is still an operator capability with no
+  school-side check (RISK-ASSESS-09).
+- **`teacherComment` is free text, stored and rendered as written.** It is
+  bounded at 2000 characters and escaped by the renderer, and nothing moderates
+  what a teacher writes to a child. There is no review, no reporting path and no
+  record of edits — because there are no edits: a comment is fixed at release
+  (RISK-ASSESS-10).
+- **There is no bulk release.** A teacher releases one attempt at a time. For a
+  class of thirty that is thirty requests, which is a usability cost accepted in
+  order to keep every release a single, individually audited decision.
+- **`explanation` is authored once and shown to everyone who reviews the
+  assessment.** Nothing prevents an author writing something about a particular
+  learner into it, where it would be disclosed to every other learner who
+  reviews the same paper. The separation from `teacherComment` is stated in the
+  contract and the schema comment; it is not enforced, and could not be.
+- **The withheld-marks redaction is a query, not a policy.** Row-level security
+  cannot hide a column, so `score`, `max_score`, `percentage` and `passed` are
+  redacted by a `CASE` in `ATTEMPT_SELECT`. Any FUTURE query that reads those
+  columns without the same expression would return a withheld mark. Nothing
+  structurally prevents that — the mitigation is that all attempt reads go
+  through the one constant, and a new one would be a visible addition in review.
 
 ## Added in Task 007
 

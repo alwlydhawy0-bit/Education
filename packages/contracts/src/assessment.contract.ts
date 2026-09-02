@@ -62,8 +62,32 @@ export const ACTIVITY_INSTRUCTIONS_MAX_CHARS = 8_000;
  * `assessment`, refined below. Creating the activity and its assessment in one
  * request is what keeps them from ever existing apart.
  */
+export const reviewPolicySchema = z.enum(['on_submission', 'on_release']);
+export type ReviewPolicy = z.infer<typeof reviewPolicySchema>;
+
+/**
+ * The assessment half of the request above, and of the response below.
+ *
+ * Frozen at publication: once the owning activity leaves draft, none of these
+ * values can be changed (`assessments_config_draft_only`, migration 0020).
+ * Moving a pass mark or a review policy after papers have been sat re-decides
+ * an outcome the learner has already been given.
+ */
 export const assessmentConfigSchema = z
   .object({
+    /**
+     * When the learner may see their result.
+     *
+     * `on_submission` (the default) releases the attempt in the same statement
+     * that scores it — the Task 008 behaviour, unchanged. `on_release`
+     * withholds the marks and the paper until a teacher or an administrator
+     * decides otherwise.
+     *
+     * Only two values, because only two are needed. "After a date" would put an
+     * authorization rule inside a clock, which this platform already refused
+     * for `startsOn`/`dueOn` in Task 006.
+     */
+    reviewPolicy: reviewPolicySchema.default('on_submission'),
     passingPercentage: z.number().int().min(0).max(100).default(50),
     /**
      * No "unlimited" value is offered, and that is a security decision rather
@@ -106,6 +130,13 @@ export const createQuestionRequestSchema = z
   .object({
     questionType: questionTypeSchema,
     prompt: z.string().trim().min(1).max(4000),
+    /**
+     * Why the answer is what it is. Shown during review, to everyone who
+     * reviews this assessment — so it must never contain a remark about a
+     * particular learner. Per-learner feedback is `teacherComment` on the
+     * attempt, which is a different field with a different audience.
+     */
+    explanation: z.string().max(4000).default(''),
     points: z.number().int().min(1).max(100).default(1),
     options: z.array(z.string().trim().min(1).max(1000)).min(2).max(10),
     correctOptions: z.array(z.number().int().min(0).max(9)).min(1).max(10),
@@ -200,6 +231,8 @@ export const assessmentResponseSchema = z
     maxAttempts: z.number().int(),
     /** How many of them this caller has already used. Server-derived. */
     attemptsUsed: z.number().int(),
+    /** Lets a client say "results are released by your teacher" up front. */
+    reviewPolicy: reviewPolicySchema,
   })
   .strict();
 export type AssessmentResponse = z.infer<typeof assessmentResponseSchema>;
@@ -259,6 +292,13 @@ export const attemptResponseSchema = z
     percentage: z.number().nullable(),
     passed: z.boolean().nullable(),
     passingPercentage: z.number().int(),
+    /**
+     * Whether the learner may see the marks above. When false, `score`,
+     * `percentage` and `passed` arrive NULL for the learner and their guardian —
+     * redacted in SQL, not here.
+     */
+    released: z.boolean(),
+    releasedAt: z.string().datetime().nullable(),
   })
   .strict();
 export type AttemptResponse = z.infer<typeof attemptResponseSchema>;
@@ -307,6 +347,75 @@ export const submitAttemptRequestSchema = z
     path: ['answers'],
   });
 export type SubmitAttemptRequest = z.infer<typeof submitAttemptRequestSchema>;
+
+// --- Review and release --------------------------------------------------
+
+/**
+ * ONE question, marked, as a reviewer receives it.
+ *
+ * This is the only shape in the platform that legitimately carries correct
+ * answers, and it exists only for a RELEASED attempt. Two things about it are
+ * deliberate:
+ *
+ *   - There is no `attemptId`, `learnerId` or score on it. Whose paper this is
+ *     was decided by the route and the policy; repeating it here would create a
+ *     second place for the two to disagree.
+ *   - `correctOptionIds` is populated by a database function that re-checks
+ *     both release and readership itself. The serializer is the last gate, not
+ *     the only one.
+ */
+export const reviewedQuestionSchema = z
+  .object({
+    questionId: idSchema,
+    position: z.number().int(),
+    questionType: questionTypeSchema,
+    prompt: z.string(),
+    points: z.number().int(),
+    awarded: z.number().int(),
+    isCorrect: z.boolean(),
+    /** What this learner chose. Empty when they left the question unanswered. */
+    selectedOptionIds: z.array(idSchema),
+    correctOptionIds: z.array(idSchema),
+    /** Authored guidance. Empty string when the author wrote none. */
+    explanation: z.string(),
+    options: z.array(
+      z.object({ id: idSchema, position: z.number().int(), body: z.string() }).strict(),
+    ),
+  })
+  .strict();
+export type ReviewedQuestion = z.infer<typeof reviewedQuestionSchema>;
+
+/**
+ * The whole review: the result, plus the marked paper.
+ *
+ * `questions` is a LIST THAT CAN BE EMPTY, and that is not a degenerate case —
+ * it is what an unreleased attempt looks like to a teacher who is deciding
+ * whether to release it. The result block is always present for a reader who
+ * got this far; the paper is not.
+ */
+export const attemptReviewSchema = z
+  .object({
+    attempt: attemptResponseSchema,
+    released: z.boolean(),
+    releasedAt: z.string().datetime().nullable(),
+    /** Per-learner remarks from the releasing teacher. Null when none. */
+    teacherComment: z.string().nullable(),
+    questions: z.array(reviewedQuestionSchema),
+  })
+  .strict();
+export type AttemptReview = z.infer<typeof attemptReviewSchema>;
+
+/**
+ * Releasing a result.
+ *
+ * Carries a comment and NOTHING else — no attempt id (that is the URL), no
+ * learner id, no organization, no class, and above all no score. `.strict()`
+ * turns any of those into a 400 rather than a silently ignored field.
+ */
+export const releaseAttemptRequestSchema = z
+  .object({ teacherComment: z.string().trim().max(2000).optional() })
+  .strict();
+export type ReleaseAttemptRequest = z.infer<typeof releaseAttemptRequestSchema>;
 
 // --- Listing -------------------------------------------------------------
 

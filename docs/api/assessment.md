@@ -51,6 +51,138 @@ helpers, that governs learner progress.
 | `GET`  | `/api/v1/classes/:id/students/:studentId/attempts` | teacher of that class · `admin` of its school                                   |
 | `GET`  | `/api/v1/guardians/children/:childId/attempts`     | verified guardian                                                               |
 
+### Review and release — Task 009
+
+| Method | Path                           | Who                                                                     |
+| ------ | ------------------------------ | ----------------------------------------------------------------------- |
+| `GET`  | `/api/v1/attempts/:id/review`  | every reader of the attempt — the SUBJECT only once released            |
+| `POST` | `/api/v1/attempts/:id/release` | teacher of the shared class · `admin` of the school · platform operator |
+
+## Withholding a result
+
+An assessment carries a `reviewPolicy`, fixed at authoring and frozen with the
+rest of its configuration when the activity is published:
+
+| Value           | What happens at submission                                                            |
+| --------------- | ------------------------------------------------------------------------------------- |
+| `on_submission` | scored and released in the same statement. The default, and exactly what Task 008 did |
+| `on_release`    | scored, and the mark is **withheld from the learner** until somebody releases it      |
+
+`on_submission` is the default so that no assessment written before Task 009
+changes behaviour. Every attempt submitted before this migration was backfilled
+as released at the moment it was submitted — leaving them unreleased would have
+retracted results children had already been shown.
+
+**There is no third value.** "Release after a date" was considered and refused:
+it puts an authorization rule inside a clock, which this platform already
+declined for `startsOn`/`dueOn` in Task 006.
+
+### Withheld means the number is not sent
+
+A withheld result does not arrive with a flag telling the client to hide it.
+`score`, `maxScore`, `percentage` and `passed` are `null` in the response,
+redacted in SQL by `assessment.repository.ts`:
+
+```
+(t.released_at IS NOT NULL
+ OR NOT (t.user_id = app_current_actor() OR app_actor_guards(t.user_id)))
+```
+
+Note the shape of that expression. The withholding is from **the subject** — the
+learner and their verified guardian — not from everybody. A teacher sees the
+mark on an unreleased attempt, because a teacher who cannot see a result cannot
+decide whether to release it. The same expression gates `app_attempt_review`, so
+the two layers withhold from exactly the same people.
+
+Row-level security cannot hide a column, which is why this lives in the query
+rather than in a policy; and it lives in the repository rather than in a
+serializer so that a withheld score never crosses the process boundary at all.
+
+## Releasing
+
+`POST /api/v1/attempts/:id/release` takes an optional `teacherComment` and
+**nothing else**. No learner, no class, no organization, and no score —
+`.strict()` turns any of those into a `400` rather than a silently ignored
+field. The attempt is the URL; the actor is the session.
+
+- **A learner can never release their own result.** Checked in the policy before
+  any read branch, and again by the RLS release policy, which has no learner
+  branch at all. Everything else in this task follows from that one rule: a
+  result the subject can disclose is not a result anyone else can rely on.
+- **A verified guardian cannot release either.** They may read what their child
+  was told; deciding what a child is told about their own assessment is a
+  teaching act, not a parental one.
+- **A platform operator may** — unlike `start` and `submit`, which they may not.
+  The direction of the act is what separates them: releasing discloses a mark
+  the database already computed; starting or submitting would manufacture
+  evidence about what a child did.
+- **Releasing twice is idempotent.** The RLS policy carries
+  `released_at IS NULL` in its `USING` clause, so a second release matches zero
+  rows, changes nothing, and returns the current state. The original releaser
+  and timestamp are never overwritten.
+- **A release cannot be undone.** There is no endpoint, and the database refuses
+  it: once `released_at` is set the row is invisible to the release policy.
+- **A release cannot carry anything else.** The submit guard compares the whole
+  row minus the three release columns, so a statement setting `released_at` and
+  `score` together is refused outright rather than partially applied. A teacher
+  who may release is still not a teacher who may mark.
+
+The release timestamp is the server's. A caller-supplied `released_at` is
+overwritten with `now()` by the guard, so a release cannot be backdated.
+
+Each release emits `assessment.result_released` carrying the attempt, the
+assessment, the learner and whether a comment was attached — never the mark.
+"Who decided this child could see their result, and when?" has to be answerable
+from the audit trail alone; the mark itself does not.
+
+## The marked paper
+
+`GET /api/v1/attempts/:id/review` is the **only** response in the system that
+carries correct answers, and it carries them for exactly one attempt.
+
+```
+{
+  "attempt": { ... }, "released": true, "releasedAt": "...", "teacherComment": null,
+  "questions": [
+    { "questionId": "...", "position": 1, "prompt": "...", "points": 2,
+      "awarded": 0, "isCorrect": false,
+      "selectedOptionIds": ["..."], "correctOptionIds": ["..."],
+      "explanation": "...", "options": [ ... ] }
+  ]
+}
+```
+
+It is a separate endpoint rather than a flag on `GET /attempts/:id` because they
+are different disclosures that open at different moments.
+
+Three properties make it safe to grant `EXECUTE` on the underlying
+`app_attempt_review` to the application role:
+
+1. **It self-authorizes.** `app_score_attempt` is granted to nobody because it
+   answers unconditionally for any id. This one re-asks both questions in its own
+   `WHERE` clause, so an id alone buys nothing.
+2. **It requires release — of the subject.** Before release a learner and their
+   guardian get **no rows at all**: not the key, not correctness, not even how
+   many questions there were. Empty rather than redacted, because a redacted
+   paper still discloses its shape.
+3. **It is scoped to one attempt.** There is no form of the query that walks an
+   assessment, a class or a learner.
+
+`assessment_answer_keys` is **not** widened by any of this. A learner's own
+connection still reads zero rows from that table; what changed is that one
+released paper can be rendered.
+
+### `explanation` vs `teacherComment`
+
+Two feedback fields with different audiences, kept apart on purpose:
+
+- `explanation` is authored **on the question**, shown to everyone who reviews
+  that assessment. It must never mention a particular learner.
+- `teacherComment` is written **on the attempt** at release, and is that one
+  learner's.
+
+Neither is generated. Task 009 introduces no AI feedback of any kind.
+
 ## The answer key
 
 **It is not a column, it is a table.** `assessment_options` holds what a learner
@@ -287,6 +419,13 @@ platform does not do.
 
 No essay or free-text answers, no AI grading, no teacher manual grading, no
 partial credit, no timing or deadlines, no question editing after creation, no
-per-question review, no gradebook, no roll-up beyond a single attempt's score,
-and no mastery. Assessment results are evidence; they are not mastery, and this
-API makes no claim that they are.
+gradebook, no roll-up beyond a single attempt's score, and no mastery.
+Assessment results are evidence; they are not mastery, and this API makes no
+claim that they are.
+
+Task 009 added per-question review and controlled release. It did **not** add:
+bulk release for a whole class, release scheduling, un-release, a teacher's
+ability to adjust a mark, or generated feedback of any kind. A teacher who
+disagrees with a mark publishes a corrected assessment — the same answer Task
+008 gave for a bad question, and for the same reason: a mark must always name
+the paper it scored.

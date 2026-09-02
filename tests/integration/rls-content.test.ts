@@ -204,6 +204,58 @@ describe('RLS — content visibility', () => {
     expect(await visible(w.studentA.id, 'lessons')).not.toContain(lesson);
   });
 
+  it('hides a DRAFT lesson under a fully published, ASSIGNED chain', async () => {
+    // THE CASE EVERY OTHER LESSON TEST HERE MISSES. The course, unit and class
+    // assignment are all in place, so the learner is legitimately inside this
+    // part of the tree and `app_unit_chain_published` is satisfied. The ONLY
+    // thing that may hide this row is the lesson's own `status = 'published'`
+    // conjunct in `lessons_select`.
+    //
+    // Found by defect injection: removing that conjunct from migration 0017 was
+    // NOT caught by any test in this repository, because the application policy
+    // independently refuses drafts and every existing RLS test varied an
+    // ANCESTOR's status rather than the lesson's own. A control that is only
+    // ever tested through the layer above it is not a second layer.
+    const w = await world();
+    const course = await createCourse({
+      organizationId: w.orgA,
+      curriculumId: w.publishedA,
+      levelId: w.level,
+      status: 'published',
+    });
+    const unit = await createUnit({ courseId: course, status: 'published' });
+    const published = await createLesson({ unitId: unit, status: 'published' });
+    const draft = await createLesson({ unitId: unit, status: 'draft' });
+    await assignCourseToClass({ classId: w.classA, courseId: course });
+
+    const seen = await visible(w.studentA.id, 'lessons');
+    expect(seen).toContain(published);
+    expect(seen).not.toContain(draft);
+
+    // The author of the same school DOES see it — otherwise this test would
+    // also pass if RLS hid the row from everybody, which proves nothing about
+    // the learner rule specifically.
+    expect(await visible(w.authorA.id, 'lessons')).toContain(draft);
+  });
+
+  it('hides an ARCHIVED lesson under a fully published, ASSIGNED chain', async () => {
+    // The mirror of the case above, and missed for the same reason: archived is
+    // not draft, and a policy that checked `status <> 'draft'` rather than
+    // `status = 'published'` would pass every other test in this file.
+    const w = await world();
+    const course = await createCourse({
+      organizationId: w.orgA,
+      curriculumId: w.publishedA,
+      levelId: w.level,
+      status: 'published',
+    });
+    const unit = await createUnit({ courseId: course, status: 'published' });
+    const archived = await createLesson({ unitId: unit, status: 'archived' });
+    await assignCourseToClass({ classId: w.classA, courseId: course });
+
+    expect(await visible(w.studentA.id, 'lessons')).not.toContain(archived);
+  });
+
   it('shows a lesson only when the WHOLE chain is published', async () => {
     const w = await world();
     const course = await createCourse({

@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import {
+  emptyQuerySchema,
   currentUserV2Schema,
   forgotPasswordRequestSchema,
   loginRequestSchema,
@@ -171,6 +172,7 @@ export function registerIdentityRoutes(app: FastifyInstance, deps: IdentityRoute
   app.get('/api/v1/auth/me', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const actor = request.actor;
       const identity = request.actorIdentity;
       if (!actor || !identity) {

@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
+  emptyQuerySchema,
   createListQuerySchema,
   createOrganizationRequestSchema,
   idSchema,
@@ -63,6 +64,7 @@ export function registerOrganizationRoutes(
   app.get('/api/v1/organizations/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = organizationParamsSchema.parse(request.params);
       return reply.status(200).send(toResponse(await organizations.get(contextOf(request), id)));
     },

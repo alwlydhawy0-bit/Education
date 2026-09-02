@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
+  emptyQuerySchema,
   adminUpdateUserRequestSchema,
   adminUserResponseSchema,
   assignRoleRequestSchema,
@@ -88,6 +89,7 @@ export function registerUsersRoutes(app: FastifyInstance, users: UsersService): 
   app.get('/api/v1/users/:id/profile', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = userParamsSchema.parse(request.params);
       const profile = await users.getProfile(contextOf(request), id);
       return reply.status(200).send(toProfileResponse(profile));
@@ -116,6 +118,7 @@ export function registerUsersRoutes(app: FastifyInstance, users: UsersService): 
   app.get('/api/v1/admin/users/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = userParamsSchema.parse(request.params);
       const ctx = contextOf(request);
       const user = await users.getUser(ctx, id);

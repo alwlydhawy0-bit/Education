@@ -70,6 +70,18 @@ const ar = {
   'authoring.reloading': 'جارٍ إعادة التحميل…',
   'authoring.reloaded': 'تم عرض أحدث نسخة',
   'authoring.archiveCascade': 'تؤدي الأرشفة أيضًا إلى أرشفة أنشطة هذا الدرس المنشورة.',
+
+  'learning.loading': 'جارٍ التحميل…',
+  'learning.unavailable': 'تعذّر عرض المقررات',
+  'learning.lessonUnavailable': 'تعذّر عرض هذا الدرس',
+  'learning.myCourses': 'مقرراتي',
+  'learning.noCourses': 'لا توجد مقررات مسندة إليك حاليًا.',
+  'learning.viaClass': 'عبر فصل',
+  'learning.objectives': 'أهداف الدرس',
+  'learning.activities': 'الأنشطة',
+  'learning.startAssessment': 'ابدأ التقييم',
+  'learning.externalLink': 'مصدر خارجي (يُفتح في تبويب جديد)',
+  'learning.backToCourses': 'العودة إلى المقررات',
 } as const;
 
 export type MessageKey = keyof typeof ar;
@@ -136,6 +148,18 @@ const en: Record<MessageKey, string> = {
   'authoring.reloading': 'Reloading…',
   'authoring.reloaded': 'Showing the latest version',
   'authoring.archiveCascade': 'Archiving also archives this lesson’s published activities.',
+
+  'learning.loading': 'Loading…',
+  'learning.unavailable': 'Your courses cannot be shown',
+  'learning.lessonUnavailable': 'This lesson cannot be shown',
+  'learning.myCourses': 'My courses',
+  'learning.noCourses': 'You have no courses assigned at the moment.',
+  'learning.viaClass': 'through class',
+  'learning.objectives': 'Lesson objectives',
+  'learning.activities': 'Activities',
+  'learning.startAssessment': 'Start assessment',
+  'learning.externalLink': 'External resource (opens in a new tab)',
+  'learning.backToCourses': 'Back to my courses',
 };
 
 const CATALOGUES: Record<Locale, Record<MessageKey, string>> = { ar, en };

@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
+  emptyQuerySchema,
   courseResponseSchema,
   createCourseRequestSchema,
   createCurriculumRequestSchema,
@@ -156,6 +157,7 @@ export function registerCurriculumRoutes(
   app.get('/api/v1/education-levels', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const levels = await curriculum.listLevels(contextOf(request));
       return reply.status(200).send({ items: levels.map(toLevel) });
     },
@@ -202,6 +204,7 @@ export function registerCurriculumRoutes(
   app.get('/api/v1/curricula/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = idParams.parse(request.params);
       return reply
         .status(200)
@@ -271,6 +274,7 @@ export function registerCurriculumRoutes(
   app.get('/api/v1/courses/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = idParams.parse(request.params);
       return reply.status(200).send(toCourse(await curriculum.getCourse(contextOf(request), id)));
     },
@@ -350,6 +354,7 @@ export function registerCurriculumRoutes(
   app.get('/api/v1/units/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = idParams.parse(request.params);
       return reply.status(200).send(toUnit(await curriculum.getUnit(contextOf(request), id)));
     },
@@ -429,6 +434,7 @@ export function registerCurriculumRoutes(
   app.get('/api/v1/lessons/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = idParams.parse(request.params);
       return reply
         .status(200)

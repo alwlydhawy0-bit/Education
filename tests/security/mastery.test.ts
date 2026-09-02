@@ -430,38 +430,51 @@ describe('cross-learner access', () => {
     expect(evidence).toEqual([]);
   });
 
-  it('A FORGED learnerId IS IGNORED — the session is authoritative', async () => {
-    // The `/me/...` routes take no learner parameter, and adding one to the
-    // query string changes nothing. Verified by injection: a handler that read
-    // `?learnerId=` instead of the session passed every other test in this file
-    // until this one existed.
-    // The learner is `demonstrated`; the peer has done nothing. Any state other
-    // than `no_evidence` in the peer's response could only have come from the
-    // learner they named.
+  it('A FORGED learnerId IS REFUSED — the session is authoritative', async () => {
+    // TASK 010 ASSERTED THAT THESE WERE IGNORED, and Task 012 changed it to a
+    // refusal (VULN-034). "Ignored" and "trusted" look identical from outside,
+    // and a 200 tells a caller probing `?learnerId=` that the parameter was at
+    // least accepted. The `/me/...` routes take no learner parameter, so the
+    // honest answer is 400.
     for (const query of [`learnerId=${w.learner.id}`, `userId=${w.learner.id}`]) {
-      const listed = items<{ mastery: string }>(
-        await get(`/api/v1/me/objectives?${query}`, w.peer.cookie),
-      );
-      expect(listed).toEqual([]);
+      expect((await get(`/api/v1/me/objectives?${query}`, w.peer.cookie)).statusCode).toBe(400);
     }
-    const course = await get(
-      `/api/v1/me/courses/${w.courseP.courseId}/mastery?learnerId=${w.learner.id}`,
-      w.peer.cookie,
-    );
+    expect(
+      (
+        await get(
+          `/api/v1/me/courses/${w.courseP.courseId}/mastery?learnerId=${w.learner.id}`,
+          w.peer.cookie,
+        )
+      ).statusCode,
+    ).toBe(400);
+
+    // AND THE UNDERLYING GUARANTEE IS UNCHANGED: with no parameter at all, the
+    // peer sees only their own record. The refusal above is the outer layer;
+    // this is the one that would still hold if the parameter were accepted.
+    const listed = items<{ mastery: string }>(await get('/api/v1/me/objectives', w.peer.cookie));
+    expect(listed).toEqual([]);
+    const course = await get(`/api/v1/me/courses/${w.courseP.courseId}/mastery`, w.peer.cookie);
     expect(course.statusCode).toBe(200);
     const body = course.json<CourseBody>();
     expect(flatObjectives(body).every((o) => o.mastery === 'no_evidence')).toBe(true);
     expect(body.tally.demonstrated + body.tally.mastered).toBe(0);
   });
 
-  it('…and a forged organizationId or classId is ignored the same way', async () => {
+  it('…and a forged organizationId or classId is refused the same way', async () => {
     await sit(w.peer, w.quizP, 'wrong');
-    const response = await get(
-      `/api/v1/me/courses/${w.courseP.courseId}/mastery?organizationId=${w.orgB}&classId=${w.classA2}`,
-      w.peer.cookie,
-    );
+    expect(
+      (
+        await get(
+          `/api/v1/me/courses/${w.courseP.courseId}/mastery?organizationId=${w.orgB}&classId=${w.classA2}`,
+          w.peer.cookie,
+        )
+      ).statusCode,
+    ).toBe(400);
+
+    // Their own real state is what the clean request returns — the parameters
+    // could not have changed it, and now cannot even be sent.
+    const response = await get(`/api/v1/me/courses/${w.courseP.courseId}/mastery`, w.peer.cookie);
     expect(response.statusCode).toBe(200);
-    // Their own real state, unaffected by either parameter.
     expect(
       flatObjectives(response.json<CourseBody>()).every((o) => o.mastery === 'developing'),
     ).toBe(true);
@@ -702,12 +715,24 @@ describe('mastery manipulation', () => {
     }
   });
 
-  it('A FORGED MASTERY STATE ON A READ IS IGNORED, and the real one returned', async () => {
-    // Query parameters are not a back door either: the state comes from
-    // `app_objective_mastery`, which takes no input but ids.
+  it('A FORGED MASTERY STATE ON A READ IS REFUSED, and the real one returned', async () => {
+    // Query parameters are not a back door, and since Task 012 (VULN-034) they
+    // are not even accepted. The state comes from `app_objective_mastery`,
+    // which takes no input but ids — so there was never anything for these to
+    // influence; what changed is that the endpoint now says so.
     await sit(w.learner, w.quizP, 'wrong');
+    expect(
+      (
+        await get(
+          `/api/v1/me/courses/${w.courseP.courseId}/mastery?mastery=mastered&demonstratedPercentage=100`,
+          w.learner.cookie,
+        )
+      ).statusCode,
+    ).toBe(400);
+
+    // The real state, from the clean request.
     const response = await get(
-      `/api/v1/me/courses/${w.courseP.courseId}/mastery?mastery=mastered&demonstratedPercentage=100`,
+      `/api/v1/me/courses/${w.courseP.courseId}/mastery`,
       w.learner.cookie,
     );
     expect(response.statusCode).toBe(200);

@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
   courseMasterySchema,
+  emptyQuerySchema,
   evidenceSummarySchema,
   idSchema,
   objectiveMasterySchema,
@@ -59,6 +60,11 @@ const toEvidence = (r: EvidenceRecord): unknown =>
  *
  * So "the client submitted MASTERED" is not a request that gets rejected here;
  * it is a request with nowhere to go.
+ *
+ * NO ROUTE HERE TAKES A QUERY PARAMETER EITHER, and each one says so by parsing
+ * `emptyQuerySchema`. Every learner on these routes is named by the path or by
+ * the session, so a caller sending `?learnerId=` is either confused or probing;
+ * answering 200 told them the parameter was at least accepted. See VULN-034.
  */
 export function registerMasteryRoutes(app: FastifyInstance, mastery: MasteryService): void {
   function contextOf(request: FastifyRequest): ActorContext {
@@ -77,6 +83,7 @@ export function registerMasteryRoutes(app: FastifyInstance, mastery: MasteryServ
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = courseParams.parse(request.params);
+      emptyQuerySchema.parse(request.query ?? {});
       const found = await mastery.myCourse(contextOf(request), id);
       return reply.status(200).send(courseMasterySchema.parse(found));
     },
@@ -92,6 +99,7 @@ export function registerMasteryRoutes(app: FastifyInstance, mastery: MasteryServ
   app.get('/api/v1/me/objectives', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const found = await mastery.myObjectives(contextOf(request));
       return reply.status(200).send({ items: found.map(toObjective) });
     },
@@ -108,6 +116,7 @@ export function registerMasteryRoutes(app: FastifyInstance, mastery: MasteryServ
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = objectiveParams.parse(request.params);
+      emptyQuerySchema.parse(request.query ?? {});
       const ctx = contextOf(request);
       const found = await mastery.evidenceFor(ctx, ctx.actor.id, id);
       return reply.status(200).send({ items: found.map(toEvidence) });
@@ -119,6 +128,7 @@ export function registerMasteryRoutes(app: FastifyInstance, mastery: MasteryServ
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { childId } = childParams.parse(request.params);
+      emptyQuerySchema.parse(request.query ?? {});
       const found = await mastery.objectivesForChild(contextOf(request), childId);
       return reply.status(200).send({ items: found.map(toObjective) });
     },
@@ -138,6 +148,7 @@ export function registerMasteryRoutes(app: FastifyInstance, mastery: MasteryServ
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id, studentId, courseId } = classStudentCourseParams.parse(request.params);
+      emptyQuerySchema.parse(request.query ?? {});
       const found = await mastery.courseForStudentInClass(
         contextOf(request),
         id,

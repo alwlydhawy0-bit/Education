@@ -207,6 +207,41 @@ the current state.
   disclosure decision that was never explicitly made, and it is out of this
   task's scope to change.
 
+## Added in Task 012
+
+- **A learner's lesson response is the authoring DTO.** Reviewed field by field
+  and found to carry nothing an author may see and a learner may not — no
+  `createdBy`, no organization internals, no scoring configuration — but it does
+  carry `updatedAt` (a write precondition, useless to a reader) and an all-false
+  `permissions` block. Neither discloses anything about the content, and a
+  separate learner schema would be a second shape for the same row to drift
+  between. The exact key set is asserted instead (RISK-DELIVERY-01).
+- **Two layers cover for each other, and that hides test gaps.** Task 012's
+  defect injection removed the organization boundary from the policy and every
+  HTTP test still passed, because RLS held; it removed the draft check from RLS
+  and every HTTP test still passed, because the policy held. Both are now caught,
+  but the general hazard remains: a control tested only through the layer above
+  it is an untested assumption. See VULN-035 (RISK-DELIVERY-02).
+- **An attempt stranded by a mid-attempt archive can never be submitted or
+  cleared.** Writing requires current access, consistently with progress, so a
+  learner who was mid-quiz when the material was retired keeps an `in_progress`
+  row forever. Deterministic and non-destructive — no partial score, no answers
+  recorded — but it consumes one of their attempt allowance. Same shape as
+  RISK-ASSESS-04, now demonstrated at the delivery layer (RISK-DELIVERY-03).
+- **There is no learner-facing course-tree endpoint.** Navigation reuses
+  `/me/courses/:id/mastery`, which returns the authorized tree. That is one
+  endpoint serving two purposes, and a future change to the mastery shape is a
+  change to navigation. Deliberate: a second tree query would be a second answer
+  to "what may this learner see" (RISK-DELIVERY-04).
+- **Nothing records that a learner READ a lesson.** Progress is recorded only
+  when the learner asserts it. Reads are not audited, so "who saw this material"
+  is unanswerable — the same gap as RISK-PROGRESS-02, at the delivery layer.
+- **The learner frontend deliberately does not filter.** `LessonView` renders a
+  draft if the server sends one, and a component test asserts that it does. This
+  is intentional — hiding it in the browser would mask a genuine server defect —
+  but it means a server-side visibility failure is fully visible to the user
+  before it is fixed.
+
 ## Added in Task 011
 
 - **Optimistic concurrency exists only for lessons.** `PATCH /lessons/:id` and

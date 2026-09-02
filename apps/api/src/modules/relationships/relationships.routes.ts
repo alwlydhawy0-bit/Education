@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
+  emptyQuerySchema,
   addClassMemberRequestSchema,
   addTeacherRequestSchema,
   classMemberResponseSchema,
@@ -113,6 +114,7 @@ export function registerRelationshipRoutes(
   app.get('/api/v1/classes/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = classParamsSchema.parse(request.params);
       return reply.status(200).send(toClass(await classes.get(contextOf(request), id)));
     },
@@ -139,6 +141,7 @@ export function registerRelationshipRoutes(
   app.get('/api/v1/classes/:id/members', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = classParamsSchema.parse(request.params);
       const members = await classes.listMembers(contextOf(request), id);
       return reply.status(200).send({ items: members.map(toMember) });
@@ -168,6 +171,7 @@ export function registerRelationshipRoutes(
   app.get('/api/v1/classes/:id/teachers', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = classParamsSchema.parse(request.params);
       const teachers = await classes.listTeachers(contextOf(request), id);
       return reply.status(200).send({ items: teachers.map(toTeacher) });

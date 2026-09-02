@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify';
 import { z } from 'zod';
 import {
+  emptyQuerySchema,
   activityResponseSchema,
   assessmentResponseSchema,
   attemptQuestionSchema,
@@ -162,6 +163,7 @@ export function registerAssessmentRoutes(
   app.get('/api/v1/activities/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = idParams.parse(request.params);
       const found = await assessment.readActivity(contextOf(request), id);
       return reply.status(200).send(toActivity(found));
@@ -172,6 +174,7 @@ export function registerAssessmentRoutes(
   app.get('/api/v1/assessments/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = idParams.parse(request.params);
       const found = await assessment.readAssessment(contextOf(request), id);
       return reply.status(200).send(toAssessment(found));
@@ -222,6 +225,7 @@ export function registerAssessmentRoutes(
   app.get('/api/v1/attempts/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = idParams.parse(request.params);
       const { attempt, questions } = await assessment.readAttempt(contextOf(request), id);
       return reply.status(200).send({
@@ -243,6 +247,7 @@ export function registerAssessmentRoutes(
   app.get('/api/v1/attempts/:id/review', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = idParams.parse(request.params);
       const { attempt, questions } = await assessment.reviewAttempt(contextOf(request), id);
       // Through the `.strict()` envelope, like every other response in this

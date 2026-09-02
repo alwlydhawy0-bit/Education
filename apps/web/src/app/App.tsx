@@ -1,8 +1,10 @@
+import { useEffect, useState } from 'react';
 import { useLocale } from './LocaleProvider.tsx';
 import { HealthIndicator } from '../features/health/HealthIndicator.tsx';
 import { AttemptPanel } from '../features/assessment/index.ts';
 import { CourseMasteryView } from '../features/mastery/index.ts';
 import { LessonEditor } from '../features/authoring/index.ts';
+import { LessonView, MyCourses } from '../features/learning/index.ts';
 
 /**
  * Reads `?attempt=<id>` from the address bar.
@@ -25,19 +27,56 @@ function idFromLocation(parameter: string): string | null {
   return value !== null && /^[0-9a-f-]{36}$/i.test(value) ? value : null;
 }
 
+/**
+ * Moves to another view by rewriting the address bar.
+ *
+ * Still not a router. `history.pushState` plus a re-render is the smallest
+ * thing that makes the learner views navigable without pulling in routing the
+ * foundation has not decided on; it keeps the URL honest, so a learner can
+ * reload or share a link and land in the same place.
+ */
+function navigateTo(parameter: string, value: string): void {
+  const url = new URL(window.location.href);
+  // One parameter at a time: leaving a stale `?lesson=` beside a new `?course=`
+  // would render two unrelated views at once.
+  for (const key of ['course', 'lesson', 'attempt']) url.searchParams.delete(key);
+  url.searchParams.set(parameter, value);
+  window.history.pushState({}, '', url);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
 export function App(): JSX.Element {
   const { t, locale, setLocale } = useLocale();
+  // Re-read the address bar whenever it changes, including on Back.
+  const [, setNavigation] = useState(0);
+  useEffect(() => {
+    const onPop = (): void => setNavigation((n) => n + 1);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
   const attemptId = idFromLocation('attempt');
   const courseId = idFromLocation('course');
   const lessonId = idFromLocation('lesson');
+  // The learner's course list is the landing view: with nothing selected there
+  // is nothing else to show, and an empty page would look broken.
+  const showCourseList = attemptId === null && courseId === null && lessonId === null;
 
   return (
     <main>
       <h1>{t('app.title')}</h1>
       <p>{t('app.tagline')}</p>
       <HealthIndicator />
+      {showCourseList && <MyCourses onOpenCourse={(id) => navigateTo('course', id)} />}
       {attemptId !== null && <AttemptPanel attemptId={attemptId} />}
       {courseId !== null && <CourseMasteryView courseId={courseId} />}
+      {/*
+        A lesson id shows the learner's view AND, for somebody who may edit it,
+        the editor. Which of the two is useful is decided by the SERVER, in the
+        `permissions` block the editor renders from — this shell does not decide
+        who is an author, and could not: it has no authorization information.
+      */}
+      {lessonId !== null && <LessonView lessonId={lessonId} />}
       {lessonId !== null && <LessonEditor lessonId={lessonId} />}
       <button type="button" onClick={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
         {t('language.switch')}

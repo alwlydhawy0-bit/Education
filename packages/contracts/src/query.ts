@@ -63,6 +63,24 @@ export interface ListQueryOptions<
  * the repository's sort-column map be checked for exhaustiveness at compile
  * time.
  */
+/**
+ * The query string of a route that takes NO query parameters.
+ *
+ * The same argument as `emptyRequestSchema`, one layer out. A handler that
+ * simply never reads `request.query` ignores `?learnerId=<someone else>`
+ * silently, and silent-ignore is indistinguishable from trusted until the day
+ * somebody adds a filter and starts reading it.
+ *
+ * It also removes an encouraging signal: a caller probing `?learnerId=` against
+ * a route that answers 200 has learned that the parameter was at least
+ * accepted. A 400 tells them the route has no such input, which is the truth.
+ *
+ * Found by a Task 012 security test that expected 400 on `/me/objectives` and
+ * got 200 while every sibling endpoint refused. See VULN-034.
+ */
+export const emptyQuerySchema = z.object({}).strict();
+export type EmptyQuery = z.infer<typeof emptyQuerySchema>;
+
 export function createListQuerySchema<
   TSortField extends string,
   // eslint-disable-next-line @typescript-eslint/no-empty-object-type

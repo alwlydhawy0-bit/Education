@@ -77,6 +77,14 @@ Task 006 added the assignment decision table, and reworked the content table
 around the narrowing: most "a learner can read this" cases now need an
 enrolled context rather than an empty one, which is itself the assertion.
 
+Task 012 added no new decision table either, and added one lesson about the
+existing ones: its defect injection showed that the policy unit tests are what
+catch a POLICY defect, because the HTTP suites pass while RLS covers for it —
+and, symmetrically, that a defect in RLS is caught only by a test that observes
+RLS alone. Two such tests were missing for the lesson's own status and have been
+added (VULN-035). The rule that follows: when a control exists in two layers,
+each layer needs a test that can fail while the other is correct.
+
 Task 011 added no new decision table — the content table already covers the
 lifecycle verbs — but added three suites over the existing ones:
 `tests/integration/rls-content-lifecycle.test.ts` (the 0022 triggers, at the
@@ -343,6 +351,13 @@ Task 011 is proved in `tests/security` over real HTTP against a real database as
 keeps the URL, method and JSON body inside the assertion surface, so a change to
 the wire format fails here instead of passing because somebody updated the mock
 to match it.
+
+Task 012 added the learner views, and with them the sharpest assertion in the
+project's component tests: **`LessonView` renders a DRAFT lesson if the server
+sends one**, and a test asserts that it does. A component that hid it would hold
+a second copy of the visibility rule and would mask a real server defect — the
+server tests would fail while the interface looked correct. Hiding drafts is the
+server's job, and `tests/security/learner-delivery.test.ts` proves it does it.
 
 ## Test data
 

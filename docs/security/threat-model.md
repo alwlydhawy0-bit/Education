@@ -647,6 +647,11 @@ ranking, counts, and latency. Semantic similarity must never widen access.
 | RISK-LIFECYCLE-03 | A published objective can never be corrected, not even for a typo; the only route is archive and re-author | Low | Accepted; a stored mastery record's meaning is worth more than an editable statement |
 | RISK-LIFECYCLE-04 | No frontend test drives a real browser; jsdom does not run layout or enforce a CSP, so RTL is asserted structurally | Low | Open; a browser-driven test would need a harness this repository does not have |
 
+| RISK-DELIVERY-01 | Learners receive the authoring lesson DTO, including an all-false capability block and a write-precondition timestamp | Low | Accepted; reviewed field by field and the exact key set is asserted in tests |
+| RISK-DELIVERY-02 | Policy and RLS cover for each other, so a defect in either can pass the HTTP suite | Medium | Open; each layer now has tests that observe it alone, but the hazard is structural |
+| RISK-DELIVERY-03 | An attempt in progress when its content is archived can never be submitted or cleared | Low | Accepted; deterministic and non-destructive, same shape as RISK-ASSESS-04 |
+| RISK-DELIVERY-04 | Learner navigation reuses the mastery endpoint, so its shape is now load-bearing for delivery | Low | Accepted; a second tree query would be a second visibility answer |
+
 ## 6. What was NOT threat-modelled
 
 Honestly and specifically: payments; third-party integrations; mobile clients;

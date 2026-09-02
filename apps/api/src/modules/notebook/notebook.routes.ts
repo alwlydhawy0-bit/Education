@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 import {
+  emptyQuerySchema,
   createNoteRequestSchema,
   idSchema,
   listNotesQuerySchema,
@@ -64,6 +65,7 @@ export function registerNotebookRoutes(app: FastifyInstance, notebook: NotebookS
   app.get('/api/v1/notes/:id', {
     preHandler: requireActor,
     handler: async (request, reply) => {
+      emptyQuerySchema.parse(request.query ?? {});
       const { id } = noteParamsSchema.parse(request.params);
       const note = await notebook.get(contextOf(request), id);
       return reply.status(200).send(toResponse(note));

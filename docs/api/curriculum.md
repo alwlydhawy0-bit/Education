@@ -252,6 +252,96 @@ cost of the authoring screen on every browse.
 Computing them records **no** `authz.denied` events. Those exist for attempted
 actions; logging a question nobody asked would bury real probing.
 
+## Learner delivery (Task 012)
+
+Delivery adds **no new endpoints**. A learner walks the same routes staff do,
+and the difference is entirely in what the policy engine and RLS return.
+
+### The one visibility rule
+
+A learner reaches a node **iff**:
+
+```
+status = 'published'
+  AND every ancestor is published
+  AND (the catalogue is global OR it belongs to the learner's organization)
+  AND the course reaches them through a class they are in
+```
+
+All four conjuncts are enforced **twice** — once in `contentPolicy`
+(`packages/authz`) and once in the RLS `SELECT` policies (0016, narrowed by
+0017). Neither layer is permitted to be the only one that holds; see
+_Independent layers_ below.
+
+Curricula are deliberately exempt from the class conjunct: the subject catalogue
+names subjects, not content, and a learner should be able to see that their
+school teaches mathematics before anybody assigns them a maths course.
+
+### Navigation, and why there is no tree endpoint
+
+A learner screen costs a **constant** number of requests:
+
+| Screen     | Requests                                                                                      |
+| ---------- | --------------------------------------------------------------------------------------------- |
+| My courses | `GET /me/courses`                                                                             |
+| One course | `GET /me/courses/:id/mastery` — units, lessons, objectives, progress and mastery in one query |
+| One lesson | `GET /lessons/:id` + `GET /lessons/:id/activities`                                            |
+
+A second course-tree endpoint was considered and refused. `/me/courses/:id/mastery`
+already returns the whole authorized tree in one statement; a delivery-shaped
+copy would be a second query answering "what may this learner see", and the copy
+nobody tests is the one that drifts.
+
+Two requests per lesson is **not** an N+1: it is O(1) per screen and stays O(1)
+however many activities the lesson has. Asserted in `tests/web`.
+
+### What a learner receives
+
+The lesson response is the same DTO an author receives. Reviewed field by field
+in Task 012 and found to carry nothing an author may see and a learner may not:
+
+- `createdBy` is **absent** from the schema entirely — authorship is audit data.
+- `permissions` describes the **reader's own** capabilities and is all-false for
+  a learner. It is not content data and discloses nothing about the lesson.
+- `status` is always `published` for a learner, because nothing else is
+  reachable.
+- `updatedAt` is a write precondition. Useless to a reader who cannot write, and
+  retained because it reveals only when staff last edited material the learner
+  can already see.
+
+Rather than trusting that review to stay true, the exact key set is **asserted**
+in `tests/security/learner-delivery.test.ts`, alongside a deny-list
+(`createdBy`, `organizationId`, `isCorrect`, `answerKey`, …) applied to every
+learner-facing payload. A field added later is a failing test, not a silent
+widening.
+
+Assessment delivery is separately shaped: `attemptQuestionSchema` carries
+`{ id, position, body }` per option and **nothing else** — asserted as an exact
+set, because a deny-list cannot name a field nobody has invented yet.
+
+### Independent layers
+
+Defect injection in Task 012 showed that these two layers cover for each other,
+which is what they are for and also a testing hazard:
+
+- Removing the organization boundary from `contentPolicy` left every HTTP test
+  passing (RLS held) and failed **7 policy unit tests**.
+- Removing `status = 'published'` from the `lessons_select` RLS policy left every
+  HTTP test passing (the policy held) and, at the time, failed **nothing** —
+  every existing RLS test varied an _ancestor's_ status rather than the lesson's
+  own. Two tests were added to close that gap.
+
+So each layer is now challenged where it can be observed alone: the policy in
+`tests/unit`, RLS in `tests/integration/rls-*`, and the application layer with
+RLS switched off in `tests/security/layered-defense.test.ts`.
+
+### Query hygiene
+
+Every route that takes no query parameters parses `emptyQuerySchema` — a
+`z.object({}).strict()`. See VULN-034: `/me/objectives` answered `200` to
+`?learnerId=<somebody else>` while every sibling answered `400`, which is an
+encouraging signal to give a caller who is probing.
+
 ## Content safety
 
 Lesson bodies are **markdown or plain text, never HTML**. Accepting HTML would

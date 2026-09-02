@@ -44,14 +44,16 @@ to `toPublicConfig()`, which is a hand-written allow-list.
 
 ### Server (`apps/api/src/platform/config.ts`)
 
-| Value                                                                      | Class                           | Notes                                                                           |
-| -------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------- |
-| `DATABASE_URL`                                                             | **PRIVATE**                     | Contains credentials. Never logged, never exposed.                              |
-| `ALLOWED_ORIGINS`                                                          | PRIVATE                         | Not secret, but not the client's business.                                      |
-| `SESSION_COOKIE_NAME`                                                      | PRIVATE                         | The cookie is `HttpOnly`; the browser attaches it without JavaScript naming it. |
-| `SESSION_COOKIE_SECURE`, `RATE_LIMIT_ENABLED`, `LOG_LEVEL`, `PORT`, `HOST` | PRIVATE                         | Operational posture.                                                            |
-| `NODE_ENV`                                                                 | public _(via `toPublicConfig`)_ | Environment name only.                                                          |
-| API version                                                                | public                          | A constant, not a secret.                                                       |
+| Value                                                                      | Class                           | Notes                                                                                                                    |
+| -------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `DATABASE_URL`                                                             | **PRIVATE**                     | Contains credentials. Never logged, never exposed.                                                                       |
+| `ALLOWED_ORIGINS`                                                          | PRIVATE                         | Not secret, but not the client's business.                                                                               |
+| `SESSION_COOKIE_NAME`                                                      | PRIVATE                         | The cookie is `HttpOnly`; the browser attaches it without JavaScript naming it.                                          |
+| `SESSION_COOKIE_SECURE`, `RATE_LIMIT_ENABLED`, `LOG_LEVEL`, `PORT`, `HOST` | PRIVATE                         | Operational posture.                                                                                                     |
+| `AI_API_KEY`                                                               | **PRIVATE, secret-bearing**     | Task 013. In `SECRET_BEARING_KEYS` beside `DATABASE_URL`, so the redacting logger and the configuration summary mask it. |
+| `AI_PROVIDER`, `AI_TIMEOUT_MS`                                             | PRIVATE                         | Which adapter and what deadline. Not secret; not the client's business.                                                  |
+| `NODE_ENV`                                                                 | public _(via `toPublicConfig`)_ | Environment name only.                                                                                                   |
+| API version                                                                | public                          | A constant, not a secret.                                                                                                |
 
 `assertNoPrivateLeakage()` runs on **every boot in every environment** and throws
 if a secret-bearing value appears anywhere inside the public object. The
@@ -73,6 +75,14 @@ The fitness tests additionally assert that `apps/web` never imports from
 `apps/api`, imports no workspace package except `@edu/contracts`, never
 references `process.env`, and contains no server-only variable _names_ (a
 tripwire for copy-paste).
+
+**Task 013 adds a rule specifically about AI credentials**
+(`tests/architecture/ai-boundaries.test.ts`): no file under `apps/web/src` may
+match `VITE_*(AI|ANTHROPIC|OPENAI|LLM|MODEL)*` or name `AI_API_KEY`, and no
+vendor SDK may be imported by either app or appear in any dependency manifest.
+An AI key behind a `VITE_` prefix would be inlined into the bundle and shipped to
+every browser that loads the page, which is the single worst outcome available in
+that task — so it gets its own rule rather than relying on the general one.
 
 **Verified:** the production bundle was built and searched for `DATABASE_URL`,
 `postgres://`, role names, development passwords, cookie settings and origin

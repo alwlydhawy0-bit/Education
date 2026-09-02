@@ -85,6 +85,21 @@ RLS alone. Two such tests were missing for the lesson's own status and have been
 added (VULN-035). The rule that follows: when a control exists in two layers,
 each layer needs a test that can fail while the other is correct.
 
+Task 013 added no decision table and proved that rule a second time, from the
+other direction. Its defect F4 JOINed `assessment_answer_keys` into the
+assistant's retrieval and every behavioural test passed, because RLS on that
+table admits no learner: the JOIN returned nothing. Nothing leaked, and nothing
+noticed. The lesson is narrower than "add another behavioural test", because no
+behavioural test could have caught it — the code's claim is that those tables are
+**never named**, and _never read_ is indistinguishable from _read and filtered_
+from outside. That claim was moved to where it can be checked:
+`tests/architecture/ai-boundaries.test.ts`, a fitness function over the source.
+
+So the rule has a corollary. **A guarantee stated as "this code never does X" is
+a structural claim and needs a structural test.** Asserting it behaviourally
+tests a weaker guarantee than the one the comment makes, and the gap between the
+two is invisible until somebody removes the layer that was covering.
+
 Task 011 added no new decision table — the content table already covers the
 lifecycle verbs — but added three suites over the existing ones:
 `tests/integration/rls-content-lifecycle.test.ts` (the 0022 triggers, at the
@@ -358,6 +373,19 @@ sends one**, and a test asserts that it does. A component that hid it would hold
 a second copy of the visibility rule and would mask a real server defect — the
 server tests would fail while the interface looked correct. Hiding drafts is the
 server's job, and `tests/security/learner-delivery.test.ts` proves it does it.
+
+Task 013 added `AssistantPanel`, and the same shape of assertion applies to a
+different rule: **the panel renders the server's `grounding` and never re-derives
+it**. One test hands it `grounding: 'insufficient'` _together with_ sources — a
+state the server does not currently produce, which is exactly why it is worth
+asserting — and requires that the panel still shows the insufficient state. A
+component inferring grounding from `sources.length > 0` would present that as
+coursework.
+
+The other sharp one: an answer containing `<img src=x onerror=…>` and
+`<script>` must render as **text**, creating no elements. The answer is model
+output derived from author-written prose — the least trustworthy string in the
+system — and the one thing the client must never do is execute it.
 
 ## Test data
 

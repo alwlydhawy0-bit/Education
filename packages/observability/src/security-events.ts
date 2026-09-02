@@ -209,6 +209,44 @@ export const SecurityEventType = {
   PAYLOAD_TOO_LARGE: 'payload.too_large',
 
   /**
+   * The learning assistant refused to retrieve for a lesson (Task 013).
+   *
+   * The AI equivalent of `authz.denied`, and separate from it because the
+   * question an investigator asks is different. A run of `authz.denied` is
+   * somebody probing the API; a run of THESE is somebody probing the assistant
+   * — trying lesson ids to find one whose material the model will summarise for
+   * them. That is a retrieval-layer IDOR attempt and it deserves its own name.
+   *
+   * Carries the lesson id and one flat reason. Never the question, never any
+   * retrieved text, and never which of "absent", "another school's", "another
+   * class's", "draft" or "archived" applied — the caller is not told, so the
+   * audit trail does not become the oracle the response refuses to be.
+   */
+  AI_RETRIEVAL_REFUSED: 'ai.retrieval_refused',
+
+  /**
+   * A provider call failed (Task 013).
+   *
+   * Carries the provider name and which of the four normalized failure kinds it
+   * was. NOT the provider's own error text, which is vendor-shaped and can echo
+   * fragments of the request — including the learner's question.
+   */
+  AI_PROVIDER_FAILED: 'ai.provider_failed',
+
+  /**
+   * A provider cited sources it was never given (Task 013).
+   *
+   * The citation is dropped before the answer leaves the server, so this is not
+   * a breach — it is the sound of the control working. Recorded because a
+   * provider inventing references is either malfunctioning or being steered by
+   * injected text, and an operator should be able to see which model started
+   * doing it and when.
+   *
+   * Carries a COUNT. The invented ids are model output and are not stored.
+   */
+  AI_CITATION_REJECTED: 'ai.citation_rejected',
+
+  /**
    * Emitted at startup when the running security posture deviates from the safe
    * defaults (rate limiting off, insecure cookies, debug logging). The
    * configuration loader refuses these outright in production and staging, so

@@ -53,7 +53,6 @@ describe('reserved policies are NOT active protection', () => {
 
   it('covers the surfaces still awaiting a route', () => {
     const reserved: string[] = Object.values(RESERVED_RATE_LIMIT_POLICIES).map((p) => p.name);
-    expect(reserved).toContain('ai.request');
     expect(reserved).toContain('file.upload');
     expect(reserved).toContain('operation.expensive');
   });
@@ -65,5 +64,18 @@ describe('reserved policies are NOT active protection', () => {
     expect(enforced).toContain('auth.password_reset');
     expect(enforced).toContain('auth.refresh');
     expect(enforced).toContain('auth.verify_email');
+  });
+
+  it('and now ENFORCES ai.request, which Task 013 gave a route', () => {
+    // This assertion is the REVERSE of what it said before Task 013, and the
+    // reversal is the point: `ai.request` was documented intent for as long as
+    // there was no assistant endpoint, and claiming it as protection then would
+    // have been dishonest. `POST /api/v1/assistant/ask` exists now, so the
+    // policy has to be in the enforced catalogue — and the assertion below is
+    // what fails if somebody wires the route without wiring the limiter.
+    const enforced: string[] = Object.values(RATE_LIMIT_POLICIES).map((p) => p.name);
+    const reserved: string[] = Object.values(RESERVED_RATE_LIMIT_POLICIES).map((p) => p.name);
+    expect(enforced).toContain('ai.request');
+    expect(reserved).not.toContain('ai.request');
   });
 });

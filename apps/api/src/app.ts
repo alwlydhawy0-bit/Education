@@ -37,6 +37,10 @@ import { registerProgressRoutes } from './modules/progress/progress.routes.ts';
 import { masteryRepository } from './modules/mastery/mastery.repository.ts';
 import { createMasteryService } from './modules/mastery/mastery.service.ts';
 import { registerMasteryRoutes } from './modules/mastery/mastery.routes.ts';
+import { createAssistantRepository } from './modules/assistant/assistant.repository.ts';
+import { createAssistantService } from './modules/assistant/assistant.service.ts';
+import { registerAssistantRoutes } from './modules/assistant/assistant.routes.ts';
+import { createGroundedComposer } from './platform/ai/provider.ts';
 import { assessmentRepository } from './modules/assessment/assessment.repository.ts';
 import { createAssessmentService } from './modules/assessment/assessment.service.ts';
 import { registerAssessmentRoutes } from './modules/assessment/assessment.routes.ts';
@@ -267,6 +271,29 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     securityEvents,
   });
 
+  /**
+   * The AI provider, selected once, here, and nowhere else.
+   *
+   * `AI_PROVIDER` currently admits only `none`, which selects the deterministic
+   * grounded composer — a real offline answer composer, not a stub that returns
+   * a fixture. Adding a vendor means adding one adapter and one enum member;
+   * nothing else in the application changes, because nothing else knows a
+   * provider exists.
+   *
+   * `AI_API_KEY` is read by config and never reaches this switch, so a
+   * credential cannot be logged from here even by accident.
+   */
+  const aiProvider = createGroundedComposer();
+
+  const assistant = createAssistantService({
+    db,
+    repository: createAssistantRepository(),
+    engine,
+    securityEvents,
+    provider: aiProvider,
+    timeoutMs: config.AI_TIMEOUT_MS,
+  });
+
   const assessment = createAssessmentService({
     db,
     repository: assessmentRepository,
@@ -322,6 +349,11 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerProgressRoutes(app, progress);
   registerMasteryRoutes(app, mastery);
   registerAssessmentRoutes(app, assessment);
+  registerAssistantRoutes(app, {
+    assistant,
+    securityEvents,
+    rateLimitEnabled: config.RATE_LIMIT_ENABLED,
+  });
 
   return { app, db };
 }

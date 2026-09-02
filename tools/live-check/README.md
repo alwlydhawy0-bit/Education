@@ -34,5 +34,34 @@ two assessments, so the `demonstrated` → `mastered` transition (which needs tw
 DIFFERENT assessments passed, not two attempts at one) can be walked through the
 real endpoints.
 
-The results of both runs are recorded under "What was actually verified" in
+`seed-assistant.ts` does the same for Task 013, and seeds **two** schools —
+because the property worth driving against a real server is a negative one, and
+one school cannot demonstrate it. Each school's lesson carries a marker word
+absent from the other's, and school B's lesson additionally carries an injected
+instruction, so one run covers cross-tenant refusal, draft refusal, absent-lesson
+refusal, prompt injection, forged request fields, the read-only guarantee, the
+per-actor quota, and what the real logger writes.
+
+```sh
+export TEST_SUPERUSER_URL='postgres://…/edu_dev'
+export LIVE_PASSWORD='<a passphrase you choose>'
+node --experimental-strip-types tools/live-check/seed-assistant.ts
+
+# Then boot the API and, with the ids it printed:
+#   A asks about A's lesson           → 200, grounding=course_material
+#   A names B's lesson                → 404
+#   A names A's own DRAFT lesson      → 404
+#   A names a lesson that does not exist → 404   (all three IDENTICAL)
+#   B asks with an injected instruction in B's own lesson → quoted as prose
+#   any forged field (learnerId, organizationId, role, sources, systemPrompt,
+#     model, instructions)            → 400
+#   61st request in an hour           → 429, and the other learner is unaffected
+# Then snapshot lesson_progress / objective_evidence / assessment_attempts /
+# lessons before and after a batch of imperative questions: identical.
+# Finally search the log for the question text, the answer text, the injected
+# instruction, the system instructions, the password, a session token, the
+# database password and a chunk id. None should appear.
+```
+
+The results of all three runs are recorded under "What was actually verified" in
 `docs/security/limitations.md`.

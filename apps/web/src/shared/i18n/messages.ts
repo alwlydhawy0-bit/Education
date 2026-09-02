@@ -82,6 +82,18 @@ const ar = {
   'learning.startAssessment': 'ابدأ التقييم',
   'learning.externalLink': 'مصدر خارجي (يُفتح في تبويب جديد)',
   'learning.backToCourses': 'العودة إلى المقررات',
+
+  'assistant.title': 'مساعد الدراسة',
+  'assistant.questionLabel': 'اسأل سؤالًا عن هذا الدرس',
+  'assistant.ask': 'اسأل',
+  'assistant.asking': 'جارٍ البحث في مادتك…',
+  'assistant.failed': 'تعذّر الحصول على إجابة الآن.',
+  'assistant.unavailable': 'المساعد غير متاح حاليًا. حاول مرة أخرى.',
+  'assistant.retry': 'إعادة المحاولة',
+  'assistant.insufficient': 'لا تحتوي مادة هذا المقرر على ما يكفي للإجابة عن سؤالك.',
+  'assistant.searched': 'عدد المقاطع التي جرى البحث فيها:',
+  'assistant.fromCourseMaterial': 'مبنيّة على مادة مقررك',
+  'assistant.sources': 'المصادر',
 } as const;
 
 export type MessageKey = keyof typeof ar;
@@ -160,6 +172,18 @@ const en: Record<MessageKey, string> = {
   'learning.startAssessment': 'Start assessment',
   'learning.externalLink': 'External resource (opens in a new tab)',
   'learning.backToCourses': 'Back to my courses',
+
+  'assistant.title': 'Study assistant',
+  'assistant.questionLabel': 'Ask a question about this lesson',
+  'assistant.ask': 'Ask',
+  'assistant.asking': 'Searching your material…',
+  'assistant.failed': 'An answer could not be produced right now.',
+  'assistant.unavailable': 'The assistant is unavailable. Please try again.',
+  'assistant.retry': 'Try again',
+  'assistant.insufficient': 'Your course material does not cover this question.',
+  'assistant.searched': 'Passages searched:',
+  'assistant.fromCourseMaterial': 'Based on your course material',
+  'assistant.sources': 'Sources',
 };
 
 const CATALOGUES: Record<Locale, Record<MessageKey, string>> = { ar, en };

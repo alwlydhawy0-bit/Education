@@ -1,5 +1,6 @@
 import rateLimit from '@fastify/rate-limit';
-import type { FastifyInstance } from 'fastify';
+import type { FastifyInstance, FastifyRequest, preHandlerAsyncHookHandler } from 'fastify';
+import { rateLimited } from '@edu/kernel';
 import { SecurityEventType, type Logger } from '@edu/observability';
 import type { SecurityEventRecorder } from './security-events.ts';
 
@@ -131,6 +132,28 @@ export const RATE_LIMIT_POLICIES = {
     rationale: 'Repeated scoring is the expensive half of answer-key probing.',
   },
 
+  /**
+   * A question to the learning assistant (Task 013).
+   *
+   * PROMOTED FROM `RESERVED_RATE_LIMIT_POLICIES`, where it was declared with the
+   * note "must be per-actor, not per-IP" — and it now is. This is the ONLY
+   * policy on the platform keyed by the authenticated actor rather than by IP,
+   * and the reason is that the abuse and the cost are both per-person: a
+   * classroom of thirty sharing one address must not exhaust each other's
+   * quota, and one learner scripting a loop must not be able to spend the
+   * school's provider budget behind a shared NAT.
+   *
+   * 60 an hour is roughly one a minute — generous for somebody studying, and
+   * far below what an automated loop wants. It is a COST and ABUSE control, not
+   * a correctness one: nothing about authorization depends on it.
+   */
+  aiRequest: {
+    name: 'ai.request',
+    max: 60,
+    timeWindow: '1 hour',
+    rationale: 'Provider cost is real money. Keyed per actor so a shared IP is not a shared quota.',
+  },
+
   /** Guessing a verification token is the attack this bounds. */
   authVerifyEmail: {
     name: 'auth.verify_email',
@@ -150,12 +173,6 @@ export const RATE_LIMIT_POLICIES = {
  * asserts these are not mistaken for active policies.
  */
 export const RESERVED_RATE_LIMIT_POLICIES = {
-  aiRequest: {
-    name: 'ai.request',
-    max: 60,
-    timeWindow: '1 hour',
-    rationale: 'Provider cost is real money; must be per-actor, not per-IP. No AI exists yet.',
-  },
   fileUpload: {
     name: 'file.upload',
     max: 20,
@@ -175,6 +192,84 @@ export function routeLimit(policy: RateLimitPolicy): {
   rateLimit: { max: number; timeWindow: string };
 } {
   return { rateLimit: { max: policy.max, timeWindow: policy.timeWindow } };
+}
+
+/**
+ * A limiter keyed by the AUTHENTICATED ACTOR rather than by IP address.
+ *
+ * WHY THIS EXISTS AT ALL. The plugin's limiter runs at `onRequest`, which is
+ * before the session is resolved at `preHandler` — so `request.actor` is always
+ * null there, and a `keyGenerator` reading it would look like per-actor
+ * attribution while silently keying everything under one bucket. The note in
+ * `onExceeded` below has said so since Task 008; Task 013 is the first feature
+ * that actually needs the thing it describes.
+ *
+ * WHY THE ASSISTANT NEEDS IT AND OTHER ROUTES DO NOT. Provider calls cost real
+ * money per request, and a classroom shares one public address. An IP-keyed
+ * quota would mean thirty learners in one room exhausting each other's budget,
+ * while one learner scripting a loop from home gets the whole allowance to
+ * themselves. Both failures are backwards.
+ *
+ * THIS IS NOT A SECOND RATE-LIMITING ARCHITECTURE. It uses the same policy
+ * objects, the same `ratelimit.exceeded` event and the same 429, and it runs
+ * IN ADDITION to the global IP limiter rather than instead of it — an
+ * unauthenticated flood is still stopped before it reaches here.
+ *
+ * IT SHARES THE HONEST LIMITATION stated at the top of this file: the counters
+ * are in-process, so with N instances the effective limit is N times the
+ * configured value (RISK-RATE-01). For a cost control that means the bill can
+ * be N times the intended ceiling, which is recorded rather than glossed.
+ */
+export function actorRateLimiter(
+  policy: RateLimitPolicy,
+  deps: { readonly enabled: boolean; readonly securityEvents: SecurityEventRecorder },
+): preHandlerAsyncHookHandler {
+  const windowMs = parseWindow(policy.timeWindow);
+  // Keyed by actor id. Entries are pruned on read rather than by a timer, so
+  // there is no interval to leak and an idle process holds nothing.
+  const hits = new Map<string, number[]>();
+
+  return async function enforce(request: FastifyRequest): Promise<void> {
+    if (!deps.enabled) return;
+
+    const actor = request.actor;
+    // No actor means `requireActor` has not run or has already refused. Either
+    // way this hook is not the place to decide authentication, so it defers —
+    // it must be registered AFTER `requireActor`, which is what the route does.
+    if (!actor) return;
+
+    const now = Date.now();
+    const recent = (hits.get(actor.id) ?? []).filter((at) => now - at < windowMs);
+
+    if (recent.length >= policy.max) {
+      hits.set(actor.id, recent);
+      // Recorded WITH the actor id — the one thing the IP-keyed limiter cannot
+      // do, and the reason a per-actor quota is worth having in the audit trail
+      // as well as in the response.
+      await deps.securityEvents.record({
+        type: SecurityEventType.RATE_LIMIT_EXCEEDED,
+        actorId: actor.id,
+        correlationId: request.correlationId,
+        ip: request.ip,
+        detail: { policy: policy.name, route: request.routeOptions?.url ?? 'unknown' },
+        occurredAt: new Date(),
+      });
+      throw rateLimited();
+    }
+
+    recent.push(now);
+    hits.set(actor.id, recent);
+  };
+}
+
+/** `"1 hour"`, `"15 minutes"`, `"30 seconds"` as milliseconds. */
+function parseWindow(window: string): number {
+  const match = /^(\d+)\s*(second|minute|hour)s?$/.exec(window.trim());
+  if (!match) throw new Error(`Unsupported rate-limit window: "${window}"`);
+  const amount = Number(match[1]);
+  const unit = match[2];
+  const scale = unit === 'second' ? 1_000 : unit === 'minute' ? 60_000 : 3_600_000;
+  return amount * scale;
 }
 
 export interface RateLimitDeps {

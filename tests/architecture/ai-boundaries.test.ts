@@ -1,0 +1,183 @@
+import { describe, expect, it } from 'vitest';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+
+/**
+ * Structural rules for the AI layer.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THESE ARE STRUCTURAL AND NOT BEHAVIOURAL
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Found by defect injection, and worth stating plainly because it is the kind
+ * of gap that is invisible until something is deliberately broken.
+ *
+ * Task 013's defect F4 added a query to the assistant's repository that JOINed
+ * `assessment_answer_keys` and pushed the correct option's text into the
+ * retrieved set. Every behavioural test still passed — because row-level
+ * security on that table admits no learner, so the JOIN returned nothing.
+ *
+ * The defence held. But the guarantee the code CLAIMS is stronger than "RLS
+ * would stop it": the repository documents that it never names those tables at
+ * all, which is why the assistant cannot disclose an answer key for the same
+ * reason it cannot disclose a payroll record. A behavioural test cannot
+ * distinguish "never read" from "read and filtered", and the difference matters
+ * the day somebody adds a definer function, a superuser path, or a teacher-
+ * facing assistant.
+ *
+ * So the claim is asserted where it lives: in the source.
+ */
+const ROOT = resolve(import.meta.dirname, '../..');
+
+function sourceFiles(dir: string): string[] {
+  const out: string[] = [];
+  const walk = (current: string): void => {
+    for (const entry of readdirSync(current)) {
+      if (entry === 'node_modules' || entry === 'dist') continue;
+      const full = join(current, entry);
+      if (statSync(full).isDirectory()) walk(full);
+      else if (entry.endsWith('.ts') || entry.endsWith('.tsx')) out.push(full);
+    }
+  };
+  walk(join(ROOT, dir));
+  return out;
+}
+
+const read = (path: string): string => readFileSync(join(ROOT, path), 'utf8');
+
+describe('rule 1 — the assistant never reads assessment internals', () => {
+  /**
+   * Tables holding, or leading directly to, the answers.
+   *
+   * `assessment_questions` is on the list as well as the keys, because a
+   * question's prompt plus its options narrows the answer even without the key
+   * row — and because a query that reaches the questions is one JOIN away from
+   * reaching the keys.
+   */
+  const FORBIDDEN_TABLES = [
+    'assessment_answer_keys',
+    'assessment_questions',
+    'assessment_options',
+    'assessment_attempt_answers',
+    'assessments',
+  ];
+
+  const assistantSource = sourceFiles('apps/api/src/modules/assistant')
+    .map((file) => readFileSync(file, 'utf8'))
+    .join('\n');
+
+  it.each(FORBIDDEN_TABLES)('the assistant module never names %s', (table) => {
+    // A word-boundary match, so `assessments` does not accidentally match a
+    // comment about "assessment material" and give a false sense of coverage.
+    expect(assistantSource).not.toMatch(new RegExp(`\\b${table}\\b`));
+  });
+
+  it('and DOES name the curriculum tables it is supposed to read', () => {
+    // The mirror assertion. Without it the rule above would pass if somebody
+    // deleted retrieval entirely, which is a green test for a broken feature.
+    expect(assistantSource).toMatch(/\blessons\b/);
+    expect(assistantSource).toMatch(/\blearning_objectives\b/);
+  });
+});
+
+describe('rule 2 — no provider SDK reaches the application', () => {
+  /**
+   * The abstraction is only worth having if it is the ONLY path.
+   *
+   * A vendor import anywhere outside `platform/ai` would mean the application
+   * had grown a second way to talk to a model — one that bypasses the request
+   * shaping, the citation validation and the failure normalization, and that
+   * nothing in the security suite covers.
+   */
+  const VENDOR_PACKAGES = [
+    '@anthropic-ai/',
+    'openai',
+    '@google/generative-ai',
+    '@google-cloud/aiplatform',
+    'cohere-ai',
+    'mistralai',
+    'langchain',
+    'llamaindex',
+  ];
+
+  const appSource = [...sourceFiles('apps/api/src'), ...sourceFiles('apps/web/src')];
+
+  it.each(VENDOR_PACKAGES)('nothing imports %s', (pkg) => {
+    for (const file of appSource) {
+      const content = readFileSync(file, 'utf8');
+      const imports = [...content.matchAll(/from\s+'([^']+)'/g)].map((match) => match[1] ?? '');
+      expect({ file, imports: imports.filter((i) => i.startsWith(pkg)) }).toEqual({
+        file,
+        imports: [],
+      });
+    }
+  });
+
+  it('and no dependency manifest carries one either', () => {
+    // Catches the step before the import: a package added "to try it out" and
+    // then reached for casually.
+    for (const manifest of ['package.json', 'apps/api/package.json', 'apps/web/package.json']) {
+      const parsed = JSON.parse(read(manifest)) as {
+        dependencies?: Record<string, string>;
+        devDependencies?: Record<string, string>;
+      };
+      const names = [
+        ...Object.keys(parsed.dependencies ?? {}),
+        ...Object.keys(parsed.devDependencies ?? {}),
+      ];
+      for (const pkg of VENDOR_PACKAGES) {
+        expect({ manifest, matched: names.filter((n) => n.startsWith(pkg)) }).toEqual({
+          manifest,
+          matched: [],
+        });
+      }
+    }
+  });
+});
+
+describe('rule 3 — no AI credential can reach the browser', () => {
+  it('the web app never reads an AI key, under any name', () => {
+    const webSource = sourceFiles('apps/web/src')
+      .map((file) => readFileSync(file, 'utf8'))
+      .join('\n');
+
+    // `VITE_` is the only prefix Vite inlines into the bundle. An AI key behind
+    // one would be shipped to every browser that loads the page, which is the
+    // single worst outcome available in this task.
+    expect(webSource).not.toMatch(/VITE_[A-Z_]*(AI|ANTHROPIC|OPENAI|LLM|MODEL)[A-Z_]*/);
+    expect(webSource).not.toMatch(/\bAI_API_KEY\b/);
+  });
+
+  it('the key is declared secret-bearing, so the logger redacts it', () => {
+    const config = read('apps/api/src/platform/config.ts');
+    // Not merely "the key exists" — it must be in the list the redacting logger
+    // and the configuration summary consult, alongside DATABASE_URL.
+    expect(config).toMatch(/SECRET_BEARING_KEYS\s*=\s*\[[^\]]*'AI_API_KEY'/);
+  });
+
+  it('the example environment file does not ship a real-looking key', () => {
+    const example = read('.env.example');
+    expect(example).not.toMatch(/sk-[A-Za-z0-9_-]{20,}/);
+  });
+});
+
+describe('rule 4 — the model cannot be handed an instruction by a caller', () => {
+  it('the system instructions are a module constant, not a template', () => {
+    const service = read('apps/api/src/modules/assistant/assistant.service.ts');
+    expect(service).toMatch(/const SYSTEM_INSTRUCTIONS =/);
+    // A template literal with a substitution would be a place a caller could
+    // eventually reach. The constant is built from a fixed array of strings.
+    expect(service).not.toMatch(/SYSTEM_INSTRUCTIONS\s*=\s*`[^`]*\$\{/);
+  });
+
+  it('the request contract has no field for instructions, sources or a model', () => {
+    const contract = read('packages/contracts/src/assistant.contract.ts');
+    const request = contract.slice(
+      contract.indexOf('askAssistantRequestSchema'),
+      contract.indexOf('assistantSourceRefSchema'),
+    );
+    for (const field of ['instructions', 'systemPrompt', 'sources', 'model', 'temperature']) {
+      expect({ field, present: request.includes(`${field}:`) }).toEqual({ field, present: false });
+    }
+  });
+});

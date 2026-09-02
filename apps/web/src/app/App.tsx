@@ -5,6 +5,7 @@ import { AttemptPanel } from '../features/assessment/index.ts';
 import { CourseMasteryView } from '../features/mastery/index.ts';
 import { LessonEditor } from '../features/authoring/index.ts';
 import { LessonView, MyCourses } from '../features/learning/index.ts';
+import { AssistantPanel } from '../features/assistant/index.ts';
 
 /**
  * Reads `?attempt=<id>` from the address bar.
@@ -77,6 +78,14 @@ export function App(): JSX.Element {
         who is an author, and could not: it has no authorization information.
       */}
       {lessonId !== null && <LessonView lessonId={lessonId} />}
+      {/*
+        The assistant sits beside the lesson because that is its whole scope:
+        it answers about the lesson you are reading. It is offered for any
+        lesson the learner can open, and the SERVER decides what material that
+        gives it access to — this shell has no authorization information and
+        makes no such decision.
+      */}
+      {lessonId !== null && <AssistantPanel lessonId={lessonId} />}
       {lessonId !== null && <LessonEditor lessonId={lessonId} />}
       <button type="button" onClick={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
         {t('language.switch')}

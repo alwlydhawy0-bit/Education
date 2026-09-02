@@ -68,7 +68,7 @@ const CONFIG_KEYS = [
  * Used by `assertNoPrivateLeakage` as a runtime backstop against a future edit
  * to `toPublicConfig` that adds a field without thinking about it.
  */
-const SECRET_BEARING_KEYS = ['DATABASE_URL'] as const;
+const SECRET_BEARING_KEYS = ['DATABASE_URL', 'AI_API_KEY'] as const;
 
 const configSchema = z
   .object({
@@ -102,6 +102,41 @@ const configSchema = z
       .enum(['true', 'false'])
       .default('true')
       .transform((v) => v === 'true'),
+
+    /**
+     * The AI provider, and the ONLY switch that turns the assistant on.
+     *
+     * `none` is the default and is a first-class mode, not a broken one: the
+     * assistant answers from retrieved course material through a deterministic
+     * local composer. That is what makes the whole pipeline — authorization,
+     * retrieval, citation validation, refusal — testable and shippable without
+     * a vendor account, and it means a missing key degrades the answer's
+     * fluency rather than degrading its SECURITY.
+     *
+     * No provider is named here beyond the enum. The application talks to
+     * `AiProvider`, never to a vendor SDK.
+     */
+    AI_PROVIDER: z.enum(['none']).default('none'),
+
+    /**
+     * PRIVATE. A provider credential.
+     *
+     * Listed in `SECRET_BEARING_KEYS`, so the redacting logger and the
+     * configuration summary treat it exactly like `DATABASE_URL`. It is read
+     * ONLY by the server; there is deliberately no `VITE_` counterpart, and
+     * `tests/architecture/deployment-config.test.ts` asserts no AI key can
+     * reach the browser bundle.
+     */
+    AI_API_KEY: z.string().optional(),
+
+    /**
+     * How long the assistant waits for a provider before giving up.
+     *
+     * Short on purpose. A learner staring at a spinner is a worse outcome than
+     * an honest "try again", and a long timeout holds a connection and a
+     * rate-limit slot while it waits.
+     */
+    AI_TIMEOUT_MS: z.coerce.number().int().min(1000).max(60_000).default(15_000),
 
     SESSION_COOKIE_NAME: z.string().default('edu_session'),
     REFRESH_COOKIE_NAME: z.string().default('edu_refresh'),

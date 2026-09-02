@@ -16,8 +16,8 @@ does not establish the absence of vulnerabilities.
 **Updated for Task 010.** The counts and the "not verified" list below reflect
 the current state.
 
-- 1,422 tests executed and passing: 574 unit, 107 architecture, 282 integration,
-  459 security.
+- 1,560 tests executed and passing: 598 unit, 108 architecture, 349 integration,
+  505 security.
 - Migrations applied cleanly from empty to full schema, repeatedly.
 - RLS enforced against a real non-superuser role — verified by attack, not by
   reading the policy.

@@ -4,8 +4,16 @@
   "compilerOptions": {
     "noEmit": true,
     "allowImportingTsExtensions": true,
-    "types": ["node"],
-    "lib": ["ES2023", "DOM", "DOM.Iterable"]
+    // `vite/client` is here for `tests/web`, which renders the real components
+    // and therefore reaches `import.meta.env` through the shared API client.
+    // The web app declares the same types in its own tsconfig; without it here
+    // the test project would typecheck the same file under different rules.
+    "types": ["node", "vite/client"],
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    // For `tests/web`, which renders the real components in jsdom. The
+    // automatic runtime matches `apps/web/tsconfig.json`, so a component
+    // compiles the same way under test as it does in the bundle.
+    "jsx": "react-jsx"
   },
-  "include": ["tests/**/*.ts", "db/**/*.ts", "tools/**/*.ts", "*.ts"]
+  "include": ["tests/**/*.ts", "tests/**/*.tsx", "db/**/*.ts", "tools/**/*.ts", "*.ts"]
 }

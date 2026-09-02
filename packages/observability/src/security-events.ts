@@ -104,6 +104,43 @@ export const SecurityEventType = {
   CONTENT_PUBLISHED: 'content.published',
   CONTENT_ARCHIVED: 'content.archived',
   CONTENT_DELETED: 'content.deleted',
+
+  /**
+   * A write was refused by the content lifecycle rules (Task 011).
+   *
+   * Distinct from `authz.denied`, which records that an actor had no standing.
+   * This records that an actor WITH standing tried to do something the content's
+   * STATE forbids: reword a published objective, add one to a closed lesson,
+   * publish beneath a draft parent, archive over live children.
+   *
+   * Worth its own type because the two mean different things operationally. A
+   * burst of `authz.denied` from one actor is probing. A burst of these is more
+   * often an author fighting a rule they do not understand — a documentation
+   * problem — but a burst aimed at PUBLISHED assessment content is the shape of
+   * somebody testing whether an answer key can still be moved, which is why it
+   * is recorded rather than left as a 409 in an access log.
+   *
+   * Carries the resource kind, its id, and the database's reason. Never the
+   * content: not a statement, not a prompt, and above all not a key.
+   */
+  CONTENT_LIFECYCLE_REFUSED: 'content.lifecycle_refused',
+
+  /**
+   * A write refused because the caller's optimistic-concurrency token was stale.
+   *
+   * Distinct from `CONTENT_LIFECYCLE_REFUSED`, which means the transition itself
+   * was illegal. This one means the transition might well have been legal — and
+   * was refused because the caller was describing a version of the row that no
+   * longer exists, so applying it would have silently destroyed somebody's work.
+   *
+   * Ordinarily benign: two authors in the same lesson. Worth recording anyway,
+   * because a stream of them against one lesson id from one session is what a
+   * replayed captured request looks like.
+   *
+   * Carries the resource kind and id only. Never who won the race — the caller
+   * whose write lost is not entitled to learn that another actor exists.
+   */
+  CONTENT_STALE_WRITE_REFUSED: 'content.stale_write_refused',
   CONTENT_REORDERED: 'content.reordered',
   EDUCATION_LEVEL_CHANGED: 'content.education_level_changed',
 

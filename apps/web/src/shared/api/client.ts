@@ -16,13 +16,29 @@ export class ApiError extends Error {
   readonly code: string;
   readonly status: number;
   readonly correlationId: string | null;
+  /**
+   * The server's machine-readable qualifier, when it sent one.
+   *
+   * Features branch on this, never on `message`. Two 409s can mean entirely
+   * different things — a lifecycle rule refused the transition, or the caller
+   * was describing a stale version of the row — and the remedies differ, so the
+   * distinction has to survive translation and rewording.
+   */
+  readonly detail: Readonly<Record<string, unknown>> | null;
 
-  constructor(status: number, code: string, message: string, correlationId: string | null) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    correlationId: string | null,
+    detail: Readonly<Record<string, unknown>> | null = null,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
     this.correlationId = correlationId;
+    this.detail = detail;
   }
 }
 
@@ -58,6 +74,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
         parsed.data.error.code,
         parsed.data.error.message,
         parsed.data.error.correlationId,
+        parsed.data.error.detail ?? null,
       );
     }
     throw new ApiError(response.status, 'INTERNAL', 'Unexpected error', null);

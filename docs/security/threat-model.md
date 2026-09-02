@@ -642,6 +642,11 @@ ranking, counts, and latency. Semantic similarity must never widen access.
 | RISK-MASTERY-05 | `app_objective_label` returns objective statements and lesson names to any caller holding an objective id | Low | Accepted; bounded to names, same shape and caveat as `app_lesson_label` |
 | RISK-MASTERY-06 | A course mastery view is computed per request with no caching; untested at catalogue scale | Low | Open; correctness chosen over throughput, as in RISK-ASSIGN-03 |
 
+| RISK-LIFECYCLE-01 | Optimistic concurrency covers lessons only; a concurrent edit to a curriculum, course or unit can still be silently lost | Low | Open; extend the same token when an editor exists for them |
+| RISK-LIFECYCLE-02 | The concurrency token is optional, so a client that omits it still gets last-write-wins | Low | Accepted; mandating it would break every caller with no earlier read |
+| RISK-LIFECYCLE-03 | A published objective can never be corrected, not even for a typo; the only route is archive and re-author | Low | Accepted; a stored mastery record's meaning is worth more than an editable statement |
+| RISK-LIFECYCLE-04 | No frontend test drives a real browser; jsdom does not run layout or enforce a CSP, so RTL is asserted structurally | Low | Open; a browser-driven test would need a harness this repository does not have |
+
 ## 6. What was NOT threat-modelled
 
 Honestly and specifically: payments; third-party integrations; mobile clients;

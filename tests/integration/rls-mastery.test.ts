@@ -338,20 +338,40 @@ describe('learning objectives', () => {
     ).toBe(false);
   });
 
-  it('CAN be reworded by an author after publication, and keep their identity', async () => {
-    // The whole reason objectives are rows rather than array elements: a
-    // published lesson is still editable (0016), so an author fixing a typo must
-    // not re-point or orphan a child's evidence.
+  it('CANNOT be reworded after publication — 0022 reversed this deliberately', async () => {
+    // TASK 010 ASSERTED THE OPPOSITE, and Task 011 changed it on purpose. The
+    // old rule let an author fix a typo in a published objective; the new one
+    // refuses, because an objective statement is what a learner's stored
+    // mastery record MEANS, and editing it changes the meaning of a record
+    // nobody can re-consent to. The remedy is to archive and re-author, which
+    // leaves the old evidence pointing at the old statement — correctly.
     const first = w.objectives[0]!;
     expect(
-      await changedRows(w.author, `UPDATE learning_objectives SET statement = $2 WHERE id = $1`, [
+      await attempt(w.author, `UPDATE learning_objectives SET statement = $2 WHERE id = $1`, [
         first.id,
         "Explain Newton's SECOND law",
       ]),
-    ).toBe(1);
+    ).toBe(false);
     const after = await objectivesOf(w.lessonA);
+    expect(after[0]!.statement).toBe("Explain Newton's second law");
+  });
+
+  it('CAN still be reworded while the lesson is a DRAFT, keeping their identity', async () => {
+    // The reason objectives are rows rather than array elements survives: while
+    // a lesson is still being written, fixing a typo must not re-point or orphan
+    // anything. What changed is WHEN that is allowed, not that identity is
+    // stable.
+    const before = await objectivesOf(w.draftLesson);
+    const first = before[0]!;
+    expect(
+      await changedRows(w.author, `UPDATE learning_objectives SET statement = $2 WHERE id = $1`, [
+        first.id,
+        'Define linear momentum',
+      ]),
+    ).toBe(1);
+    const after = await objectivesOf(w.draftLesson);
     expect(after[0]!.id).toBe(first.id);
-    expect(after[0]!.statement).toBe("Explain Newton's SECOND law");
+    expect(after[0]!.statement).toBe('Define linear momentum');
   });
 
   it('CANNOT be moved to another lesson', async () => {
@@ -399,16 +419,21 @@ describe('learning objectives', () => {
   it('are capped at twenty per lesson', async () => {
     // 0016 held this as `cardinality(objectives) <= 20`; the bound survives the
     // promotion to rows rather than being quietly dropped with the column.
+    //
+    // Asserted on the DRAFT lesson, because 0022 refuses any objective write to
+    // a published one — and this test is about the CAP, not the freeze. Running
+    // it against a published lesson would trip the freeze first and pass with
+    // the cap removed, which is a test that proves nothing.
     const db2 = await seedDb();
     await db2.query(
       `INSERT INTO learning_objectives (lesson_id, position, statement)
-       SELECT $1, g, 'Objective ' || g FROM generate_series(4, 20) g`,
-      [w.lessonA],
+       SELECT $1, g, 'Objective ' || g FROM generate_series(2, 20) g`,
+      [w.draftLesson],
     );
     await expect(
       db2.query(
         `INSERT INTO learning_objectives (lesson_id, position, statement) VALUES ($1, 21, 'One too many')`,
-        [w.lessonA],
+        [w.draftLesson],
       ),
     ).rejects.toThrow(/at most 20/i);
   });

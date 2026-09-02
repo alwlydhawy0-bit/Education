@@ -207,6 +207,57 @@ the current state.
   disclosure decision that was never explicitly made, and it is out of this
   task's scope to change.
 
+## Added in Task 011
+
+- **Optimistic concurrency exists only for lessons.** `PATCH /lessons/:id` and
+  the lesson publish/archive routes accept `expectedUpdatedAt`; curricula,
+  courses and units accept nothing and remain last-write-wins. Two people
+  editing a course title concurrently can still lose one of the edits. The
+  reason is that nothing edits those interactively yet, and a token no client
+  sends is untested code; the fix is to extend the same mechanism when an editor
+  for them exists (RISK-LIFECYCLE-01).
+- **The concurrency token is a timestamp, not an opaque version.** It is bumped
+  with `GREATEST(now(), updated_at + interval '1 ms')`, so it strictly increases
+  per row and cannot repeat — but it is still readable, guessable in shape, and
+  meaningful outside the protocol. It is not a capability: a caller who cannot
+  read the lesson cannot use it, and a mismatch discloses only that the row
+  moved. Recorded because a version counter would have been cleaner and was not
+  chosen, to avoid a second column that can fall out of step with the row.
+- **The token is not enforced.** A client that omits it gets last-write-wins,
+  by design, so a buggy or hostile client can still overwrite a concurrent edit.
+  The protection is available, not mandatory, because demanding it would break
+  every non-browser caller that has no earlier read to be stale against
+  (RISK-LIFECYCLE-02).
+- **`permissions` in the lesson DTO is a rendering hint with no security
+  weight.** It is computed by the enforcing policy engine and is output-only —
+  sending it is a `400` — but a client that ignores it entirely behaves
+  identically. It must never be read as a grant, and nothing in the server
+  consults it.
+- **Objectives are frozen wholesale once a lesson leaves draft.** A typo in a
+  published objective cannot be corrected, at all, by anyone. That is the
+  deliberate trade: an objective statement is what a stored mastery record
+  _means_, and a platform that let it be edited would let a child's record
+  change meaning silently. The escape hatch is to archive and re-author, which
+  leaves the old evidence pointing at the old statement — correctly
+  (RISK-LIFECYCLE-03).
+- **Publish validation is one rule.** A lesson needs a body or an external URL,
+  and nothing else. No objective is required, no activity, no summary, no
+  duration. Editorial completeness is not enforced anywhere, because no rule
+  makes a lesson without those _wrong_ — an author can publish a thin lesson and
+  nothing will object.
+- **Archiving cascades; nothing un-archives.** A course archive retires its
+  whole subtree in one transaction and there is no reverse operation. Restoring
+  content means publishing each node again, top down.
+- **The component tests are not a security control and do not claim to be.**
+  `tests/web` renders the real editor against a stubbed `fetch`. It proves the
+  client sends the right shapes and renders the server's answers; it proves
+  nothing about what the server permits. Every authorization claim in this task
+  is tested over real HTTP against a real database in `tests/security`.
+- **No frontend test drives a real browser.** jsdom is not a browser: it does
+  not run layout, does not enforce a real CSP, and its `fetch` is a stub. RTL
+  correctness is asserted through `dir`/`lang` and pure locale functions, not
+  visually (RISK-LIFECYCLE-04).
+
 ## Added in Task 010
 
 - **Mastery cannot tell one objective of a lesson from another.** An assessment

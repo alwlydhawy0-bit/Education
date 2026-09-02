@@ -8,6 +8,10 @@
  *
  *   unit         — pure logic. No database, no network, no filesystem.
  *   architecture — fitness functions asserting the dependency rules hold.
+ *   web          — React components in jsdom, with `fetch` stubbed. Still no
+ *                  database and no network: a component test that reached a
+ *                  real API would be an integration test wearing a disguise,
+ *                  and would go stale the moment the API was slow.
  *   integration  — real PostgreSQL. Proves the schema, constraints and RLS.
  *   security     — real PostgreSQL + real HTTP. Proves the security boundaries.
  *
@@ -60,6 +64,17 @@ export default defineConfig({
         test: {
           name: 'architecture',
           include: ['tests/architecture/**/*.test.ts'],
+          sequence: { groupOrder: 0 },
+        },
+      },
+      {
+        // JSX, so `.tsx`; esbuild reads the automatic runtime from
+        // `apps/web/tsconfig.json`, which is why no React plugin is needed.
+        test: {
+          name: 'web',
+          include: ['tests/web/**/*.test.tsx'],
+          environment: 'jsdom',
+          setupFiles: ['tests/setup/web.ts'],
           sequence: { groupOrder: 0 },
         },
       },

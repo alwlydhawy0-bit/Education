@@ -466,6 +466,55 @@ update another person's profile** — not a teacher, not an administrator. A
 profile is self-description; removing inappropriate content is a moderation
 action against the account, which is a different capability and does not exist.
 
+## Capability hints are not authorization (Task 011)
+
+`GET /lessons/:id` returns a `permissions` block — `{ update, publish, archive }`
+— so a client does not have to hold its own copy of the publish rule. Three
+things make that safe rather than a new attack surface:
+
+1. **It is computed by the enforcing engine.** The service calls `engine.decide`
+   on the same resource with the same actions the write path uses. There is one
+   rule, evaluated twice, not two rules that can drift.
+2. **It is output only.** `permissions` is not in any request schema, and every
+   request schema is `.strict()`, so sending it is a `400`. Nothing on the
+   server ever reads a client-supplied capability.
+3. **Nothing consults it.** Every write re-decides from scratch. A client that
+   fabricates `{ publish: true }` in its own memory and clicks the button gets
+   the same `403` it would have got with the button hidden.
+
+The hint is therefore a **courtesy to the interface**, in the same category as
+disabling a form field. It is stated here because a capability field in a DTO
+looks like an authorization decision leaking into the transport layer, and the
+distinction — advisory output versus consulted input — is the whole of why it
+is not.
+
+Computing it records **no** `authz.denied` events, unlike every enforcement
+path. A denial event means an actor attempted something; three capability
+questions per read are not attempts, and logging them would bury real probing
+under self-inflicted noise. `lessonPermissions` is the only place in the
+curriculum service that calls the engine directly rather than through `decide`,
+and that is why.
+
+## Optimistic concurrency is integrity, not authorization
+
+`expectedUpdatedAt` refuses a write whose caller was describing a version of the
+row that no longer exists. It is **not** an access-control mechanism and grants
+nothing:
+
+- A caller who cannot read the lesson never obtains a token and is refused by
+  the authorization gate long before the token is compared.
+- A caller who forges a token learns only that the row moved — not who moved it,
+  not to what, and not whether any other actor exists. The refusal message names
+  no person.
+- The check runs **after** authorization. A double publish is therefore `403`
+  (the policy answers first) rather than `409`, even though the stale token
+  would also have refused it — two independent controls, and the outer one
+  speaks.
+
+`content.stale_write_refused` is recorded for the same reason a denial is: two
+authors colliding is benign, but a stream of them against one lesson id from one
+session is what a replayed captured request looks like.
+
 ## Adding a new protected resource
 
 1. Add the table with `owner_id`, `organization_id`, `visibility`, `state`.

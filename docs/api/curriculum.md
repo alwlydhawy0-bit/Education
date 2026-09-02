@@ -163,6 +163,95 @@ Every listing is filtered twice: RLS scopes the rows, then the service runs the
 policy over each one and keeps only the allows. The second pass is a no-op
 whenever RLS is working, which is exactly why it belongs there.
 
+## Content lifecycle integrity (Task 011)
+
+The tree already had three statuses. What it did not have was any rule tying a
+node's status to its parent's, or protecting the parts of a lesson that a
+learner's record points at. Migration `0022_content_lifecycle_integrity.sql`
+adds those rules **in the database**, as triggers, so they hold for any writer —
+the API, a future job, a DBA with `psql`.
+
+There is deliberately **no versioning and no review state**. The existing
+`draft → published → archived` model plus these rules covers every requirement
+of the task; a revision history would be a large, permanent structure bought for
+a problem nobody has yet stated, and a `pending_review` state would encode a
+workflow nobody has designed. The separation of duties that matters — authoring
+cannot publish — is already enforced by permissions.
+
+### What the rules are
+
+| Rule                                                                                | Why                                                                                                              |
+| ----------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| A lesson's **objectives** are frozen once it leaves `draft`                         | Learners' evidence points at objective ids. Rewording one silently changes what a stored mastery record _means_. |
+| A published activity's **definition** is frozen (title, instructions, type, lesson) | The same, for the thing a learner was actually assessed on.                                                      |
+| A node may be **published** only when its parent is published                       | Otherwise a "live" lesson hangs off a draft unit and the published chain stops meaning visibility.               |
+| A node may be **archived** only when no published child remains                     | A retired subtree must not leave children claiming to be live.                                                   |
+| A lesson may be published only with `contentBody` **or** `externalUrl`              | Publishing an empty lesson to children is the one validation with a real reason.                                 |
+
+Nothing else is required at publish. Objectives, activities, a summary and a
+duration are all **optional**, because no rule anywhere makes a lesson without
+them wrong.
+
+Archiving **cascades** — a course archives its units, lessons and published
+activities, deepest first, in one transaction. Publishing does **not** cascade:
+a parent going live must never drag unreviewed drafts out with it.
+
+A refusal is `409` with the database's own message, not `500`, and is recorded
+as `content.lifecycle_refused`.
+
+### Optimistic concurrency on a lesson
+
+`GET /lessons/:id` returns `updatedAt`. `PATCH /lessons/:id`,
+`POST /lessons/:id/publish` and `POST /lessons/:id/archive` accept an optional
+`expectedUpdatedAt`; when present it must equal the stored value or the write is
+refused with:
+
+```json
+{ "error": { "code": "CONFLICT", "message": "…", "detail": { "reason": "stale_write" } } }
+```
+
+Branch on `detail.reason`, never on the message. A `stale_write` is fixed by
+reloading and reapplying; any other `409` is a lifecycle rule and reloading will
+not help.
+
+The token is a **precondition, not a field**: it is never stored, a patch
+carrying only the token is `400` ("at least one field"), and omitting it is
+allowed — a script with no earlier read has nothing to be stale against, so
+last-write-wins remains the default for non-browser callers.
+
+The check takes a row lock (`SELECT … FOR UPDATE`) before comparing, so two
+authors cannot both read the same token, both find it current and both write.
+`updated_at` is bumped with `GREATEST(now(), updated_at + interval '1 ms')`, so
+it strictly increases per row and two writes in the same millisecond cannot
+produce the same token.
+
+**Only lessons carry a token.** Curricula, courses and units do not, because
+nothing edits them interactively yet and an untested token nobody sends is worse
+than none. Recorded in [limitations](../security/limitations.md).
+
+### Server-computed permissions
+
+`GET /lessons/:id` and every single-lesson write response include:
+
+```json
+"permissions": { "update": true, "publish": false, "archive": false }
+```
+
+These come from the **same policy engine call the write path makes**, evaluated
+on the row as it stands after the write. They exist so a client does not have to
+hold a second copy of the publish rule that can drift from the enforced one.
+
+They are a rendering hint, **not a grant**. Every write re-decides regardless,
+and a client that ignores them entirely gets identical answers. The field is
+**output only** — sending `permissions` in a request body is `400`.
+
+List endpoints (`GET /units/:id/lessons`) omit the block: a list is a catalogue,
+not a set of action targets, and three policy decisions per row would put the
+cost of the authoring screen on every browse.
+
+Computing them records **no** `authz.denied` events. Those exist for attempted
+actions; logging a question nobody asked would bury real probing.
+
 ## Content safety
 
 Lesson bodies are **markdown or plain text, never HTML**. Accepting HTML would
@@ -186,6 +275,15 @@ UTF-8 bytes. A limit the transport rejects first is not a limit.
 `content.deleted`, `content.reordered`, `content.education_level_changed`, plus
 `authz.denied` on every refusal.
 
+Task 011 adds two more. `content.lifecycle_refused` records an actor **with**
+standing attempting something the content's _state_ forbids — a burst aimed at
+published assessment content is somebody testing whether an answer key can still
+be moved. `content.stale_write_refused` records a write rejected because its
+concurrency token was stale; ordinarily two authors colliding, but a stream of
+them against one lesson id from one session is what a replayed request looks
+like. Both carry the resource kind and id and nothing else: never the rejected
+content, and never which actor won the race.
+
 `content.published` is the one that matters: it is the moment material becomes
 visible to learners, behind a permission that authoring does not confer. "Who
 made this visible to children, and when?" is answerable from the audit trail
@@ -193,7 +291,9 @@ alone.
 
 ## Not implemented
 
-Content versioning or revision history (an edit overwrites). Review workflows
+Content versioning or revision history — an edit overwrites, and Task 011
+deliberately did not add one (see _Content lifecycle integrity_ above for why).
+Optimistic concurrency exists only for **lessons**. Review workflows
 beyond the permission split — no submit-for-review state, no reviewer comments,
 no approval record beyond the audit event. Localisation of a single lesson into
 multiple languages. Media or file attachments. Prerequisites, dependencies, or

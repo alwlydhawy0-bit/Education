@@ -231,6 +231,21 @@ export const createLessonRequestSchema = z
   .strict();
 export type CreateLessonRequest = z.infer<typeof createLessonRequestSchema>;
 
+/**
+ * The optimistic-concurrency token: the `updatedAt` the client last saw.
+ *
+ * IT IS NOT CONTENT, and it is not trusted as identity, ownership or state —
+ * the server compares it to the stored row and refuses the write when they
+ * differ. Omitting it is allowed and means "last write wins", which is the
+ * right default for a script that has no earlier read to be stale against. The
+ * browser editor always sends it; see `apps/web/src/features/authoring`.
+ *
+ * The token cannot be used to LEARN anything: a caller that cannot read the
+ * lesson cannot reach this code path at all, and a mismatch says only that the
+ * row moved — never who moved it, or to what.
+ */
+const expectedUpdatedAtSchema = z.string().datetime();
+
 export const updateLessonRequestSchema = z
   .object({
     title: titleSchema.optional(),
@@ -240,10 +255,37 @@ export const updateLessonRequestSchema = z
     externalUrl: externalUrlSchema.nullable().optional(),
     estimatedMinutes: z.number().int().min(1).max(1440).nullable().optional(),
     objectives: z.array(z.string().trim().min(1).max(300)).max(20).optional(),
+    expectedUpdatedAt: expectedUpdatedAtSchema.optional(),
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 0, { message: 'At least one field must be provided' });
+  // The token is not a field to change, so a patch carrying ONLY the token is
+  // still an empty patch. Counting all keys would let it through and turn a
+  // no-op into a write that bumps `updated_at` and invalidates every other
+  // author's token for nothing.
+  .refine((v) => Object.keys(v).some((k) => k !== 'expectedUpdatedAt'), {
+    message: 'At least one field must be provided',
+  });
 export type UpdateLessonRequest = z.infer<typeof updateLessonRequestSchema>;
+
+/**
+ * The body of a lesson publish or archive.
+ *
+ * Deliberately NOT `emptyRequestSchema`, and deliberately narrower than it
+ * looks: the ONLY field is the concurrency token. Status, publishedAt,
+ * organizationId, authorId and objectives are all absent and `.strict()` makes
+ * sending one a 400 — the transition is named by the URL and the actor by the
+ * session, never by the body.
+ *
+ * The other six lifecycle routes (curricula, courses, units) still parse
+ * `emptyRequestSchema`. That asymmetry is intentional rather than an oversight:
+ * they have no editor, so there is no client holding a stale read of them, and
+ * inventing a token nobody sends would be untested code. Recorded as residual
+ * risk in docs/api/curriculum.md.
+ */
+export const lessonLifecycleRequestSchema = z
+  .object({ expectedUpdatedAt: expectedUpdatedAtSchema.optional() })
+  .strict();
+export type LessonLifecycleRequest = z.infer<typeof lessonLifecycleRequestSchema>;
 
 export const lessonResponseSchema = z
   .object({
@@ -259,9 +301,66 @@ export const lessonResponseSchema = z
     objectives: z.array(z.string()),
     status: contentStatusSchema,
     createdAt: z.string().datetime(),
+    // The concurrency token a client sends back as `expectedUpdatedAt`. It is
+    // a timestamp rather than an opaque version because the column already
+    // existed and is already maintained on every write; a second counter would
+    // be a second thing that can fall out of step with the row.
+    updatedAt: z.string().datetime(),
     publishedAt: z.string().datetime().nullable(),
   })
   .strict();
+
+/**
+ * The authoring view of a lesson, and the only one there is.
+ *
+ * A separate learner DTO was considered and refused: this shape carries no
+ * field a learner may not see. `createdBy` is deliberately absent — authorship
+ * is recorded for audit and is not published to anyone — and `status` is the
+ * only administrative field, which a learner can already infer from the fact
+ * that they can read the row at all. RLS is what decides WHICH lessons reach a
+ * reader; a second schema would only be a second place for the two to disagree.
+ */
+export type LessonResponse = z.infer<typeof lessonResponseSchema>;
+
+/**
+ * What THIS actor may do to THIS lesson, decided by the server.
+ *
+ * WHY THE SERVER SENDS IT. A client that decided for itself whether to draw the
+ * publish button would be a second copy of the publish rule, free to drift from
+ * the one that is enforced — and the drift shows up as a button that 403s, or
+ * worse, a missing button for someone who is allowed. These flags are produced
+ * by the SAME policy engine call the write path makes, so there is one rule.
+ *
+ * WHAT IT IS NOT. It is not a permission grant and not a security boundary. The
+ * server re-decides on every write regardless of what it said here, and a
+ * client that ignores these flags entirely gets exactly the same answers. It is
+ * a rendering hint with an authoritative source.
+ *
+ * It is also not a disclosure: an actor who cannot read the lesson never
+ * receives this object, and it describes only the reader's own capabilities —
+ * never another actor's, never who published, never who else may edit.
+ */
+export const lessonPermissionsSchema = z
+  .object({
+    update: z.boolean(),
+    publish: z.boolean(),
+    archive: z.boolean(),
+  })
+  .strict();
+export type LessonPermissions = z.infer<typeof lessonPermissionsSchema>;
+
+/**
+ * One lesson, addressed by id — the shape every single-lesson endpoint returns.
+ *
+ * List endpoints return `lessonResponseSchema` without the permissions block.
+ * That is not laziness: a list is a catalogue, not a set of action targets, and
+ * computing three policy decisions per row would put the cost of the authoring
+ * screen on every browse.
+ */
+export const lessonDetailResponseSchema = lessonResponseSchema
+  .extend({ permissions: lessonPermissionsSchema })
+  .strict();
+export type LessonDetailResponse = z.infer<typeof lessonDetailResponseSchema>;
 
 // --- Reordering ------------------------------------------------------------
 

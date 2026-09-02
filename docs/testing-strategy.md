@@ -77,6 +77,20 @@ Task 006 added the assignment decision table, and reworked the content table
 around the narrowing: most "a learner can read this" cases now need an
 enrolled context rather than an empty one, which is itself the assertion.
 
+Task 011 added no new decision table — the content table already covers the
+lifecycle verbs — but added three suites over the existing ones:
+`tests/integration/rls-content-lifecycle.test.ts` (the 0022 triggers, at the
+database), `tests/security/content-lifecycle.test.ts` (the rules over HTTP),
+`tests/security/content-concurrency.test.ts` (lost updates, capability hints and
+direct HTTP that no interface would send) and
+`tests/security/content-full-chain.test.ts`, which builds Course → Unit → Lesson
+→ Objective → Activity → Assessment → Question entirely through the API,
+publishes it, has a learner attempt it, and then disturbs the content to prove
+no stored attempt, answer, evidence row, released result or mastery level moves.
+That last one exists because every link has its own suite and none of them can
+see the failure that matters: content edited _around_ a learner's history in a
+way that changes what the history MEANS.
+
 Task 007 added the progress table, which is the first one where the read row and
 the write row for the same actor and the same resource give different answers.
 It is enumerated as two tables rather than one — `record` against every actor
@@ -303,6 +317,32 @@ application against a `BYPASSRLS` role and proves the policy engine refuses
 alone. A boundary that appears only in one of them is a boundary with one gate —
 that is how VULN-016 was found, and the fix is verified in the second file, not
 the first.
+
+### Web (component) — added in Task 011
+
+`tests/web` renders the real `LessonEditor` in jsdom with `fetch` stubbed. It is
+its own Vitest project so it can have a DOM environment without giving one to
+the unit tests, and it runs in group 0 alongside `unit` and `architecture`
+because it touches no database.
+
+**What it is for.** The component's whole job is to render what the server said
+and send back only what the contract allows. The interesting assertions are
+therefore negative: it must not invent a permission the server did not grant,
+must not assume a transition succeeded before the server confirmed it, must not
+send a stale concurrency token or forget to send one, must not disclose the
+difference between "no such lesson" and "not yours", and must distinguish the
+five failure kinds an author can act on differently.
+
+**What it is not for, stated so nobody mistakes it later.** It is not a security
+control and proves nothing about what the server permits. `fetch` is stubbed —
+the responses are whatever the test says they are. Every authorization claim in
+Task 011 is proved in `tests/security` over real HTTP against a real database as
+`edu_app`.
+
+`fetch` is stubbed rather than the feature's own API module, deliberately: that
+keeps the URL, method and JSON body inside the assertion surface, so a change to
+the wire format fails here instead of passing because somebody updated the mock
+to match it.
 
 ## Test data
 

@@ -478,22 +478,41 @@ describe('IDOR / BOLA — draft and archived content', () => {
     expect(ids(await get('/api/v1/curricula', a.student.cookie))).not.toContain(id(second));
   });
 
-  it('REFUSES a student a lesson whose UNIT is still a draft', async () => {
+  it('REFUSES TO PUBLISH a lesson whose UNIT is still a draft', async () => {
+    // CHANGED BY TASK 011, deliberately, and the old expectation is worth
+    // recording. This test used to publish the lesson successfully and assert
+    // only that a learner could not see it — the lifecycle was per-node, so a
+    // published child of a draft parent was a reachable state that happened to
+    // be invisible.
+    //
+    // 0022 makes that state unreachable instead. The visibility guarantee is
+    // unchanged and now rests on something stronger than a chain check at read
+    // time: the tree cannot be put into the inconsistent shape at all.
     const a = await school('a', levelId);
     const unit = await post(`/api/v1/courses/${a.courseId}/units`, a.author.cookie, { title: 'U' });
-    const lesson = await post(`/api/v1/units/${id(unit)}/lessons`, a.author.cookie, { title: 'L' });
-    // Publish the course and the lesson, but NOT the unit between them.
+    const lesson = await post(`/api/v1/units/${id(unit)}/lessons`, a.author.cookie, {
+      title: 'L',
+      contentBody: 'Something to read',
+    });
     await publishChain(a.reviewer.cookie, { curriculumId: a.curriculumId, courseId: a.courseId });
-    // The lesson cannot even be published while its unit is a draft? It can —
-    // the lifecycle is per-node — but it stays invisible to a learner.
+
+    const refused = await post(`/api/v1/lessons/${id(lesson)}/publish`, a.reviewer.cookie);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ error: { message: string } }>().error.message).toMatch(/unit or course/i);
+
+    await study(a.classId, a.courseId);
+    expect((await get(`/api/v1/courses/${a.courseId}`, a.student.cookie)).statusCode).toBe(200);
+    expect((await get(`/api/v1/lessons/${id(lesson)}`, a.student.cookie)).statusCode).toBe(404);
+
+    // And publishing IN ORDER works, so the rule is about sequence rather than
+    // about permission.
+    expect((await post(`/api/v1/units/${id(unit)}/publish`, a.reviewer.cookie)).statusCode).toBe(
+      200,
+    );
     expect(
       (await post(`/api/v1/lessons/${id(lesson)}/publish`, a.reviewer.cookie)).statusCode,
     ).toBe(200);
-
-    await study(a.classId, a.courseId);
-
-    expect((await get(`/api/v1/courses/${a.courseId}`, a.student.cookie)).statusCode).toBe(200);
-    expect((await get(`/api/v1/lessons/${id(lesson)}`, a.student.cookie)).statusCode).toBe(404);
+    expect((await get(`/api/v1/lessons/${id(lesson)}`, a.student.cookie)).statusCode).toBe(200);
   });
 
   it('hides content again once it is archived', async () => {

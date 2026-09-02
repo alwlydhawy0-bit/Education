@@ -2,6 +2,7 @@ import { useLocale } from './LocaleProvider.tsx';
 import { HealthIndicator } from '../features/health/HealthIndicator.tsx';
 import { AttemptPanel } from '../features/assessment/index.ts';
 import { CourseMasteryView } from '../features/mastery/index.ts';
+import { LessonEditor } from '../features/authoring/index.ts';
 
 /**
  * Reads `?attempt=<id>` from the address bar.
@@ -28,6 +29,7 @@ export function App(): JSX.Element {
   const { t, locale, setLocale } = useLocale();
   const attemptId = idFromLocation('attempt');
   const courseId = idFromLocation('course');
+  const lessonId = idFromLocation('lesson');
 
   return (
     <main>
@@ -36,6 +38,7 @@ export function App(): JSX.Element {
       <HealthIndicator />
       {attemptId !== null && <AttemptPanel attemptId={attemptId} />}
       {courseId !== null && <CourseMasteryView courseId={courseId} />}
+      {lessonId !== null && <LessonEditor lessonId={lessonId} />}
       <button type="button" onClick={() => setLocale(locale === 'ar' ? 'en' : 'ar')}>
         {t('language.switch')}
       </button>

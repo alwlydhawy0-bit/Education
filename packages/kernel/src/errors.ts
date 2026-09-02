@@ -56,8 +56,28 @@ export const forbidden = (message = 'Forbidden'): AppError =>
 export const notFound = (message = 'Not found'): AppError =>
   new AppError(ErrorCode.NOT_FOUND, 404, message);
 
-export const conflict = (message = 'Conflict'): AppError =>
-  new AppError(ErrorCode.CONFLICT, 409, message);
+/**
+ * A well-formed request that the CURRENT STATE refuses.
+ *
+ * `detail` exists so a client can branch on WHICH conflict without parsing the
+ * message. Two are distinguishable and must be, because the remedy differs: a
+ * lifecycle refusal ("archive the published lessons first") is fixed by acting
+ * on other content, while a stale write ("someone saved after you loaded") is
+ * fixed by reloading and re-applying. See `ConflictReason`.
+ */
+export const ConflictReason = {
+  /** The optimistic-concurrency token did not match the stored row. */
+  STALE_WRITE: 'stale_write',
+  /** A content-lifecycle rule refused the transition. */
+  LIFECYCLE: 'lifecycle',
+} as const;
+
+export type ConflictReason = (typeof ConflictReason)[keyof typeof ConflictReason];
+
+export const conflict = (
+  message = 'Conflict',
+  detail?: Readonly<Record<string, unknown>>,
+): AppError => new AppError(ErrorCode.CONFLICT, 409, message, detail);
 
 export const validationFailed = (
   message = 'Validation failed',

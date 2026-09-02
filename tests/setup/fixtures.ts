@@ -379,22 +379,55 @@ export async function createLesson(options: {
   const db = await seedDb();
   const status = options.status ?? 'draft';
   const [publishedAt, archivedAt] = lifecycleStamps(status);
+
+  // TWO SEEDING ORDERS, and which one runs is decided by whether objectives were
+  // asked for. Both are deliberate; neither is a workaround.
+  //
+  // WITH OBJECTIVES — born a draft, objectives written, then stamped. 0022
+  // freezes a published lesson's objectives, so seeding them onto a row that was
+  // inserted as `published` is refused exactly as it would be for a real author.
+  // This is the authoring order the product actually has, and it requires the
+  // ancestors to be published too, because 0022 refuses to publish beneath a
+  // draft parent. A test that asks for the impossible combination fails loudly
+  // here, which is the right answer.
+  //
+  // WITHOUT OBJECTIVES — inserted directly at the requested status. The tree
+  // consistency trigger fires BEFORE UPDATE, not BEFORE INSERT, so this can
+  // construct a published lesson under a draft unit. That state is one the
+  // product now refuses to CREATE — and it is precisely the state the RLS and
+  // layered-defence suites must still be tested against, for two reasons: a
+  // database upgraded from before 0022 can already contain such rows
+  // (grandfathered, see docs/api/curriculum.md), and RLS's job is to hide an
+  // unpublished chain WITHOUT relying on a trigger having prevented it. A
+  // control that is only correct because another control held is not a second
+  // layer.
+  const bornStatus = options.objectives && options.objectives.length > 0 ? 'draft' : status;
+  const [bornPublishedAt, bornArchivedAt] = lifecycleStamps(bornStatus);
   const { rows } = await db.query<{ id: string }>(
-    `INSERT INTO lessons (unit_id, position, title, content_body, status,
-                          published_at, archived_at, created_by)
+    `INSERT INTO lessons (unit_id, position, title, content_body, status, created_by,
+                          published_at, archived_at)
      VALUES ($1,
              COALESCE($2, (SELECT COALESCE(MAX(position), 0) + 1 FROM lessons WHERE unit_id = $1)),
-             $3, $4, $5, $6, $7, $8)
+             $3, $4, $6, $5, $7, $8)
      RETURNING id`,
     [
       options.unitId,
       options.position ?? null,
       options.title ?? 'Lesson',
-      options.contentBody ?? '',
-      status,
-      publishedAt,
-      archivedAt,
+      // A PUBLISHED lesson gets a body it did not ask for. 0022 refuses to
+      // publish a lesson with neither content nor an external link, and that
+      // rule is right: an empty lesson shown to a child is a bug. A fixture
+      // that seeded one would be modelling a state the product cannot reach,
+      // so callers that only care about VISIBILITY get default content rather
+      // than a special case in the trigger.
+      //
+      // A DRAFT keeps the empty default, because an empty draft is ordinary —
+      // it is what every lesson looks like the moment it is created.
+      options.contentBody ?? (status === 'published' ? 'Seeded lesson content.' : ''),
       options.createdBy ?? null,
+      bornStatus,
+      bornPublishedAt,
+      bornArchivedAt,
     ],
   );
   const id = rows[0]?.id;
@@ -405,6 +438,12 @@ export async function createLesson(options: {
        SELECT $1, ord, statement
          FROM unnest($2::text[]) WITH ORDINALITY AS t(statement, ord)`,
       [id, [...options.objectives]],
+    );
+  }
+  if (bornStatus !== status) {
+    await db.query(
+      `UPDATE lessons SET status = $2, published_at = $3, archived_at = $4 WHERE id = $1`,
+      [id, status, publishedAt, archivedAt],
     );
   }
   return id;

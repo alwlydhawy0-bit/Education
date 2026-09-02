@@ -77,6 +77,8 @@ export interface LessonRecord {
   readonly objectives: readonly string[];
   readonly status: ContentStatus;
   readonly createdAt: Date;
+  /** The optimistic-concurrency token. Bumped by every write to the row. */
+  readonly updatedAt: Date;
   readonly publishedAt: Date | null;
 }
 
@@ -133,6 +135,7 @@ interface LessonRow {
   objectives: string[];
   status: ContentStatus;
   created_at: Date;
+  updated_at: Date;
   published_at: Date | null;
   course_id: string;
   course_organization_id: string | null;
@@ -223,6 +226,7 @@ const toLesson = (row: LessonRow): LessonRecord => ({
   objectives: row.objectives,
   status: row.status,
   createdAt: row.created_at,
+  updatedAt: row.updated_at,
   publishedAt: row.published_at,
 });
 
@@ -274,7 +278,7 @@ const LESSON_SELECT = `SELECT l.id, l.unit_id, l.position, l.title, l.summary, l
                    FROM learning_objectives o WHERE o.lesson_id = l.id),
                 '{}'::text[]
               ) AS objectives,
-              l.status, l.created_at, l.published_at,
+              l.status, l.created_at, l.updated_at, l.published_at,
               c.id AS course_id, c.organization_id AS course_organization_id,
               (u.status = 'published' AND c.status = 'published') AS ancestors_published
          FROM lessons l
@@ -365,6 +369,59 @@ export class ContentInUseError extends Error {
     super('Content is still referenced');
     this.name = 'ContentInUseError';
   }
+}
+
+/**
+ * Raised when a caller's optimistic-concurrency token no longer matches the row.
+ *
+ * Distinct from "returned null" on purpose. Null already means "absent, or RLS
+ * hid it", which the service answers with 404 — and answering 404 for a stale
+ * write would be actively misleading: the lesson is right there, the author may
+ * edit it, and the fix is to reload rather than to go looking for a lesson that
+ * supposedly vanished.
+ */
+export class StaleWriteError extends Error {
+  constructor() {
+    super('This lesson changed after you loaded it. Reload and reapply your edit.');
+    this.name = 'StaleWriteError';
+  }
+}
+
+/**
+ * Locks one lesson and proves the caller's token still describes it.
+ *
+ * `FOR UPDATE` is doing real work rather than decorating the read. It holds the
+ * row against any other writer until this transaction ends, so the comparison
+ * cannot be overtaken between reading `updated_at` and writing it. Without the
+ * lock two authors could both read the same token, both find it current, and
+ * both write — the lost update in full.
+ *
+ * A lesson hidden by RLS, or absent, yields no row and returns false; the
+ * service turns that into 404 exactly as it already does when an UPDATE matches
+ * nothing. Note that a locking read also evaluates the UPDATE policy's USING
+ * clause, so an actor RLS would refuse to let write is refused HERE instead of
+ * one statement later — the same answer, reached earlier.
+ *
+ * A caller that sends NO token is not refused. That is deliberate: a script
+ * with no earlier read has nothing to be stale against, and demanding a token
+ * it cannot have would break every non-browser caller to protect a read it
+ * never made.
+ */
+async function lockLessonForWrite(
+  tx: Tx,
+  id: string,
+  expectedUpdatedAt: Date | null,
+): Promise<boolean> {
+  const { rows } = await tx.query<{ updated_at: Date }>(
+    `SELECT updated_at FROM lessons WHERE id = $1 FOR UPDATE`,
+    [id],
+  );
+  const row = rows[0];
+  if (!row) return false;
+  if (expectedUpdatedAt !== null && row.updated_at.getTime() !== expectedUpdatedAt.getTime()) {
+    throw new StaleWriteError();
+  }
+  return true;
 }
 
 /**
@@ -516,12 +573,43 @@ export interface CurriculumRepository {
       estimatedMinutes: number | null;
       objectives: readonly string[];
     }>,
+    /**
+     * The `updated_at` the caller last saw, or null for "no earlier read".
+     * A mismatch raises `StaleWriteError` rather than overwriting.
+     */
+    expectedUpdatedAt: Date | null,
   ): Promise<LessonRecord | null>;
-  setLessonStatus(tx: Tx, id: string, status: ContentStatus): Promise<LessonRecord | null>;
+  setLessonStatus(
+    tx: Tx,
+    id: string,
+    status: ContentStatus,
+    expectedUpdatedAt: Date | null,
+  ): Promise<LessonRecord | null>;
   deleteLesson(tx: Tx, id: string): Promise<boolean>;
   lessonIdsInOrder(tx: Tx, unitId: string): Promise<string[]>;
   applyLessonOrder(tx: Tx, unitId: string, orderedIds: readonly string[]): Promise<void>;
 }
+
+/**
+ * Bumps `updated_at` so that it STRICTLY INCREASES for the row.
+ *
+ * A plain `now()` assignment records WHEN a row changed, but cannot serve as an
+ * optimistic-concurrency token. `now()` is transaction-start time
+ * and the driver compares it at millisecond precision, so two writes beginning
+ * inside the same millisecond can produce the SAME token — and a second author
+ * holding the pre-write value would find it still "current" and overwrite the
+ * first write. That is precisely the lost update the token exists to prevent.
+ *
+ * GREATEST closes it: the new value is either the clock, or one millisecond
+ * past the value already stored, whichever is later. The column therefore never
+ * repeats for a row, at any write rate, and "the token I read is the token in
+ * the table" means "nothing has been written since I read".
+ *
+ * The cost is that under sustained same-row writes the timestamp can run a few
+ * milliseconds ahead of the clock. For content rows that is not a meaningful
+ * inaccuracy, and it buys a version number that cannot collide.
+ */
+const TOUCH = `updated_at = GREATEST(now(), updated_at + interval '1 millisecond')`;
 
 /**
  * Timestamps for a lifecycle move, derived from the target status alone.
@@ -531,12 +619,95 @@ export interface CurriculumRepository {
  * constraint violation rather than a silently wrong row, but only if every call
  * site agrees on the mapping.
  */
+
 const statusTimestamps = (status: ContentStatus): string =>
   status === 'published'
     ? `status = 'published', published_at = now(), archived_at = NULL`
     : status === 'archived'
       ? `status = 'archived', archived_at = now()`
       : `status = 'draft', published_at = NULL, archived_at = NULL`;
+
+/**
+ * Archives everything published beneath one content node, deepest first.
+ *
+ * WHY THIS EXISTS. 0022 refuses to archive a node while a published child hangs
+ * off it, so that a retired subtree cannot be left claiming to be live. Without
+ * a cascade that rule would turn "withdraw this course" into one request per
+ * lesson — a real usability regression, and one that buys nothing, because
+ * learner visibility was already governed by the published-chain rule.
+ *
+ * So the author still performs ONE act and the tree still ends up consistent.
+ * The trigger is what makes that trustworthy rather than merely intended: this
+ * runs inside the caller's transaction, so a cascade that failed part way
+ * through cannot leave half a course retired — it rolls back to the previous
+ * valid state, which is exactly what §10 of the task asks of a lifecycle change.
+ *
+ * DEEPEST FIRST is not a preference. Each statement has to satisfy the same
+ * trigger, so archiving a unit before its lessons would be refused by the very
+ * rule this is here to honour.
+ *
+ * It touches ONLY published rows. A draft child is left alone: it has never been
+ * seen by a learner, and silently marking it archived would retire work an
+ * author may still be writing.
+ */
+async function archivePublishedDescendants(
+  tx: Tx,
+  kind: 'curriculum' | 'course' | 'unit' | 'lesson',
+  id: string,
+): Promise<void> {
+  const ARCHIVE = `status = 'archived', archived_at = now(), ${TOUCH}`;
+
+  // The predicate that selects each level's descendants, written once per depth
+  // rather than as one recursive query: the tables have different parent
+  // columns, and a CTE that pretended otherwise would be harder to read than
+  // four explicit steps.
+  const lessonsOf: Record<typeof kind, string> = {
+    lesson: `l.id = $1`,
+    unit: `l.unit_id = $1`,
+    course: `l.unit_id IN (SELECT id FROM course_units WHERE course_id = $1)`,
+    curriculum: `l.unit_id IN (
+      SELECT u.id FROM course_units u
+       JOIN courses c ON c.id = u.course_id
+      WHERE c.curriculum_id = $1)`,
+  };
+
+  await tx.query(
+    `UPDATE learning_activities a SET ${ARCHIVE}
+      WHERE a.status = 'published'
+        AND a.lesson_id IN (SELECT l.id FROM lessons l WHERE ${lessonsOf[kind]})`,
+    [id],
+  );
+
+  if (kind !== 'lesson') {
+    await tx.query(
+      `UPDATE lessons l SET ${ARCHIVE} WHERE l.status = 'published' AND ${lessonsOf[kind]}`,
+      [id],
+    );
+  }
+
+  if (kind === 'unit') return;
+
+  if (kind === 'course') {
+    await tx.query(
+      `UPDATE course_units SET ${ARCHIVE} WHERE status = 'published' AND course_id = $1`,
+      [id],
+    );
+    return;
+  }
+
+  if (kind === 'curriculum') {
+    await tx.query(
+      `UPDATE course_units SET ${ARCHIVE}
+        WHERE status = 'published'
+          AND course_id IN (SELECT id FROM courses WHERE curriculum_id = $1)`,
+      [id],
+    );
+    await tx.query(
+      `UPDATE courses SET ${ARCHIVE} WHERE status = 'published' AND curriculum_id = $1`,
+      [id],
+    );
+  }
+}
 
 export const curriculumRepository: CurriculumRepository = {
   // --- Education levels -------------------------------------------------
@@ -627,7 +798,7 @@ export const curriculumRepository: CurriculumRepository = {
     const { rows } = await tx.query<CurriculumRow>(
       `UPDATE curricula
           SET name = COALESCE($2, name), description = COALESCE($3, description),
-              updated_at = now()
+              ${TOUCH}
         WHERE id = $1
       RETURNING ${CURRICULUM_COLUMNS}`,
       [id, patch.name ?? null, patch.description ?? null],
@@ -637,8 +808,12 @@ export const curriculumRepository: CurriculumRepository = {
   },
 
   async setCurriculumStatus(tx, id, status) {
+    // Archiving retires the subtree in the SAME transaction, deepest first —
+    // see `archivePublishedDescendants`. Publishing does not cascade: a parent
+    // going live must never drag unreviewed drafts out with it.
+    if (status === 'archived') await archivePublishedDescendants(tx, 'curriculum', id);
     const { rows } = await tx.query<CurriculumRow>(
-      `UPDATE curricula SET ${statusTimestamps(status)}, updated_at = now()
+      `UPDATE curricula SET ${statusTimestamps(status)}, ${TOUCH}
         WHERE id = $1 RETURNING ${CURRICULUM_COLUMNS}`,
       [id],
     );
@@ -717,7 +892,7 @@ export const curriculumRepository: CurriculumRepository = {
           SET title = COALESCE($2, title), summary = COALESCE($3, summary),
               curriculum_id = COALESCE($4, curriculum_id),
               level_id = COALESCE($5, level_id),
-              updated_at = now()
+              ${TOUCH}
         WHERE id = $1
       RETURNING ${COURSE_COLUMNS}`,
       [
@@ -733,8 +908,12 @@ export const curriculumRepository: CurriculumRepository = {
   },
 
   async setCourseStatus(tx, id, status) {
+    // Archiving retires the subtree in the SAME transaction, deepest first —
+    // see `archivePublishedDescendants`. Publishing does not cascade: a parent
+    // going live must never drag unreviewed drafts out with it.
+    if (status === 'archived') await archivePublishedDescendants(tx, 'course', id);
     const { rows } = await tx.query<CourseRow>(
-      `UPDATE courses SET ${statusTimestamps(status)}, updated_at = now()
+      `UPDATE courses SET ${statusTimestamps(status)}, ${TOUCH}
         WHERE id = $1 RETURNING ${COURSE_COLUMNS}`,
       [id],
     );
@@ -793,7 +972,7 @@ export const curriculumRepository: CurriculumRepository = {
   async updateUnit(tx, id, patch) {
     const { rows } = await tx.query<{ id: string }>(
       `UPDATE course_units
-          SET title = COALESCE($2, title), summary = COALESCE($3, summary), updated_at = now()
+          SET title = COALESCE($2, title), summary = COALESCE($3, summary), ${TOUCH}
         WHERE id = $1 RETURNING id`,
       [id, patch.title ?? null, patch.summary ?? null],
     );
@@ -802,8 +981,12 @@ export const curriculumRepository: CurriculumRepository = {
   },
 
   async setUnitStatus(tx, id, status) {
+    // Archiving retires the subtree in the SAME transaction, deepest first —
+    // see `archivePublishedDescendants`. Publishing does not cascade: a parent
+    // going live must never drag unreviewed drafts out with it.
+    if (status === 'archived') await archivePublishedDescendants(tx, 'unit', id);
     const { rows } = await tx.query<{ id: string }>(
-      `UPDATE course_units SET ${statusTimestamps(status)}, updated_at = now()
+      `UPDATE course_units SET ${statusTimestamps(status)}, ${TOUCH}
         WHERE id = $1 RETURNING id`,
       [id],
     );
@@ -831,7 +1014,7 @@ export const curriculumRepository: CurriculumRepository = {
     await tx.query('SET CONSTRAINTS course_units_position_uk DEFERRED');
     await tx.query(
       `UPDATE course_units AS u
-          SET position = o.ordinality, updated_at = now()
+          SET position = o.ordinality, ${TOUCH}
          FROM unnest($2::uuid[]) WITH ORDINALITY AS o(id, ordinality)
         WHERE u.id = o.id AND u.course_id = $1`,
       [courseId, [...orderedIds]],
@@ -886,7 +1069,12 @@ export const curriculumRepository: CurriculumRepository = {
     return created;
   },
 
-  async updateLesson(tx, id, patch) {
+  async updateLesson(tx, id, patch, expectedUpdatedAt) {
+    // Before anything is written. A stale token must not first archive, reorder
+    // or replace objectives and only then discover it was stale — the rollback
+    // would make that harmless, but the wasted work and the noise in the audit
+    // trail are avoidable by asking first.
+    if (!(await lockLessonForWrite(tx, id, expectedUpdatedAt))) return null;
     const { rows } = await tx.query<{ id: string }>(
       `UPDATE lessons
           SET title = COALESCE($2, title),
@@ -899,7 +1087,7 @@ export const curriculumRepository: CurriculumRepository = {
               -- present in the request at all, which is the real question.
               external_url = CASE WHEN $6 THEN $7 ELSE external_url END,
               estimated_minutes = CASE WHEN $8 THEN $9 ELSE estimated_minutes END,
-              updated_at = now()
+              ${TOUCH}
         WHERE id = $1 RETURNING id`,
       [
         id,
@@ -920,9 +1108,16 @@ export const curriculumRepository: CurriculumRepository = {
     return readLesson(tx, id);
   },
 
-  async setLessonStatus(tx, id, status) {
+  async setLessonStatus(tx, id, status, expectedUpdatedAt) {
+    // Checked BEFORE the cascade, so a stale archive cannot walk the subtree
+    // first and be refused afterwards.
+    if (!(await lockLessonForWrite(tx, id, expectedUpdatedAt))) return null;
+    // Archiving retires the subtree in the SAME transaction, deepest first —
+    // see `archivePublishedDescendants`. Publishing does not cascade: a parent
+    // going live must never drag unreviewed drafts out with it.
+    if (status === 'archived') await archivePublishedDescendants(tx, 'lesson', id);
     const { rows } = await tx.query<{ id: string }>(
-      `UPDATE lessons SET ${statusTimestamps(status)}, updated_at = now()
+      `UPDATE lessons SET ${statusTimestamps(status)}, ${TOUCH}
         WHERE id = $1 RETURNING id`,
       [id],
     );
@@ -947,7 +1142,7 @@ export const curriculumRepository: CurriculumRepository = {
     await tx.query('SET CONSTRAINTS lessons_position_uk DEFERRED');
     await tx.query(
       `UPDATE lessons AS l
-          SET position = o.ordinality, updated_at = now()
+          SET position = o.ordinality, ${TOUCH}
          FROM unnest($2::uuid[]) WITH ORDINALITY AS o(id, ordinality)
         WHERE l.id = o.id AND l.unit_id = $1`,
       [unitId, [...orderedIds]],

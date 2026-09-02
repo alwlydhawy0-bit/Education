@@ -1,4 +1,4 @@
-import { conflict, forbidden, notFound } from '@edu/kernel';
+import { ConflictReason, conflict, forbidden, notFound } from '@edu/kernel';
 import {
   type Action,
   type Actor,
@@ -24,6 +24,7 @@ import type {
   UpdateCourseRequest,
   UpdateCurriculumRequest,
   UpdateEducationLevelRequest,
+  LessonPermissions,
   UpdateLessonRequest,
   UpdateUnitRequest,
 } from '@edu/contracts';
@@ -32,6 +33,7 @@ import type { SecurityEventRecorder } from '../../platform/security/security-eve
 import {
   ContentInUseError,
   DuplicateCodeError,
+  StaleWriteError,
   type CourseRecord,
   type CurriculumRecord,
   type CurriculumRepository,
@@ -39,6 +41,18 @@ import {
   type LessonRecord,
   type UnitRecord,
 } from './curriculum.repository.ts';
+
+/**
+ * A lesson plus what THIS actor may do to it next.
+ *
+ * The permissions are decided by the same engine the write path consults, on
+ * the resource as it stands AFTER the write — so the answer a client renders is
+ * the answer it would get if it tried. They are a rendering hint with an
+ * authoritative source, never a grant: every write re-decides regardless.
+ */
+export interface LessonDetail extends LessonRecord {
+  readonly permissions: LessonPermissions;
+}
 
 export interface ActorContext {
   readonly actor: Actor;
@@ -102,24 +116,171 @@ export interface CurriculumService {
   reorderUnits(ctx: ActorContext, courseId: string, input: ReorderRequest): Promise<UnitRecord[]>;
 
   listLessons(ctx: ActorContext, unitId: string, query: ListChildrenQuery): Promise<LessonRecord[]>;
-  getLesson(ctx: ActorContext, id: string): Promise<LessonRecord>;
+  getLesson(ctx: ActorContext, id: string): Promise<LessonDetail>;
   createLesson(
     ctx: ActorContext,
     unitId: string,
     input: CreateLessonRequest,
-  ): Promise<LessonRecord>;
-  updateLesson(ctx: ActorContext, id: string, input: UpdateLessonRequest): Promise<LessonRecord>;
+  ): Promise<LessonDetail>;
+  updateLesson(ctx: ActorContext, id: string, input: UpdateLessonRequest): Promise<LessonDetail>;
   setLessonStatus(
     ctx: ActorContext,
     id: string,
     status: Exclude<ContentStatus, 'draft'>,
-  ): Promise<LessonRecord>;
+    /** The `updatedAt` the caller last saw. Absent means "no earlier read". */
+    expectedUpdatedAt: Date | null,
+  ): Promise<LessonDetail>;
   deleteLesson(ctx: ActorContext, id: string): Promise<void>;
   reorderLessons(ctx: ActorContext, unitId: string, input: ReorderRequest): Promise<LessonRecord[]>;
 }
 
 export function createCurriculumService(deps: CurriculumServiceDeps): CurriculumService {
   const { db, repository, engine, securityEvents } = deps;
+
+  /**
+   * Turns a lifecycle-integrity refusal from the database into an answer a
+   * caller can act on.
+   *
+   * WITHOUT THIS, EVERY ONE OF 0022's RULES IS A 500. The triggers raise
+   * `integrity_constraint_violation`, which no handler recognises, so it falls
+   * through to "Internal error" — telling an author their content is broken
+   * when in fact their REQUEST was, and corrupting the error-rate signal
+   * on-call alerting depends on.
+   *
+   * THE DATABASE'S MESSAGE IS THE ONE THE CALLER SEES, deliberately. These
+   * messages are written for an author ("Archive this unit's 3 published
+   * lessons first") and they name only the act and a count — no learner, no
+   * organization, no content. Rewriting them here would mean maintaining a
+   * second vocabulary that drifts from the rules it describes, and the drift
+   * would show up as a misleading error at exactly the wrong moment.
+   *
+   * 409 rather than 400: the request is well-formed and the content is real.
+   * What is wrong is the STATE — the parent is a draft, a child is still
+   * published, the lesson is empty. That is a conflict with the current state
+   * of the resource, which is what 409 means.
+   */
+  const INTEGRITY_VIOLATION = '23000';
+
+  /**
+   * Runs a lifecycle write, translating and recording the database's refusals.
+   *
+   * The event is emitted OUTSIDE the transaction that failed — `securityEvents`
+   * has its own connection — because the failing transaction is about to roll
+   * back and would take the record of its own refusal with it.
+   */
+  async function guardLifecycle<T>(
+    ctx: ActorContext,
+    resourceKind: string,
+    resourceId: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      const code =
+        typeof error === 'object' && error !== null && 'code' in error
+          ? (error as { code?: unknown }).code
+          : null;
+      if (code !== INTEGRITY_VIOLATION) throw error;
+
+      const reason = error instanceof Error ? error.message : 'Content lifecycle conflict';
+      await securityEvents.record({
+        type: SecurityEventType.CONTENT_LIFECYCLE_REFUSED,
+        actorId: ctx.actor.id,
+        correlationId: ctx.correlationId,
+        ip: ctx.ip,
+        // Ids and the rule's own reason. No statement, no prompt, no key — the
+        // audit trail is more widely readable than the content is.
+        detail: { resourceKind, resourceId, reason },
+        occurredAt: new Date(),
+      });
+      throw conflict(reason);
+    }
+  }
+
+  /**
+   * Turns a stale optimistic-concurrency token into a 409 the client can act on.
+   *
+   * Separate from `guardLifecycle` because the two conflicts have different
+   * remedies and the client must be able to tell them apart WITHOUT parsing
+   * prose: a lifecycle refusal is fixed by acting on other content, a stale
+   * write by reloading and reapplying. Hence the machine-readable
+   * `ConflictReason` in the detail rather than a message match.
+   *
+   * It is recorded as a security event for the same reason a denial is: a burst
+   * of stale writes on one lesson is either two authors colliding — which the
+   * product owner wants to know about — or a client replaying a captured
+   * request, which security does.
+   */
+  async function guardStaleWrite<T>(
+    ctx: ActorContext,
+    resourceId: string,
+    run: () => Promise<T>,
+  ): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      if (!(error instanceof StaleWriteError)) throw error;
+      await securityEvents.record({
+        type: SecurityEventType.CONTENT_STALE_WRITE_REFUSED,
+        actorId: ctx.actor.id,
+        correlationId: ctx.correlationId,
+        ip: ctx.ip,
+        // Which lesson, and nothing about it. Not the title, not the body, and
+        // above all not who won the race — the loser is not entitled to learn
+        // that another actor exists, let alone which one.
+        detail: { resourceKind: 'lesson', resourceId },
+        occurredAt: new Date(),
+      });
+      throw conflict(error.message, { reason: ConflictReason.STALE_WRITE });
+    }
+  }
+
+  /**
+   * What this actor may do to this lesson next.
+   *
+   * Read AFTER the write, from the row as it now stands, because a lifecycle
+   * move changes the answer: a lesson that has just been published can be
+   * archived and can no longer have its objectives replaced.
+   *
+   * NO DENIAL IS RECORDED HERE. `decide` exists to enforce and logs every
+   * refusal, which is right for an attempted action and wrong for a question
+   * nobody asked — computing three capabilities per read through it would bury
+   * real denials under a flood of self-inflicted ones. This calls the engine
+   * directly, and it is the ONLY place in this service that does.
+   *
+   * A lesson the actor can no longer read yields all-false rather than an
+   * error: the write happened, the response is owed, and "you may do nothing
+   * further" is the honest answer.
+   */
+  async function lessonPermissions(
+    ctx: ActorContext,
+    tx: Tx,
+    id: string,
+  ): Promise<LessonPermissions> {
+    const guarded = await repository.findLesson(tx, id);
+    if (!guarded) return { update: false, publish: false, archive: false };
+    const authContext: AuthorizationContext = {
+      actor: ctx.actor,
+      relationships: await ctx.loadRelationships(),
+    };
+    const may = (action: Action): boolean =>
+      engine.decide(authContext, action, guarded.resource).effect === 'allow';
+    return {
+      update: may('lesson:update'),
+      publish: may('lesson:publish'),
+      archive: may('lesson:archive'),
+    };
+  }
+
+  const withPermissions = async (
+    ctx: ActorContext,
+    tx: Tx,
+    record: LessonRecord,
+  ): Promise<LessonDetail> => ({
+    ...record,
+    permissions: await lessonPermissions(ctx, tx, record.id),
+  });
 
   async function recordDenial(
     ctx: ActorContext,
@@ -375,7 +536,9 @@ export function createCurriculumService(deps: CurriculumServiceDeps): Curriculum
       return db.withActor(ctx.actor.id, async (tx) => {
         const action = status === 'published' ? 'curriculum:publish' : 'curriculum:archive';
         await authorize(ctx, await repository.findCurriculum(tx, id), action, 'curriculum', id);
-        const updated = await repository.setCurriculumStatus(tx, id, status);
+        const updated = await guardLifecycle(ctx, 'curriculum', id, () =>
+          repository.setCurriculumStatus(tx, id, status),
+        );
         if (!updated) throw notFound();
         await emit(
           ctx,
@@ -502,7 +665,9 @@ export function createCurriculumService(deps: CurriculumServiceDeps): Curriculum
       return db.withActor(ctx.actor.id, async (tx) => {
         const action = status === 'published' ? 'course:publish' : 'course:archive';
         await authorize(ctx, await repository.findCourse(tx, id), action, 'course', id);
-        const updated = await repository.setCourseStatus(tx, id, status);
+        const updated = await guardLifecycle(ctx, 'course', id, () =>
+          repository.setCourseStatus(tx, id, status),
+        );
         if (!updated) throw notFound();
         await emit(
           ctx,
@@ -623,7 +788,9 @@ export function createCurriculumService(deps: CurriculumServiceDeps): Curriculum
       return db.withActor(ctx.actor.id, async (tx) => {
         const action = status === 'published' ? 'course_unit:publish' : 'course_unit:archive';
         await authorize(ctx, await repository.findUnit(tx, id), action, 'course_unit', id);
-        const updated = await repository.setUnitStatus(tx, id, status);
+        const updated = await guardLifecycle(ctx, 'course_unit', id, () =>
+          repository.setUnitStatus(tx, id, status),
+        );
         if (!updated) throw notFound();
         await emit(
           ctx,
@@ -718,9 +885,16 @@ export function createCurriculumService(deps: CurriculumServiceDeps): Curriculum
     },
 
     async getLesson(ctx, id) {
-      return db.withActor(ctx.actor.id, async (tx) =>
-        authorize(ctx, await repository.findLesson(tx, id), 'lesson:read', 'lesson', id),
-      );
+      return db.withActor(ctx.actor.id, async (tx) => {
+        const record = await authorize(
+          ctx,
+          await repository.findLesson(tx, id),
+          'lesson:read',
+          'lesson',
+          id,
+        );
+        return withPermissions(ctx, tx, record);
+      });
     },
 
     async createLesson(ctx, unitId, input) {
@@ -758,38 +932,62 @@ export function createCurriculumService(deps: CurriculumServiceDeps): Curriculum
           resourceId: created.id,
           unitId,
         });
-        return created;
+        return withPermissions(ctx, tx, created);
       });
     },
 
     async updateLesson(ctx, id, input) {
       return db.withActor(ctx.actor.id, async (tx) => {
         await authorize(ctx, await repository.findLesson(tx, id), 'lesson:update', 'lesson', id);
-        const updated = await repository.updateLesson(tx, id, {
-          ...(input.title !== undefined ? { title: input.title } : {}),
-          ...(input.summary !== undefined ? { summary: input.summary } : {}),
-          ...(input.contentFormat !== undefined ? { contentFormat: input.contentFormat } : {}),
-          ...(input.contentBody !== undefined ? { contentBody: input.contentBody } : {}),
-          ...(input.externalUrl !== undefined ? { externalUrl: input.externalUrl } : {}),
-          ...(input.estimatedMinutes !== undefined
-            ? { estimatedMinutes: input.estimatedMinutes }
-            : {}),
-          ...(input.objectives !== undefined ? { objectives: input.objectives } : {}),
-        });
+        // Through the translator: editing the OBJECTIVES of a published lesson
+        // is refused by 0022, and an author who tries deserves to be told that
+        // rather than handed a 500. Everything else in this patch — the title,
+        // the body — stays editable after publication.
+        // `expectedUpdatedAt` is stripped from the patch here rather than
+        // forwarded: it is a precondition on the write, never a column, and a
+        // repository that received it among the fields could one day try to
+        // store it.
+        const { expectedUpdatedAt, ...fields } = input;
+        const updated = await guardStaleWrite(ctx, id, () =>
+          guardLifecycle(ctx, 'lesson', id, () =>
+            repository.updateLesson(
+              tx,
+              id,
+              {
+                ...(fields.title !== undefined ? { title: fields.title } : {}),
+                ...(fields.summary !== undefined ? { summary: fields.summary } : {}),
+                ...(fields.contentFormat !== undefined
+                  ? { contentFormat: fields.contentFormat }
+                  : {}),
+                ...(fields.contentBody !== undefined ? { contentBody: fields.contentBody } : {}),
+                ...(fields.externalUrl !== undefined ? { externalUrl: fields.externalUrl } : {}),
+                ...(fields.estimatedMinutes !== undefined
+                  ? { estimatedMinutes: fields.estimatedMinutes }
+                  : {}),
+                ...(fields.objectives !== undefined ? { objectives: fields.objectives } : {}),
+              },
+              expectedUpdatedAt === undefined ? null : new Date(expectedUpdatedAt),
+            ),
+          ),
+        );
         if (!updated) throw notFound();
         await emit(ctx, SecurityEventType.CONTENT_UPDATED, {
           resourceKind: 'lesson',
           resourceId: id,
         });
-        return updated;
+        return withPermissions(ctx, tx, updated);
       });
     },
 
-    async setLessonStatus(ctx, id, status) {
+    async setLessonStatus(ctx, id, status, expectedUpdatedAt) {
       return db.withActor(ctx.actor.id, async (tx) => {
         const action = status === 'published' ? 'lesson:publish' : 'lesson:archive';
         await authorize(ctx, await repository.findLesson(tx, id), action, 'lesson', id);
-        const updated = await repository.setLessonStatus(tx, id, status);
+        const updated = await guardStaleWrite(ctx, id, () =>
+          guardLifecycle(ctx, 'lesson', id, () =>
+            repository.setLessonStatus(tx, id, status, expectedUpdatedAt),
+          ),
+        );
         if (!updated) throw notFound();
         await emit(
           ctx,
@@ -798,7 +996,7 @@ export function createCurriculumService(deps: CurriculumServiceDeps): Curriculum
             : SecurityEventType.CONTENT_ARCHIVED,
           { resourceKind: 'lesson', resourceId: id, unitId: updated.unitId },
         );
-        return updated;
+        return withPermissions(ctx, tx, updated);
       });
     },
 

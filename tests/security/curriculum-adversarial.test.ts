@@ -322,18 +322,22 @@ describe('the lifecycle cannot be reached sideways', () => {
 
 // =========================================================================
 describe('publishing a child does not publish its parents', () => {
-  it('leaves a course invisible to learners when only its unit is published', async () => {
+  it('REFUSES to publish a unit whose course is still a draft', async () => {
+    // CHANGED BY TASK 011. This used to publish the unit and assert only that
+    // the learner saw neither it nor its draft course. 0022 refuses the publish
+    // outright, so the invisible-but-published state no longer exists — and the
+    // learner still sees neither, which is what the test was really about.
     const a = await authorWithCourse('a');
     const student = await seedAndLogin({
       email: 'stu@test.local',
       organizationId: a.organizationId,
     });
     const unit = await post(`/api/v1/courses/${a.courseId}/units`, a.author.cookie, { title: 'U' });
-    expect((await post(`/api/v1/units/${id(unit)}/publish`, a.reviewer.cookie)).statusCode).toBe(
-      200,
-    );
 
-    // The unit is published; its course is not. The learner sees neither.
+    const refused = await post(`/api/v1/units/${id(unit)}/publish`, a.reviewer.cookie);
+    expect(refused.statusCode).toBe(409);
+    expect(refused.json<{ error: { message: string } }>().error.message).toMatch(/course/i);
+
     expect((await get(`/api/v1/units/${id(unit)}`, student.cookie)).statusCode).toBe(404);
     expect((await get(`/api/v1/courses/${a.courseId}`, student.cookie)).statusCode).toBe(404);
   });

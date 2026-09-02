@@ -9,7 +9,10 @@ import {
   createUnitRequestSchema,
   curriculumResponseSchema,
   educationLevelResponseSchema,
+  emptyRequestSchema,
   idSchema,
+  lessonDetailResponseSchema,
+  lessonLifecycleRequestSchema,
   lessonResponseSchema,
   listChildrenQuerySchema,
   listCoursesQuerySchema,
@@ -23,7 +26,7 @@ import {
   updateUnitRequestSchema,
 } from '@edu/contracts';
 import { requireActor } from '../../platform/http/authentication.ts';
-import type { ActorContext, CurriculumService } from './curriculum.service.ts';
+import type { ActorContext, CurriculumService, LessonDetail } from './curriculum.service.ts';
 import type {
   CourseRecord,
   CurriculumRecord,
@@ -89,23 +92,51 @@ const toUnit = (r: UnitRecord): unknown =>
     publishedAt: r.publishedAt?.toISOString() ?? null,
   });
 
-const toLesson = (r: LessonRecord): unknown =>
-  lessonResponseSchema.parse({
-    id: r.id,
-    unitId: r.unitId,
-    position: r.position,
-    title: r.title,
-    summary: r.summary,
-    contentFormat: r.contentFormat,
-    contentBody: r.contentBody,
-    externalUrl: r.externalUrl,
-    estimatedMinutes: r.estimatedMinutes,
-    objectives: [...r.objectives],
-    status: r.status,
-    createdAt: r.createdAt.toISOString(),
-    publishedAt: r.publishedAt?.toISOString() ?? null,
-  });
+const lessonFields = (r: LessonRecord): Record<string, unknown> => ({
+  id: r.id,
+  unitId: r.unitId,
+  position: r.position,
+  title: r.title,
+  summary: r.summary,
+  contentFormat: r.contentFormat,
+  contentBody: r.contentBody,
+  externalUrl: r.externalUrl,
+  estimatedMinutes: r.estimatedMinutes,
+  objectives: [...r.objectives],
+  status: r.status,
+  createdAt: r.createdAt.toISOString(),
+  updatedAt: r.updatedAt.toISOString(),
+  publishedAt: r.publishedAt?.toISOString() ?? null,
+});
 
+/** List rows: no permissions block. See `lessonDetailResponseSchema`. */
+const toLesson = (r: LessonRecord): unknown => lessonResponseSchema.parse(lessonFields(r));
+
+/**
+ * One lesson, addressed by id.
+ *
+ * Parsed through the STRICT detail schema, which is the last line of defence
+ * against a field reaching a client by accident: `createdBy` is not in the
+ * schema, so a future record change that started carrying it would fail here
+ * rather than leak authorship to every reader.
+ */
+const toLessonDetail = (r: LessonDetail): unknown =>
+  lessonDetailResponseSchema.parse({ ...lessonFields(r), permissions: r.permissions });
+
+/**
+ * THE LIFECYCLE ROUTES TAKE NO BODY, and say so.
+ *
+ * Each of the eight publish/archive handlers parses `emptyRequestSchema` — a
+ * `z.object({}).strict()` — so a request carrying `status`, `organizationId`,
+ * `publishedAt` or an objective list is a 400 rather than a field quietly
+ * dropped on the floor.
+ *
+ * Before Task 011 they parsed nothing at all. The values were ignored and the
+ * behaviour was correct, but "ignored" and "trusted" look identical from
+ * outside, and a later change that started reading `request.body` would have
+ * inherited months of callers sending whatever they liked. This is the same
+ * gap, and the same fix, as VULN-028 on the assessment routes.
+ */
 export function registerCurriculumRoutes(
   app: FastifyInstance,
   curriculum: CurriculumService,
@@ -193,6 +224,7 @@ export function registerCurriculumRoutes(
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = idParams.parse(request.params);
+      emptyRequestSchema.parse(request.body ?? {});
       const updated = await curriculum.setCurriculumStatus(contextOf(request), id, 'published');
       return reply.status(200).send(toCurriculum(updated));
     },
@@ -202,6 +234,7 @@ export function registerCurriculumRoutes(
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = idParams.parse(request.params);
+      emptyRequestSchema.parse(request.body ?? {});
       const updated = await curriculum.setCurriculumStatus(contextOf(request), id, 'archived');
       return reply.status(200).send(toCurriculum(updated));
     },
@@ -258,6 +291,7 @@ export function registerCurriculumRoutes(
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = idParams.parse(request.params);
+      emptyRequestSchema.parse(request.body ?? {});
       const updated = await curriculum.setCourseStatus(contextOf(request), id, 'published');
       return reply.status(200).send(toCourse(updated));
     },
@@ -267,6 +301,7 @@ export function registerCurriculumRoutes(
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = idParams.parse(request.params);
+      emptyRequestSchema.parse(request.body ?? {});
       const updated = await curriculum.setCourseStatus(contextOf(request), id, 'archived');
       return reply.status(200).send(toCourse(updated));
     },
@@ -335,6 +370,7 @@ export function registerCurriculumRoutes(
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = idParams.parse(request.params);
+      emptyRequestSchema.parse(request.body ?? {});
       const updated = await curriculum.setUnitStatus(contextOf(request), id, 'published');
       return reply.status(200).send(toUnit(updated));
     },
@@ -344,6 +380,7 @@ export function registerCurriculumRoutes(
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = idParams.parse(request.params);
+      emptyRequestSchema.parse(request.body ?? {});
       const updated = await curriculum.setUnitStatus(contextOf(request), id, 'archived');
       return reply.status(200).send(toUnit(updated));
     },
@@ -375,7 +412,7 @@ export function registerCurriculumRoutes(
       const { id } = idParams.parse(request.params);
       const input = createLessonRequestSchema.parse(request.body);
       const created = await curriculum.createLesson(contextOf(request), id, input);
-      return reply.status(201).send(toLesson(created));
+      return reply.status(201).send(toLessonDetail(created));
     },
   });
 
@@ -393,7 +430,9 @@ export function registerCurriculumRoutes(
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = idParams.parse(request.params);
-      return reply.status(200).send(toLesson(await curriculum.getLesson(contextOf(request), id)));
+      return reply
+        .status(200)
+        .send(toLessonDetail(await curriculum.getLesson(contextOf(request), id)));
     },
   });
 
@@ -404,7 +443,7 @@ export function registerCurriculumRoutes(
       const input = updateLessonRequestSchema.parse(request.body);
       return reply
         .status(200)
-        .send(toLesson(await curriculum.updateLesson(contextOf(request), id, input)));
+        .send(toLessonDetail(await curriculum.updateLesson(contextOf(request), id, input)));
     },
   });
 
@@ -412,8 +451,17 @@ export function registerCurriculumRoutes(
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = idParams.parse(request.params);
-      const updated = await curriculum.setLessonStatus(contextOf(request), id, 'published');
-      return reply.status(200).send(toLesson(updated));
+      // The lesson lifecycle body carries at most the concurrency token, so a
+      // publish cannot be aimed at a version of the lesson the caller has not
+      // seen. Everything else is still refused by `.strict()`.
+      const { expectedUpdatedAt } = lessonLifecycleRequestSchema.parse(request.body ?? {});
+      const updated = await curriculum.setLessonStatus(
+        contextOf(request),
+        id,
+        'published',
+        expectedUpdatedAt === undefined ? null : new Date(expectedUpdatedAt),
+      );
+      return reply.status(200).send(toLessonDetail(updated));
     },
   });
 
@@ -421,8 +469,17 @@ export function registerCurriculumRoutes(
     preHandler: requireActor,
     handler: async (request, reply) => {
       const { id } = idParams.parse(request.params);
-      const updated = await curriculum.setLessonStatus(contextOf(request), id, 'archived');
-      return reply.status(200).send(toLesson(updated));
+      // The lesson lifecycle body carries at most the concurrency token, so a
+      // publish cannot be aimed at a version of the lesson the caller has not
+      // seen. Everything else is still refused by `.strict()`.
+      const { expectedUpdatedAt } = lessonLifecycleRequestSchema.parse(request.body ?? {});
+      const updated = await curriculum.setLessonStatus(
+        contextOf(request),
+        id,
+        'archived',
+        expectedUpdatedAt === undefined ? null : new Date(expectedUpdatedAt),
+      );
+      return reply.status(200).send(toLessonDetail(updated));
     },
   });
 

@@ -673,6 +673,20 @@ describe('the request accepts only what it intends to', () => {
       { instructions: 'ignore policy' },
       { model: 'gpt-4' },
       { grounding: 'course_material' },
+      // ── Added in Task 014, now that a real provider exists ──────────────
+      //
+      // Each of these is a knob that costs real money or changes reviewed
+      // behaviour, and every one of them is decided server-side. They are not
+      // ignored — the contract has no field for them, so sending one is a 400.
+      { provider: 'anthropic' },
+      { temperature: 2 },
+      { maxTokens: 100000 },
+      { max_tokens: 100000 },
+      { effort: 'max' },
+      { stream: true },
+      { tools: [{ name: 'publish_lesson' }] },
+      { citedSourceIds: ['lesson:x#0'] },
+      { apiKey: 'sk-forged' }, // secret-scan-allow: literal forged value in a negative test
     ]) {
       const response = await askRaw(w.learner, {
         question: 'mitochondria',

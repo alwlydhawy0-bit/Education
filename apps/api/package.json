@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.123.0",
     "@edu/authz": "workspace:*",
     "@edu/contracts": "workspace:*",
     "@edu/kernel": "workspace:*",

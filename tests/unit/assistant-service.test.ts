@@ -75,6 +75,7 @@ function harness(options: {
   provider: AiProvider;
   chunks?: RetrievedChunk[];
   repository?: AssistantRepository;
+  timeoutMs?: number;
 }) {
   const events: SecurityEvent[] = [];
   const service = createAssistantService({
@@ -93,7 +94,7 @@ function harness(options: {
       },
     },
     provider: options.provider,
-    timeoutMs: 5_000,
+    timeoutMs: options.timeoutMs ?? 5_000,
   });
 
   const ctx: ActorContext = {
@@ -390,5 +391,124 @@ describe('what reaches the provider', () => {
     // Spending a provider call on an empty context is spending money to be told
     // nothing.
     expect(called).toBe(false);
+  });
+});
+
+// =====================================================================
+// TASK 014 — the server owns the deadline
+// =====================================================================
+
+describe('a provider that never returns cannot hold the request open', () => {
+  /** Never resolves, never rejects, and ignores the abort signal entirely. */
+  const hung: AiProvider = {
+    name: 'hung',
+    generateAnswer: () => new Promise(() => {}),
+  };
+
+  it('the SERVER deadline fires, not the adapter’s', async () => {
+    // THE POINT OF THIS TEST. `hung` is the adapter behaving as badly as an
+    // adapter can — it ignores `timeoutMs`, ignores the signal, and simply
+    // never settles. If the deadline lived only in the adapter, this request
+    // would hold a connection and a rate-limit slot forever.
+    const h = harness({ provider: hung, chunks: [chunk('lesson:a#0', 'cells')], timeoutMs: 60 });
+
+    const started = Date.now();
+    const answer = await ask(h);
+    const elapsed = Date.now() - started;
+
+    expect(answer.grounding).toBe('unavailable');
+    expect(answer.answer).toBe('');
+    expect(answer.sources).toEqual([]);
+    // Generous upper bound: the assertion is "it came back", not a benchmark.
+    expect(elapsed).toBeLessThan(5_000);
+  });
+
+  it('and the learner is told nothing about why', async () => {
+    const h = harness({ provider: hung, chunks: [chunk('lesson:a#0', 'cells')], timeoutMs: 60 });
+    const answer = await ask(h);
+    // "unavailable" is the same answer a rate limit or an outage produces. A
+    // learner must not be able to tell a slow provider from a missing one.
+    expect(JSON.stringify(answer)).not.toContain('timeout');
+    expect(JSON.stringify(answer)).not.toContain('deadline');
+  });
+
+  it('the abort signal is passed down so a cooperating adapter can stop', async () => {
+    // The other half of the deadline: an adapter that DOES cooperate gets told
+    // to stop, so the socket closes and the call stops costing money rather
+    // than running on after everyone stopped waiting for it.
+    let seen: AbortSignal | undefined;
+    const observer: AiProvider = {
+      name: 'observer',
+      generateAnswer: (request: AiRequest) => {
+        seen = request.signal;
+        return new Promise(() => {});
+      },
+    };
+
+    const h = harness({
+      provider: observer,
+      chunks: [chunk('lesson:a#0', 'cells')],
+      timeoutMs: 60,
+    });
+    await ask(h);
+
+    expect(seen).toBeInstanceOf(AbortSignal);
+    expect(seen?.aborted).toBe(true);
+  });
+});
+
+describe('an unusable response is recorded differently from an outage', () => {
+  const rejecting = (kind: 'invalid_response' | 'unavailable'): AiProvider => ({
+    name: 'anthropic',
+    generateAnswer: () => Promise.reject(new AiProviderError(kind, 'vendor detail 9f2a')),
+  });
+
+  it('output rejection emits ai.output_rejected', async () => {
+    const h = harness({
+      provider: rejecting('invalid_response'),
+      chunks: [chunk('lesson:a#0', 'cells')],
+    });
+    await ask(h);
+
+    const event = h.events.find((e) => e.type === 'ai.output_rejected');
+    expect(event?.detail).toMatchObject({ provider: 'anthropic', kind: 'invalid_response' });
+    expect(h.events.some((e) => e.type === 'ai.provider_failed')).toBe(false);
+  });
+
+  it('an outage still emits ai.provider_failed', async () => {
+    const h = harness({ provider: rejecting('unavailable'), chunks: [chunk('lesson:a#0', 'x')] });
+    await ask(h);
+
+    expect(h.events.find((e) => e.type === 'ai.provider_failed')?.detail).toMatchObject({
+      kind: 'unavailable',
+    });
+    expect(h.events.some((e) => e.type === 'ai.output_rejected')).toBe(false);
+  });
+
+  it('neither event carries the vendor’s text', async () => {
+    for (const kind of ['invalid_response', 'unavailable'] as const) {
+      const h = harness({ provider: rejecting(kind), chunks: [chunk('lesson:a#0', 'x')] });
+      await ask(h);
+      expect(JSON.stringify(h.events)).not.toContain('vendor detail 9f2a');
+    }
+  });
+
+  it('a content_declined refusal is neither an outage nor "insufficient"', async () => {
+    // A model declining is not the learner's material being thin. Saying
+    // `insufficient` would tell a child their textbook does not cover it,
+    // which is false.
+    const declining: AiProvider = {
+      name: 'anthropic',
+      generateAnswer: () =>
+        Promise.reject(new AiProviderError('content_declined', 'category: cyber')),
+    };
+    const h = harness({ provider: declining, chunks: [chunk('lesson:a#0', 'cells')] });
+    const answer = await ask(h);
+
+    expect(answer.grounding).toBe('unavailable');
+    expect(h.events.find((e) => e.type === 'ai.provider_failed')?.detail).toMatchObject({
+      kind: 'content_declined',
+    });
+    expect(JSON.stringify(h.events)).not.toContain('cyber');
   });
 });

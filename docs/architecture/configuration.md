@@ -44,16 +44,16 @@ to `toPublicConfig()`, which is a hand-written allow-list.
 
 ### Server (`apps/api/src/platform/config.ts`)
 
-| Value                                                                      | Class                           | Notes                                                                                                                    |
-| -------------------------------------------------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| `DATABASE_URL`                                                             | **PRIVATE**                     | Contains credentials. Never logged, never exposed.                                                                       |
-| `ALLOWED_ORIGINS`                                                          | PRIVATE                         | Not secret, but not the client's business.                                                                               |
-| `SESSION_COOKIE_NAME`                                                      | PRIVATE                         | The cookie is `HttpOnly`; the browser attaches it without JavaScript naming it.                                          |
-| `SESSION_COOKIE_SECURE`, `RATE_LIMIT_ENABLED`, `LOG_LEVEL`, `PORT`, `HOST` | PRIVATE                         | Operational posture.                                                                                                     |
-| `AI_API_KEY`                                                               | **PRIVATE, secret-bearing**     | Task 013. In `SECRET_BEARING_KEYS` beside `DATABASE_URL`, so the redacting logger and the configuration summary mask it. |
-| `AI_PROVIDER`, `AI_TIMEOUT_MS`                                             | PRIVATE                         | Which adapter and what deadline. Not secret; not the client's business.                                                  |
-| `NODE_ENV`                                                                 | public _(via `toPublicConfig`)_ | Environment name only.                                                                                                   |
-| API version                                                                | public                          | A constant, not a secret.                                                                                                |
+| Value                                                                      | Class                           | Notes                                                                                                                                                                                                    |
+| -------------------------------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DATABASE_URL`                                                             | **PRIVATE**                     | Contains credentials. Never logged, never exposed.                                                                                                                                                       |
+| `ALLOWED_ORIGINS`                                                          | PRIVATE                         | Not secret, but not the client's business.                                                                                                                                                               |
+| `SESSION_COOKIE_NAME`                                                      | PRIVATE                         | The cookie is `HttpOnly`; the browser attaches it without JavaScript naming it.                                                                                                                          |
+| `SESSION_COOKIE_SECURE`, `RATE_LIMIT_ENABLED`, `LOG_LEVEL`, `PORT`, `HOST` | PRIVATE                         | Operational posture.                                                                                                                                                                                     |
+| `AI_API_KEY`                                                               | **PRIVATE, secret-bearing**     | Task 013. In `SECRET_BEARING_KEYS` beside `DATABASE_URL`, so the redacting logger and the configuration summary mask it.                                                                                 |
+| `AI_PROVIDER`, `AI_MODEL`, `AI_MAX_OUTPUT_TOKENS`, `AI_TIMEOUT_MS`         | PRIVATE                         | Which adapter, which model, and the output and time ceilings. Not secret; not the client's business, and never accepted from a request. `AI_MODEL` is allowlisted, and an unknown value refuses to boot. |
+| `NODE_ENV`                                                                 | public _(via `toPublicConfig`)_ | Environment name only.                                                                                                                                                                                   |
+| API version                                                                | public                          | A constant, not a secret.                                                                                                                                                                                |
 
 `assertNoPrivateLeakage()` runs on **every boot in every environment** and throws
 if a secret-bearing value appears anywhere inside the public object. The
@@ -87,6 +87,23 @@ that task — so it gets its own rule rather than relying on the general one.
 **Verified:** the production bundle was built and searched for `DATABASE_URL`,
 `postgres://`, role names, development passwords, cookie settings and origin
 settings. None were present.
+
+### The allowlist that reads the environment
+
+`loadConfig` copies values out of `process.env` using an explicit list,
+`CONFIG_KEYS`. Both halves of that pairing are now guarded, and only one of them
+used to be:
+
+- a key in `CONFIG_KEYS` but **not** in the schema fails loudly, because the
+  schema is `.strict()`;
+- a key in the schema but **not** in `CONFIG_KEYS` used to fail **silently** —
+  the variable could be set, documented and reported, and it did nothing.
+
+The second case really happened. Task 013 declared `AI_PROVIDER`, `AI_API_KEY`
+and `AI_TIMEOUT_MS` and never listed them, so all three kept their defaults for
+an entire task (VULN-037). A fitness test in `tests/unit/config.test.ts` now
+compares the two declarations directly, with a guard asserting both were found
+so a rename cannot quietly make the comparison vacuous.
 
 ## Secrets
 

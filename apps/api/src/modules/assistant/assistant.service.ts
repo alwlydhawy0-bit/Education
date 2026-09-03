@@ -4,7 +4,13 @@ import { SecurityEventType } from '@edu/observability';
 import type { AskAssistantRequest, AssistantGrounding, AssistantSourceRef } from '@edu/contracts';
 import type { Database } from '../../platform/db.ts';
 import type { SecurityEventRecorder } from '../../platform/security/security-events.ts';
-import { AiProviderError, type AiProvider, type AiSource } from '../../platform/ai/provider.ts';
+import {
+  AiProviderError,
+  type AiCompletion,
+  type AiProvider,
+  type AiRequest,
+  type AiSource,
+} from '../../platform/ai/provider.ts';
 import type { AssistantRepository, RetrievedChunk } from './assistant.repository.ts';
 
 export interface ActorContext {
@@ -170,21 +176,28 @@ export function createAssistantService(deps: AssistantServiceDeps): AssistantSer
 
       let completion;
       try {
-        completion = await provider.generateAnswer({
+        completion = await callWithDeadline(provider, timeoutMs, {
           instructions: SYSTEM_INSTRUCTIONS,
           question: input.question,
           sources,
-          timeoutMs,
         });
       } catch (error) {
         // NORMALIZED, ALWAYS. A provider's own error text is vendor-shaped and
         // can echo fragments of the request, so none of it reaches the learner
-        // or the log — only which of four kinds it was.
+        // or the log — only which of the five kinds it was.
         const kind = error instanceof AiProviderError ? error.kind : 'unavailable';
-        await emit(ctx, SecurityEventType.AI_PROVIDER_FAILED, {
-          provider: provider.name,
-          kind,
-        });
+        // `invalid_response` means the provider ANSWERED but the answer was
+        // unusable — a different operational story from an outage, and the one
+        // worth its own event because it is how a misbehaving or tampered-with
+        // provider first shows up. Both carry the KIND and nothing else: no
+        // vendor message, no status line, no fragment of the request.
+        await emit(
+          ctx,
+          kind === 'invalid_response'
+            ? SecurityEventType.AI_OUTPUT_REJECTED
+            : SecurityEventType.AI_PROVIDER_FAILED,
+          { provider: provider.name, kind },
+        );
         return {
           grounding: 'unavailable',
           answer: '',
@@ -248,6 +261,57 @@ export function createAssistantService(deps: AssistantServiceDeps): AssistantSer
       };
     },
   };
+}
+
+/**
+ * Calls a provider under a deadline the SERVER owns.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS EXISTS WHEN THE ADAPTER ALREADY HAS A TIMEOUT
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * Because "the adapter has a timeout" is a promise made by the component whose
+ * misbehaviour this is protecting against. An adapter that ignored `timeoutMs`,
+ * or a vendor SDK whose own timeout did not cover some phase of a request,
+ * would hold a connection and a rate-limit slot open for as long as it liked,
+ * and nothing above it would notice.
+ *
+ * So the deadline is enforced HERE, where the caller owns the clock:
+ *
+ *   1. an `AbortSignal` goes down, so an adapter that cooperates closes its
+ *      socket and stops costing money;
+ *   2. the promise is RACED against the timer, so the request finishes on time
+ *      even if the adapter ignores the signal entirely.
+ *
+ * Point 2 is what makes this a control rather than a convenience: it holds when
+ * the layer below is wrong, which is the only time a control counts. A hung
+ * provider becomes an ordinary `unavailable` answer.
+ */
+async function callWithDeadline(
+  provider: AiProvider,
+  timeoutMs: number,
+  request: Omit<AiRequest, 'timeoutMs' | 'signal'>,
+): Promise<AiCompletion> {
+  const controller = new AbortController();
+  let timer: NodeJS.Timeout | undefined;
+
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => {
+      controller.abort();
+      reject(new AiProviderError('timeout', 'server deadline exceeded'));
+    }, timeoutMs);
+  });
+
+  try {
+    return await Promise.race([
+      provider.generateAnswer({ ...request, timeoutMs, signal: controller.signal }),
+      deadline,
+    ]);
+  } finally {
+    // Always cleared: a surviving timer holds the event loop open and fires an
+    // abort at a request that finished long ago.
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 /**

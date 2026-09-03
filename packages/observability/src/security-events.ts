@@ -247,6 +247,26 @@ export const SecurityEventType = {
   AI_CITATION_REJECTED: 'ai.citation_rejected',
 
   /**
+   * The provider answered, and the answer was thrown away.
+   *
+   * ADDED IN TASK 014, and distinct from `ai.provider_failed` on purpose. A
+   * failure means the provider did not answer — an outage, a timeout, a quota.
+   * THIS means it answered with something the server refused to use: output
+   * that did not match the schema, an answer past the size tripwire, absurd
+   * citation counts, a request the API rejected as malformed.
+   *
+   * Worth separating because the two have different causes and different
+   * responses. A run of failures is an incident with the vendor; a run of
+   * REJECTIONS is a model change, a bad model identifier, a stale request
+   * shape, or something sitting in the middle of the connection rewriting
+   * responses — and none of those look like an outage.
+   *
+   * Carries the provider name and the failure KIND. Never the response body,
+   * never the vendor's error text, never a fragment of the request.
+   */
+  AI_OUTPUT_REJECTED: 'ai.output_rejected',
+
+  /**
    * Emitted at startup when the running security posture deviates from the safe
    * defaults (rate limiting off, insecure cookies, debug logging). The
    * configuration loader refuses these outright in production and staging, so

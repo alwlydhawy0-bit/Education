@@ -100,6 +100,28 @@ a structural claim and needs a structural test.** Asserting it behaviourally
 tests a weaker guarantee than the one the comment makes, and the gap between the
 two is invisible until somebody removes the layer that was covering.
 
+Task 014 connected a real provider and needed a third technique, because neither
+of the first two reaches an external dependency. The adapter's tests inject a
+`fetch` into the **real vendor SDK**, so the real request assembly, the real
+response parsing and the real error classes run against crafted HTTP responses.
+A hand-written fake client would have tested a drawing of the adapter; this
+tests the adapter. When a test asserts that a 429 becomes `rate_limited`, what
+it proves is that `Anthropic.RateLimitError` is actually constructed and
+actually matched.
+
+The rule: **stub the transport, not the dependency.** The seam belongs at the
+lowest boundary you control, because everything above it is code you shipped and
+therefore code that can be wrong.
+
+Task 014 also produced a finding of a different kind, and one worth naming
+because no amount of behavioural testing would have reached it. `loadConfig`
+reads the environment through an explicit allowlist, and Task 013 added three
+variables to the schema without adding them to that list — so all three silently
+kept their defaults for an entire task (VULN-037). Two declarations of the same
+fact, with only one direction guarded. The fix is a test comparing the
+declarations, which is the same shape as the structural rule above: **when one
+fact is written down twice, a test has to say so.**
+
 Task 011 added no new decision table — the content table already covers the
 lifecycle verbs — but added three suites over the existing ones:
 `tests/integration/rls-content-lifecycle.test.ts` (the 0022 triggers, at the

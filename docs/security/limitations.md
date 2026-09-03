@@ -11,11 +11,14 @@ repository.** 1,893 automated tests passed against a real PostgreSQL database.
 That establishes that specific, enumerated properties held at a point in time. It
 does not establish the absence of vulnerabilities.
 
-Task 013 adds a second sentence that has to be read as carefully as the first:
-**no language model has ever been run against this code.** The AI claims in this
+A second sentence has to be read as carefully as the first, and Task 014 does
+not change it: **no language model has ever been run against this code.** Task
+014 connects a real provider adapter, but no credential exists in this
+environment and no live call has ever been made. The AI claims in this
 repository are claims about the pipeline around a provider — authorization,
-retrieval scope, citation validation, disclosure — and none of them is a claim
-about how a real model behaves. See RISK-AI-01.
+retrieval scope, output validation, citation validation, disclosure — and none
+of them is a claim about how a real model behaves. See RISK-AI-01 and
+RISK-AI-10.
 
 ## What was actually verified
 
@@ -119,6 +122,17 @@ the current state.
   `ai.retrieval_refused` events holding an actor id, a correlation id, a resource
   id and `reason: "absent_or_not_visible"` — and eight `validation.rejected`
   events for the forged fields.
+- **The Task 014 provider adapter was NOT driven against a live provider.** No
+  credential exists in this environment. What was verified instead: 52 adapter
+  tests run the **real vendor SDK** over a stubbed `fetch`, so the real request
+  assembly, response parsing and error classes execute against crafted HTTP
+  responses. Every status in §9 of the task normalizes to the documented kind;
+  every malformed shape in §8 is refused; the serialized request body was
+  asserted to contain no email, session token, password material, database URL,
+  learner id, organization id, platform role or assessment data; and a service
+  test drives an adapter that ignores both `timeoutMs` and the abort signal and
+  confirms the request still returns on time. **None of that is evidence about
+  how a real model behaves.**
 - **One thing that live run surfaced, recorded rather than smoothed over.** A
   question the learner's material does NOT answer ("explain photosynthesis and
   chlorophyll", asked against a mitochondria lesson) came back labelled
@@ -245,6 +259,70 @@ the current state.
   file. It is recorded because shipping source maps to production is a
   disclosure decision that was never explicitly made, and it is out of this
   task's scope to change.
+
+## Added in Task 014
+
+- **NO LIVE PROVIDER CALL HAS EVER BEEN MADE FROM THIS REPOSITORY.** This is the
+  headline limitation of the task and it is stated first so it cannot be missed.
+  The development environment holds no provider credential, so the adapter was
+  built and exercised against the real SDK over a **stubbed transport** — real
+  request assembly, real response parsing, real error classes, crafted HTTP
+  responses. What that proves is how the platform treats a provider's output.
+  What it does not touch is how a real model behaves on real curriculum text:
+  answer quality, refusal rates, citation fidelity, Arabic handling, and
+  latency are all unmeasured (RISK-AI-10).
+- **The first live call is therefore an untested code path in production terms.**
+  Enabling `AI_PROVIDER=anthropic` for the first time should be treated as a
+  deployment with its own verification: one authorized question, one irrelevant
+  question, one injection attempt, and an inspection of the server log — the
+  procedure in `tools/live-check/README.md`, extended to the provider
+  (RISK-AI-11).
+- **The request shape was written against SDK 0.123.0 types and never against a
+  live 200.** Typecheck proves the body satisfies
+  `MessageCreateParamsNonStreaming`; it does not prove the API accepts the
+  combination. A rejected parameter would surface as `invalid_response` and the
+  assistant would return `unavailable` for every question — safe, and visible
+  in `ai.output_rejected`, but a total outage of the feature (RISK-AI-12).
+- **Structured output is asked for through a raw JSON schema, not the SDK's Zod
+  helper.** The helper requires Zod 4 and this workspace is on Zod 3; upgrading
+  the validation library the whole contracts package is built on is not a change
+  to make in passing. The shape is therefore declared twice, and a test asserts
+  the two declarations agree so they cannot drift silently. Recorded because
+  duplication is a real cost, not because it is currently wrong.
+- **There is still no spend ceiling.** Task 014 makes the money real: the quota
+  is 60 requests/hour/actor, per process, in memory. With N replicas the
+  effective limit is N × 60 per learner per hour, and `AI_MAX_OUTPUT_TOKENS`
+  bounds each answer but nothing bounds the total. A school asking questions all
+  afternoon is entirely within policy and would be invisible until an invoice
+  arrived. **A per-actor quota is not a financial control and is not presented
+  as one** (RISK-AI-07, now materially more serious than in Task 013).
+- **Retries are off, so a transient provider blip is a visible failure.** This is
+  deliberate — automatic retries would make the quota under-report spend by up
+  to 3×, would make `AI_TIMEOUT_MS` mean a third of what it says, and would
+  triple load on a provider already struggling. The cost is that a learner sees
+  "try again" for failures a retry would have hidden. The retry decision is
+  theirs, and their retry is counted (RISK-AI-13).
+- **A `content_declined` refusal has no learner-facing explanation, by design.**
+  The learner sees the same neutral message as an outage. Anything more specific
+  would turn the assistant into an oracle for the provider's safety classifier,
+  and a child does not need to know which category their biology question
+  tripped. The operator sees the kind in `ai.provider_failed`. The cost is a
+  learner who cannot tell "ask differently" from "try later" (RISK-AI-14).
+- **The random source fence reduces manipulation; it does not prevent it.** An
+  author writing hostile text into a lesson can still make the assistant give a
+  poor answer _about their own learners' material_ — material those learners can
+  already read. What the fence and the three-part request shape cannot do is
+  widen access, because authorization ran before retrieval. Prompt discipline
+  and authorization are different things and are not conflated anywhere in this
+  codebase.
+- **No prompt caching, and no measurement of what it would save.** Every request
+  re-sends the system instructions and the retrieved passages. For a foundation
+  with one endpoint and no conversation this is the honest default; it is also
+  money left on the table once volume exists (RISK-AI-15).
+- **Latency is unmeasured end to end.** Retrieval was measured against seeded
+  corpora in Task 013; provider latency cannot be measured without a provider.
+  Total request latency under a real model is unknown, and `AI_TIMEOUT_MS`
+  defaults to 15 seconds on that basis rather than on evidence.
 
 ## Added in Task 013
 

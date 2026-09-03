@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   assertNoPrivateLeakage,
   loadConfig,
@@ -166,5 +168,149 @@ describe('environment variable handling', () => {
 
   it('rejects an unknown NODE_ENV rather than guessing', () => {
     expect(() => loadConfig({ ...base, NODE_ENV: 'prod' })).toThrow(/Invalid configuration/);
+  });
+});
+
+// =====================================================================
+// TASK 014 — the provider is configured server-side, or not at all
+// =====================================================================
+
+describe('AI provider configuration', () => {
+  it('defaults to the offline composer with no credential needed', () => {
+    const config = loadConfig({ ...base });
+    expect(config.AI_PROVIDER).toBe('none');
+    expect(config.AI_API_KEY).toBeUndefined();
+  });
+
+  it('REFUSES TO START when a provider is named without a credential', () => {
+    // A server that boots fine and then fails on a child's first question is
+    // the worst version of this failure: nobody finds out until a learner
+    // does. Refusing at startup turns it into a deployment error.
+    expect(() => loadConfig({ ...base, AI_PROVIDER: 'anthropic' })).toThrow(/AI_API_KEY/);
+    expect(() => loadConfig({ ...base, AI_PROVIDER: 'anthropic', AI_API_KEY: '   ' })).toThrow(
+      /AI_API_KEY/,
+    );
+  });
+
+  it('starts when the provider and its credential are both present', () => {
+    const config = loadConfig({
+      ...base,
+      AI_PROVIDER: 'anthropic',
+      AI_API_KEY: 'a-test-value-that-is-not-a-credential', // secret-scan-allow: inert fixture for config parsing
+    });
+    expect(config.AI_PROVIDER).toBe('anthropic');
+    expect(config.AI_MODEL).toBe('claude-opus-5');
+  });
+
+  it('REFUSES a model outside the allowlist', () => {
+    // A model identifier reaches a paid API. An arbitrary value is whatever an
+    // operator typed, and a typo is a failed request in front of a child.
+    for (const model of ['gpt-4', 'claude-instant', 'claude-opus-5-20991231', '']) {
+      expect(() => loadConfig({ ...base, AI_MODEL: model })).toThrow();
+    }
+  });
+
+  it('REFUSES an out-of-range output ceiling', () => {
+    for (const tokens of ['0', '-1', '999999', 'lots']) {
+      expect(() => loadConfig({ ...base, AI_MAX_OUTPUT_TOKENS: tokens })).toThrow();
+    }
+    expect(loadConfig({ ...base, AI_MAX_OUTPUT_TOKENS: '512' }).AI_MAX_OUTPUT_TOKENS).toBe(512);
+  });
+
+  it('REFUSES an out-of-range timeout', () => {
+    for (const ms of ['0', '500', '600000']) {
+      expect(() => loadConfig({ ...base, AI_TIMEOUT_MS: ms })).toThrow();
+    }
+  });
+
+  it('never places the provider credential in the public config', () => {
+    const config = loadConfig({
+      ...base,
+      AI_PROVIDER: 'anthropic',
+      AI_API_KEY: 'a-very-distinctive-provider-secret', // secret-scan-allow: inert fixture asserted to be ABSENT from public config
+    });
+    expect(JSON.stringify(toPublicConfig(config))).not.toContain(
+      'a-very-distinctive-provider-secret',
+    );
+  });
+
+  it('the leakage guard catches an AI key reaching the public object', () => {
+    // The same backstop that protects DATABASE_URL, asserted for the new
+    // secret — because a guard that only knows about the first secret it was
+    // written for is a guard that stops working the day a second one is added.
+    const config = loadConfig({
+      ...base,
+      AI_PROVIDER: 'anthropic',
+      AI_API_KEY: 'another-distinctive-provider-secret', // secret-scan-allow: inert fixture for the leakage guard
+    });
+    const leaky = { ...toPublicConfig(config), aiApiKey: config.AI_API_KEY } as never;
+    expect(() => assertNoPrivateLeakage(config, leaky)).toThrow(
+      /would expose a server-only secret/,
+    );
+  });
+});
+
+describe('the environment allowlist and the schema cannot disagree', () => {
+  /**
+   * ═══════════════════════════════════════════════════════════════════════════
+   * THE TEST THAT WOULD HAVE CAUGHT VULN-037
+   * ═══════════════════════════════════════════════════════════════════════════
+   *
+   * `loadConfig` copies only the keys named in `CONFIG_KEYS` out of the
+   * environment. A key declared in the schema but missing from that list is
+   * SILENTLY IGNORED: the variable can be set, documented, and described in a
+   * final report, and it does nothing. Task 013 shipped three such keys.
+   *
+   * The reverse direction is already loud — the schema is `.strict()`, so a key
+   * in the list and not in the schema fails at boot. Only this direction was
+   * unguarded, so only this direction needs asserting.
+   *
+   * It is a source-level test because both facts live in the same file and
+   * neither is exported. Comparing them at runtime would need the schema's
+   * internals; comparing the declarations is what actually catches the drift.
+   */
+  const source = readFileSync(
+    resolve(import.meta.dirname, '../../apps/api/src/platform/config.ts'),
+    'utf8',
+  );
+
+  const allowlisted = new Set(
+    [
+      ...(/const CONFIG_KEYS = \[([\s\S]*?)\] as const;/.exec(source)?.[1] ?? '').matchAll(
+        /'([A-Z0-9_]+)'/g,
+      ),
+    ].map((match) => match[1] ?? ''),
+  );
+
+  const declared = [
+    ...(
+      /const configSchema = z[\s\S]*?\n {2}\}\)\n {2}\.strict\(\)/.exec(source)?.[0] ?? ''
+    ).matchAll(/^ {4}([A-Z][A-Z0-9_]+):/gm),
+  ].map((match) => match[1] ?? '');
+
+  it('finds both declarations, so a parsing change cannot make this vacuous', () => {
+    // Without this, a rename that broke the regexes above would leave the
+    // real assertion comparing two empty sets and passing forever.
+    expect(allowlisted.size).toBeGreaterThan(15);
+    expect(declared.length).toBeGreaterThan(15);
+  });
+
+  it('every schema key is read from the environment', () => {
+    const ignored = declared.filter((key) => !allowlisted.has(key));
+    expect(ignored).toEqual([]);
+  });
+
+  it('specifically, every AI key is read', () => {
+    // Named explicitly as well as covered by the rule above, because these are
+    // the ones that were wrong and a regression here re-breaks the provider.
+    for (const key of [
+      'AI_PROVIDER',
+      'AI_API_KEY',
+      'AI_MODEL',
+      'AI_MAX_OUTPUT_TOKENS',
+      'AI_TIMEOUT_MS',
+    ]) {
+      expect({ key, read: allowlisted.has(key) }).toEqual({ key, read: true });
+    }
   });
 });

@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { ALLOWED_AI_MODELS, DEFAULT_AI_MODEL } from './ai/models.ts';
 
 /**
  * Centralized configuration.
@@ -60,6 +61,27 @@ const CONFIG_KEYS = [
   'LOCKOUT_MINUTES',
   'REQUIRE_VERIFIED_EMAIL_FOR_LOGIN',
   'SESSION_COOKIE_SECURE',
+  /**
+   * ── ADDED IN TASK 014, AND THE OMISSION WAS A BUG ────────────────────────
+   *
+   * Task 013 declared `AI_PROVIDER`, `AI_API_KEY` and `AI_TIMEOUT_MS` in the
+   * schema and documented them as configurable — but never listed them here,
+   * so `loadConfig` copied nothing into the candidate and every one of them
+   * silently kept its default. The environment variable existed, the
+   * documentation described it, and setting it did nothing.
+   *
+   * Nothing was exposed by it (the provider was always `none`, and a key that
+   * is never read cannot leak), but "configuration that silently does not
+   * apply" is exactly the failure this file exists to prevent, and it survived
+   * a full task. Recorded as VULN-037; the fitness test in
+   * `tests/unit/config.test.ts` now asserts that this list and the schema
+   * describe the same keys, so the class is closed rather than the instance.
+   */
+  'AI_PROVIDER',
+  'AI_API_KEY',
+  'AI_MODEL',
+  'AI_MAX_OUTPUT_TOKENS',
+  'AI_TIMEOUT_MS',
 ] as const;
 
 /**
@@ -116,7 +138,30 @@ const configSchema = z
      * No provider is named here beyond the enum. The application talks to
      * `AiProvider`, never to a vendor SDK.
      */
-    AI_PROVIDER: z.enum(['none']).default('none'),
+    AI_PROVIDER: z.enum(['none', 'anthropic']).default('none'),
+
+    /**
+     * Which model the adapter uses. SERVER-SIDE, ALLOWLISTED, VALIDATED AT BOOT.
+     *
+     * There is deliberately no request field for this and never will be: a
+     * caller who could name the model could name an expensive one, or one whose
+     * behaviour has not been reviewed, on somebody else's bill. The allowlist
+     * lives in `platform/ai/models.ts`, and an unrecognised value is a startup
+     * failure — the only place a configuration mistake costs nothing.
+     */
+    AI_MODEL: z.enum(ALLOWED_AI_MODELS).default(DEFAULT_AI_MODEL),
+
+    /**
+     * The hard ceiling on what one answer may generate.
+     *
+     * THE PRIMARY COST AND SIZE CONTROL, and the only one that acts before the
+     * money is spent: the response cannot exceed it, so an unexpectedly
+     * enormous answer cannot exhaust memory, blow the response payload, or run
+     * up a bill. The default is sized for a lesson answer with citations, not
+     * for an essay; the range is validated so neither a zero nor a six-figure
+     * value can be typed in by accident.
+     */
+    AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(256).max(8_192).default(2_048),
 
     /**
      * PRIVATE. A provider credential.
@@ -196,6 +241,19 @@ const configSchema = z
   .refine((c) => !isHardened(c.NODE_ENV) || c.ALLOWED_ORIGINS.length > 0, {
     message: 'ALLOWED_ORIGINS must not be empty in production or staging — refusing to start.',
     path: ['ALLOWED_ORIGINS'],
+  })
+  .refine((c) => c.AI_PROVIDER === 'none' || (c.AI_API_KEY ?? '').trim() !== '', {
+    /**
+     * A named provider with no credential is a server that boots fine and then
+     * fails on a child's first question. Refusing at startup turns a silent
+     * runtime outage into a loud deployment error, which is the trade this
+     * whole file exists to make.
+     *
+     * The message names the VARIABLE, never a value — this string can end up in
+     * a log or a console.
+     */
+    message: 'AI_API_KEY is required when AI_PROVIDER is not "none" — refusing to start.',
+    path: ['AI_API_KEY'],
   })
   .refine((c) => !isHardened(c.NODE_ENV) || c.LOG_LEVEL !== 'debug', {
     // Debug logging in a hardened environment increases the volume of

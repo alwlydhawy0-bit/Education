@@ -274,16 +274,45 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   /**
    * The AI provider, selected once, here, and nowhere else.
    *
-   * `AI_PROVIDER` currently admits only `none`, which selects the deterministic
-   * grounded composer — a real offline answer composer, not a stub that returns
-   * a fixture. Adding a vendor means adding one adapter and one enum member;
-   * nothing else in the application changes, because nothing else knows a
-   * provider exists.
+   * `none` selects the deterministic grounded composer — a real offline answer
+   * composer, not a stub that returns a fixture. It keeps the whole pipeline
+   * (authorization, retrieval, citation validation, refusal, quota) live and
+   * testable with no vendor account, which is why it stays the default and why
+   * the entire automated suite runs on it.
    *
-   * `AI_API_KEY` is read by config and never reaches this switch, so a
-   * credential cannot be logged from here even by accident.
+   * THE VENDOR SDK IS IMPORTED LAZILY, and that is not a performance tweak. A
+   * static import would load a vendor's code into every process this platform
+   * runs — migrations, tests, a deployment configured with `none` — none of
+   * which has any business holding it. With a dynamic import, a deployment that
+   * has not opted in never loads the SDK at all, and the credential check in
+   * `config.ts` has already refused to boot if a provider was named without a
+   * key.
+   *
+   * Adding a second vendor means one more arm and one more sibling adapter.
+   * Nothing else in the application changes, because nothing else knows a
+   * provider exists.
    */
-  const aiProvider = createGroundedComposer();
+  const aiProvider = await (async () => {
+    if (config.AI_PROVIDER === 'none') return createGroundedComposer();
+
+    const apiKey = config.AI_API_KEY;
+    if (apiKey === undefined || apiKey === '') {
+      // Unreachable: the configuration schema already refuses to start when a
+      // provider is named without a credential. Kept as a narrowing that is
+      // also a second gate — an adapter constructed with an empty key would
+      // fail on a child's first question instead of at boot, and this is the
+      // last place that can still be a startup error.
+      throw new Error('AI_PROVIDER is set but AI_API_KEY is missing — refusing to start.');
+    }
+
+    const { createAnthropicAdapter } = await import('./platform/ai/anthropic.adapter.ts');
+    return createAnthropicAdapter({
+      apiKey,
+      model: config.AI_MODEL,
+      maxOutputTokens: config.AI_MAX_OUTPUT_TOKENS,
+      timeoutMs: config.AI_TIMEOUT_MS,
+    });
+  })();
 
   const assistant = createAssistantService({
     db,

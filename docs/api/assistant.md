@@ -182,3 +182,14 @@ that quotes retrieved passages and cites exactly what it quoted. The whole
 pipeline — authorization, retrieval, citation validation, refusal, quota — is
 live and testable with no vendor account and no network. A missing key costs
 fluency, never safety.
+
+With `AI_PROVIDER=anthropic` the same pipeline runs with a real model composing
+the answer. Nothing else changes: the same authorization runs before retrieval,
+the same citation intersection runs after the answer, and the same server
+decides grounding. **The provider is an untrusted external dependency** — its
+claimed citations, its grounding claim, its error text and its output shape are
+each validated or discarded. See
+[`docs/security/ai-security.md`](../security/ai-security.md) §4b.
+
+The provider is never named in a response, and a provider failure is never
+distinguishable by a client from any other failure.

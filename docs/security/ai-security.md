@@ -1,12 +1,18 @@
 # AI Security Architecture
 
-> **STATUS: PARTIALLY IMPLEMENTED (Task 013).**
+> **STATUS: PARTIALLY IMPLEMENTED (Tasks 013-014).**
 >
 > **What exists:** one endpoint — `POST /api/v1/assistant/ask` — with a provider
 > abstraction, authorization-filtered retrieval over live curriculum rows,
-> server-validated citations, per-actor quota, and a read-only guarantee. It runs
-> against a deterministic offline composer; **no model-backed adapter has been
-> written, configured, or tested.**
+> server-validated citations, per-actor quota, and a read-only guarantee. Task
+> 014 added **one real provider adapter** (Anthropic), a server-owned deadline,
+> output validation, and vendor-error normalization.
+>
+> **What has NOT been done:** no live provider call has ever been made from this
+> repository. No credential exists in the development environment, so the
+> adapter is exercised against the real SDK over a stubbed transport and the
+> default provider remains the offline composer. **Real provider behaviour is
+> untested.** See §6.
 >
 > **What does not exist:** the AI Tutor, the general-purpose AI Assistant, the
 > multi-product gateway, conversations, tools, embeddings, a vector store, and
@@ -349,9 +355,112 @@ to the composer and not to a future model-backed adapter**, which is exactly why
 the injection tests assert on _what reaches the provider_ and on _what survives
 citation validation_, not on the composer's own good behaviour. See RISK-AI-01.
 
-`AI_PROVIDER` is currently `z.enum(['none'])`. Adding a vendor means adding a
-value and an adapter; the enum makes an unconfigured deployment fail at startup
-rather than at the first question.
+---
+
+## 4b. The real adapter (Task 014)
+
+`AI_PROVIDER` is `z.enum(['none', 'anthropic'])`. `none` stays the default and
+stays the mode the entire automated suite runs in.
+
+**Anthropic, via `@anthropic-ai/sdk`, in one file**:
+`apps/api/src/platform/ai/anthropic.adapter.ts`. Nothing else in the repository
+imports the SDK, and `apps/web` may not even name it — asserted structurally
+(§5, rule 2). The SDK is imported **dynamically**, so a deployment running
+`none` never loads vendor code at all.
+
+### What the adapter sends
+
+| Part      | Contents                                                       | Position             |
+| --------- | -------------------------------------------------------------- | -------------------- |
+| `system`  | The server's fixed instructions, passed through untouched      | Instruction position |
+| user text | The learner's question                                         | Data position        |
+| user text | Retrieved passages, each inside a **per-request random fence** | Data position        |
+
+Nothing is concatenated across those boundaries. `buildRequest` is a pure
+exported function so a test can serialize the exact body and assert what is
+**not** in it: no email, no session token, no password material, no database
+URL, no learner id, no organization id, no platform role, no assessment data.
+
+The fence is `SOURCE-<uuid>`, regenerated per request. A fixed delimiter invites
+an author to write the closing marker into a lesson body; a random one cannot be
+written in advance. **This is a mitigation, not a boundary** — it makes the
+model harder to steer, and it is not what stops a learner reading another
+school's lesson. Authorization already did that, before retrieval.
+
+### What the adapter refuses to believe
+
+Every one of these ends as a clean `unavailable` for the learner:
+
+| Condition                                | Result                                     |
+| ---------------------------------------- | ------------------------------------------ |
+| Response body over 64,000 chars          | rejected **before** parsing                |
+| Not valid JSON / not a message at all    | rejected (`SyntaxError` mapped explicitly) |
+| Missing, null, or non-string `answer`    | rejected                                   |
+| `citedSourceIds` not an array of strings | rejected                                   |
+| Any unexpected field (`.strict()`)       | rejected                                   |
+| Answer over 20,000 chars                 | **rejected, not truncated**                |
+| Over 64 claimed citations                | rejected                                   |
+| Empty or absurdly long citation ids      | dropped, the rest kept                     |
+| `stop_reason: "refusal"`                 | `content_declined`                         |
+
+An oversized answer is rejected rather than truncated because a truncated answer
+looks like a complete one, and an honest refusal is always available.
+
+### No vendor text escapes
+
+Every message thrown by the adapter is a constant written in the adapter.
+`error.message` is never read, wrapped, or logged. This is not tidiness: a
+provider 400 can quote the prompt back, and the prompt contains a child's
+question — which this platform deliberately does not log.
+
+| Vendor failure                      | Kind               |
+| ----------------------------------- | ------------------ |
+| Timeout / caller abort              | `timeout`          |
+| Connection failure                  | `unavailable`      |
+| 429                                 | `rate_limited`     |
+| Other 4xx (400, 401, 403, 404, 422) | `invalid_response` |
+| 5xx                                 | `unavailable`      |
+| Unparseable body                    | `invalid_response` |
+| Model declined                      | `content_declined` |
+| Anything else                       | `unavailable`      |
+
+A 401 is the platform's credential being wrong, not the learner being wrong. It
+normalizes like any other failure: the learner is told to try again, and the
+fact that the deployment's key is bad is not broadcast to a child.
+
+### Deadline, retries, streaming, tools
+
+- **The deadline is owned by the service, not the adapter.** `callWithDeadline`
+  passes an `AbortSignal` down _and_ races the promise against a timer — so a
+  provider that ignores the signal entirely still returns on time. A test drives
+  the service with an adapter that never settles and asserts the request
+  completes. A control that only works when the layer below cooperates is not a
+  control.
+- **SDK retries are off** (`maxRetries: 0`). Three reasons pointing the same
+  way: the per-actor quota counts one request, so silent retries would make the
+  quota lie about money; `timeout` is per attempt, so retries would make
+  `AI_TIMEOUT_MS` not mean what its name says; and a provider having a bad
+  minute should see load fall, not triple. The learner already has a retry
+  button — the decision stays with the person.
+- **No streaming** (`stream: false`). Every response must pass citation
+  validation and the size checks as a whole before a learner sees any of it, and
+  a rendered stream cannot be withdrawn.
+- **No tools.** Not a rule telling the model to behave — the absence of any
+  tool definition. The model cannot publish a lesson, record progress, reach
+  another learner or touch the network, because there is nothing to call.
+
+### Model configuration
+
+Server-side, allowlisted (`platform/ai/models.ts`), validated at boot. There is
+no request field for `model`, `provider`, `temperature`, `maxTokens`,
+`systemPrompt`, `instructions`, `effort` or `stream`, and sending one is a
+`400` — they are unrepresentable, not filtered. Effort is a module constant
+(`low`): the task is comprehension of supplied passages, and thinking stays
+**on**, because disabling it is a documented source of stray reasoning text in
+the visible answer.
+
+Naming a provider without a credential is a **startup failure**, not a runtime
+one.
 
 ---
 
@@ -391,6 +500,8 @@ lives: in the source.
 | `tests/unit/ai-provider.test.ts`           | 9     | The composer cites only what it quoted, refuses when nothing matches, and never reads `instructions`.                                                                                                     |
 | `tests/architecture/ai-boundaries.test.ts` | 20    | The four structural rules above.                                                                                                                                                                          |
 | `tests/web/assistant-panel.test.tsx`       | 14    | The client renders the server's grounding, executes no model output, and sends nothing identifying.                                                                                                       |
+| `tests/unit/anthropic-adapter.test.ts`     | 53    | **Task 014.** The real SDK over a stubbed transport: wire payload, request separation, malformed output, every HTTP status, timeout, retry count, hostile source text.                                    |
+| `tests/unit/config.test.ts` (AI section)   | 12    | **Task 014.** Boot refusals for a missing credential, an unknown model and out-of-range numbers; the environment allowlist matches the schema.                                                            |
 
 **Defect injection — ten defects, ten detected.** Each was injected into the
 real implementation, the suite was run, and the implementation was restored.
@@ -409,6 +520,57 @@ real implementation, the suite was run, and the implementation was restored.
 | F10 | Provider's claimed citations trusted verbatim            | 3 unit tests                                  |
 
 F4 is the finding of the round and is recorded as VULN-036.
+
+**Task 014 — ten more defects, ten detected.** Same method: injected into the
+real implementation, suite run, implementation restored.
+
+| #   | Defect                                                       | Detected by                       |
+| --- | ------------------------------------------------------------ | --------------------------------- |
+| F1  | Application imports the vendor SDK directly                  | 1 architecture test               |
+| F2  | Client-supplied `model` accepted                             | 1 security test (+1 added, below) |
+| F3  | Provider's `groundedInSources` trusted                       | 3 unit tests                      |
+| F4  | Unknown citation id falls back to a real chunk               | 3 unit tests                      |
+| F5  | Vendor error text and status wrapped into the failure        | 1 unit test                       |
+| F6  | Key exposed as `VITE_*`, and dropped from the redaction list | 4 tests (2 web, 2 server)         |
+| F7  | Response validation skipped ("the API enforces the schema")  | 10 unit tests                     |
+| F8  | Retrieval widened past the authorized course                 | 10+ security tests                |
+| F9  | Timeout removed — service deadline **and** adapter abort     | 4 tests (3 + 1)                   |
+| F10 | Model output writes lesson progress                          | 1 security test                   |
+
+**One test was strengthened during the round.** F2 was caught, but an adapter
+test whose comment claimed "the request has no model field" was checking a
+fixture defined in the test file rather than the contract — so adding `model` to
+the public contract left it green. It now reads the contract source and checks
+eleven provider knobs, and fails under F2 as it always should have.
+
+**And one defect was found that was not injected.** Writing the configuration
+tests revealed that `AI_PROVIDER`, `AI_API_KEY` and `AI_TIMEOUT_MS` had never
+been read from the environment at all: `loadConfig` uses an explicit allowlist
+and Task 013 never added them to it. Recorded as VULN-037.
+
+### Task 014 — the adapter, against a stubbed transport
+
+`tests/unit/anthropic-adapter.test.ts` (52 tests) injects a `fetch` into the
+**real SDK**, so the real request assembly, the real response parsing and the
+real error classes run against crafted HTTP responses. When a test asserts a
+429 becomes `rate_limited`, it proves `Anthropic.RateLimitError` was actually
+constructed and matched — not that a mock said so.
+
+Covered: the exact wire payload (privacy), the three-part separation, the random
+fence, no tools, no streaming, the allowlisted model, every malformed-output
+case in the table above, every HTTP status, the abort signal, one-call-per-
+request, seven shapes of hostile source text, and a guard that the JSON schema
+sent to the API and the Zod schema used to validate it cannot drift.
+
+`tests/unit/assistant-service.test.ts` adds the deadline tests: an adapter that
+never settles, ignores `timeoutMs` and ignores the signal still returns
+`unavailable` on time.
+
+**REAL PROVIDER BEHAVIOUR IS NOT TESTED.** No credential exists in this
+environment and no live call has ever been made from this repository. Everything
+above is about how the platform treats a provider's output — which is exactly
+the half that has to hold when the model misbehaves, and exactly the half that
+does not depend on the model being good. It is not a claim about the model.
 
 **Driven against a booted server.** `tools/live-check/seed-assistant.ts` seeds
 two schools; the run then proved over real HTTP that a cross-school lesson id, a
@@ -432,10 +594,23 @@ on a single-common-word match — no leak, but a wrong label (RISK-AI-09).
 ## 7. Risks and limitations
 
 Recorded in full in [`limitations.md`](./limitations.md) as **RISK-AI-01**
-through **RISK-AI-08**. In short: no real model has been run; `simple` FTS
-cannot match Arabic morphological variants; retrieval is course-scoped by
-design; the quota is per-process; and questions are deliberately not logged, so
-there is no record with which to investigate abuse.
+through **RISK-AI-15**.
+
+From Task 013: `simple` FTS cannot match Arabic morphological variants;
+retrieval is course-scoped by design; the quota is per-process; questions are
+deliberately not logged, so there is no record with which to investigate abuse;
+and a passage matching a single common word can still be labelled
+`course_material` (RISK-AI-09), which is the one place where the honesty
+property is weaker than the security property.
+
+Task 014 adds six, and the first is the one that matters: **no live provider
+call has ever been made from this repository** (RISK-AI-10), so the first one in
+production is an untested path (RISK-AI-11) and the request shape has never met
+a real `200` (RISK-AI-12). Retries are off by design, so a transient blip is a
+visible failure (RISK-AI-13); a model refusal is deliberately indistinguishable
+from an outage to the learner (RISK-AI-14); and there is no prompt caching
+(RISK-AI-15). The cost-ceiling gap (RISK-AI-07) is materially more serious now
+that the spend is real.
 
 ---
 

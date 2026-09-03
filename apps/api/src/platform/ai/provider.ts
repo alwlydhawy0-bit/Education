@@ -51,6 +51,19 @@ export interface AiRequest {
   readonly sources: readonly AiSource[];
   /** Hard deadline in milliseconds. */
   readonly timeoutMs: number;
+  /**
+   * Aborts the call when the server's own deadline fires.
+   *
+   * ADDED IN TASK 014. `timeoutMs` alone lets an adapter decide how long to
+   * wait, which means a buggy or negligent adapter could hold a request open
+   * indefinitely — and the caller could do nothing about it. The signal moves
+   * the decision to the CALLER: the service sets the deadline, and an adapter
+   * that honours the signal closes the socket rather than leaving the work
+   * running after everyone stopped caring.
+   *
+   * Optional because a synchronous provider has nothing to abort.
+   */
+  readonly signal?: AbortSignal;
 }
 
 export interface AiCompletion {
@@ -77,10 +90,31 @@ export interface AiCompletion {
  *
  * A closed set on purpose. Provider errors are vendor-shaped, chatty, and
  * occasionally contain fragments of the request — none of which may reach a
- * learner or a log. Every adapter maps its own failures onto these four, and
- * the service maps all four onto one message for the client.
+ * learner or a log. Every adapter maps its own failures onto these five, and
+ * the service maps all five onto ONE message for the client — the distinction
+ * exists for the operator reading security events, never for the caller.
  */
-export type AiFailureKind = 'timeout' | 'unavailable' | 'rate_limited' | 'invalid_response';
+export type AiFailureKind =
+  | 'timeout'
+  | 'unavailable'
+  | 'rate_limited'
+  | 'invalid_response'
+  /**
+   * The model declined to answer.
+   *
+   * ADDED IN TASK 014, because a real provider has a state the offline composer
+   * does not: a safety classifier can decline. It needs its own kind rather
+   * than being folded into `unavailable`, for a reason that is about honesty
+   * to a child rather than about taxonomy.
+   *
+   * Folding it into `insufficient` would tell a learner "your material does not
+   * cover this", which is false. Folding it into `unavailable` would tell an
+   * OPERATOR that the provider was down, which is also false. The learner sees
+   * the same neutral message either way — they must not be able to tell the
+   * difference, or the assistant becomes a classifier oracle — while the
+   * security event records which it was.
+   */
+  | 'content_declined';
 
 export class AiProviderError extends Error {
   readonly kind: AiFailureKind;

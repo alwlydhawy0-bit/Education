@@ -65,3 +65,44 @@ node --experimental-strip-types tools/live-check/seed-assistant.ts
 
 The results of all three runs are recorded under "What was actually verified" in
 `docs/security/limitations.md`.
+
+## Task 014 — the first live provider call
+
+**Not performed.** No provider credential exists in this development
+environment, so no request has ever been made to a real model from this
+repository. The adapter is exercised against the real SDK over a stubbed
+transport (`tests/unit/anthropic-adapter.test.ts`), which proves how the
+platform treats a provider's output and proves nothing about the model.
+
+When a credential does exist, the first live call is a deployment step with its
+own verification, not a configuration change. Run it on a development database,
+with the seed above, and treat a surprise as a blocker:
+
+```sh
+export AI_PROVIDER=anthropic
+export AI_API_KEY='<the credential>'   # server-side only; never a VITE_ variable
+export AI_MODEL=claude-opus-5          # allowlisted; an unknown value refuses to boot
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/main.ts
+
+# 1. An authorized question, against the learner's own lesson.
+#    Expect 200, grounding=course_material, and EVERY source naming a lesson of
+#    that learner's own course.
+# 2. An irrelevant question ("explain photosynthesis" against a cell lesson).
+#    Expect insufficient — NOT a confident answer from general knowledge.
+# 3. A prompt injection, in the question and in a lesson body.
+#    Expect no other school's marker word, no answer key, no system prompt.
+# 4. A malformed/edge question (one word, punctuation only, 1,000 characters).
+# 5. A failure: point AI_TIMEOUT_MS at 1000 and confirm the learner sees the
+#    ordinary "unavailable" state and the log carries ai.provider_failed with a
+#    kind and nothing else.
+# 6. Citations: check every returned source id against what the lesson actually
+#    contains. A citation naming something not retrieved is a BLOCKER, not a
+#    quality issue — though the server should already have dropped it.
+#
+# Then search the log for the question text, the answer text, the API key, the
+# system instructions and any vendor error string. None should appear.
+```
+
+Record what actually happened, including anything that did not match the
+expectations above. A live run that is not written down is a live run that was
+not performed.

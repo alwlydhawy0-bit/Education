@@ -31,12 +31,12 @@ product decision that Phase 0 does **not** pre-empt.
 | Language        | TypeScript 5.7, strict (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `verbatimModuleSyntax`) |
 | Package manager | pnpm 10.33 workspace                                                                                      |
 | Backend         | Fastify 5                                                                                                 |
-| Frontend        | React 18 + Vite 7, no framework beyond that                                                               |
+| Frontend        | React 18 + Vite 7.3.6 in `apps/web` (Vite 8.2.2 at the root, for Vitest)                                  |
 | Database        | PostgreSQL 16, `pg` driver, hand-written SQL migrations (23)                                              |
 | Validation      | Zod 3 (`.strict()` throughout)                                                                            |
 | AI              | `@anthropic-ai/sdk` 0.123, confined to `apps/api/src/platform/ai/`                                        |
 | Auth            | Opaque server-side sessions, Argon2id (`@node-rs/argon2`)                                                 |
-| Tests           | Vitest 5, six projects, 2,047 tests                                                                       |
+| Tests           | Vitest 4.1.11, six projects, 2,047 tests                                                                  |
 | CI              | GitHub Actions — `ci.yml`, `codeql.yml`                                                                   |
 | Deploy          | `vercel.json` builds the web client only. **No API deployment exists.**                                   |
 

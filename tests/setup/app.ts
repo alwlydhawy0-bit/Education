@@ -1,5 +1,6 @@
 import { loadConfig } from '../../apps/api/src/platform/config.ts';
 import { buildApp, type BuiltApp } from '../../apps/api/src/app.ts';
+import type { AiProvider } from '../../apps/api/src/platform/ai/provider.ts';
 import { createLogger, createMemorySink, type LogRecord } from '@edu/observability';
 import type { MailDelivery } from '../../apps/api/src/modules/identity/mail-delivery.ts';
 import { TEST_APP_URL } from './env.ts';
@@ -35,7 +36,19 @@ export interface TestApp extends BuiltApp {
   readonly mail: CapturedMail[];
 }
 
-export async function buildTestApp(overrides: Record<string, string> = {}): Promise<TestApp> {
+export async function buildTestApp(
+  overrides: Record<string, string> = {},
+  /**
+   * An AI provider to use instead of the configured one.
+   *
+   * Exists for the assertions that are about what a provider RECEIVES —
+   * above all the negative one: that a request refused by authorization never
+   * reaches a provider at all. Over HTTP that is invisible without it, because
+   * a 404 looks the same whether the provider was skipped or called and
+   * ignored.
+   */
+  aiProvider?: AiProvider,
+): Promise<TestApp> {
   const { sink, records } = createMemorySink();
   const config = loadConfig({
     NODE_ENV: 'test',
@@ -61,6 +74,7 @@ export async function buildTestApp(overrides: Record<string, string> = {}): Prom
     config,
     logger: createLogger({ level: 'debug', sink }),
     mail: capturingMail,
+    ...(aiProvider ? { aiProvider } : {}),
   });
   return { ...built, logs: records, mail };
 }

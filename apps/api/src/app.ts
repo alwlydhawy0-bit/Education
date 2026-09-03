@@ -40,7 +40,7 @@ import { registerMasteryRoutes } from './modules/mastery/mastery.routes.ts';
 import { createAssistantRepository } from './modules/assistant/assistant.repository.ts';
 import { createAssistantService } from './modules/assistant/assistant.service.ts';
 import { registerAssistantRoutes } from './modules/assistant/assistant.routes.ts';
-import { createGroundedComposer } from './platform/ai/provider.ts';
+import { createGroundedComposer, type AiProvider } from './platform/ai/provider.ts';
 import { assessmentRepository } from './modules/assessment/assessment.repository.ts';
 import { createAssessmentService } from './modules/assessment/assessment.service.ts';
 import { registerAssessmentRoutes } from './modules/assessment/assessment.routes.ts';
@@ -77,6 +77,21 @@ export interface BuildAppOptions {
    * testable — which would itself be an account-takeover vulnerability.
    */
   readonly mail?: MailDelivery;
+  /**
+   * Overrides the AI provider. Same purpose as `mail` above, and the same
+   * precedent: some guarantees can only be proved by observing what a
+   * collaborator RECEIVES.
+   *
+   * The one this exists for is negative — that a request refused by
+   * authorization never reaches a provider at all. Over HTTP that is otherwise
+   * invisible: a 404 looks identical whether the provider was skipped or
+   * called and ignored, and the difference is the whole property. A counting
+   * provider makes it observable.
+   *
+   * Production never passes this; `app.ts` selects the provider from
+   * configuration when it is absent.
+   */
+  readonly aiProvider?: AiProvider;
 }
 
 export interface BuiltApp {
@@ -292,7 +307,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
    * Nothing else in the application changes, because nothing else knows a
    * provider exists.
    */
-  const aiProvider = await (async () => {
+  const aiProvider = await (async (): Promise<AiProvider> => {
+    if (options.aiProvider) return options.aiProvider;
     if (config.AI_PROVIDER === 'none') return createGroundedComposer();
 
     const apiKey = config.AI_API_KEY;
@@ -311,6 +327,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
       model: config.AI_MODEL,
       maxOutputTokens: config.AI_MAX_OUTPUT_TOKENS,
       timeoutMs: config.AI_TIMEOUT_MS,
+      baseURL: config.AI_BASE_URL,
     });
   })();
 

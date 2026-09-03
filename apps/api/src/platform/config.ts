@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ALLOWED_AI_MODELS, DEFAULT_AI_MODEL } from './ai/models.ts';
+import { ALLOWED_AI_MODELS, DEFAULT_AI_BASE_URL, DEFAULT_AI_MODEL } from './ai/models.ts';
 
 /**
  * Centralized configuration.
@@ -81,6 +81,7 @@ const CONFIG_KEYS = [
   'AI_API_KEY',
   'AI_MODEL',
   'AI_MAX_OUTPUT_TOKENS',
+  'AI_BASE_URL',
   'AI_TIMEOUT_MS',
 ] as const;
 
@@ -162,6 +163,29 @@ const configSchema = z
      * value can be typed in by accident.
      */
     AI_MAX_OUTPUT_TOKENS: z.coerce.number().int().min(256).max(8_192).default(2_048),
+
+    /**
+     * WHERE PROVIDER REQUESTS GO. Pinned, validated, server-side.
+     *
+     * Exists because the vendor SDK silently defaults this to
+     * `ANTHROPIC_BASE_URL`, which meant the destination of credential-bearing
+     * requests was decided by an ambient variable nothing in this application
+     * read (VULN-038). Naming it here makes the destination an explicit,
+     * validated, reviewable configuration value with a safe default.
+     *
+     * `https://` is required, because the alternative is the platform's
+     * credential and a child's coursework travelling in plaintext. It is
+     * settable for the deployments that legitimately need it — an enterprise
+     * gateway, a regional endpoint — and every such deployment is now a
+     * deliberate, visible decision instead of an accident.
+     */
+    AI_BASE_URL: z
+      .string()
+      .url()
+      .refine((url) => url.startsWith('https://'), {
+        message: 'AI_BASE_URL must be https:// — refusing to send a credential over plaintext.',
+      })
+      .default(DEFAULT_AI_BASE_URL),
 
     /**
      * PRIVATE. A provider credential.

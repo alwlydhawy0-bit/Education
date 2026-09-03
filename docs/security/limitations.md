@@ -11,8 +11,9 @@ repository.** 1,893 automated tests passed against a real PostgreSQL database.
 That establishes that specific, enumerated properties held at a point in time. It
 does not establish the absence of vulnerabilities.
 
-A second sentence has to be read as carefully as the first, and Task 014 does
-not change it: **no language model has ever been run against this code.** Task
+A second sentence has to be read as carefully as the first, and neither Task 014
+nor Task 015 changes it: **no language model has ever been run against this
+code.** Task 015 attempted exactly that and stopped at the credential gate. Task
 014 connects a real provider adapter, but no credential exists in this
 environment and no live call has ever been made. The AI claims in this
 repository are claims about the pipeline around a provider — authorization,
@@ -259,6 +260,53 @@ the current state.
   file. It is recorded because shipping source maps to production is a
   disclosure decision that was never explicitly made, and it is out of this
   task's scope to change.
+
+## Added in Task 015
+
+- **THE FIRST LIVE PROVIDER CALL WAS ATTEMPTED AND DID NOT HAPPEN.** Verified
+  2026-09-03 against commit `ca3379e`: the application's `AI_API_KEY` was absent
+  from both the process environment and `.env`. The gate stopped there and
+  nothing was substituted — in particular not the Claude Code harness's own
+  Anthropic configuration, which IS present in this container. That credential
+  belongs to the harness, not to this application; spending it would have proved
+  nothing about this platform while producing a report that read as though it
+  had. **RISK-AI-10, RISK-AI-11 and RISK-AI-12 all remain open and unchanged.**
+- **What the attempt did establish** is narrower and worth stating exactly: the
+  twenty-two non-live rows of the go-live checklist in `ai-security.md` §4c pass
+  in the automated suite. The two that cannot pass without a credential are
+  "a credential exists" and "a real model answers correctly, cites honestly, and
+  handles Arabic". Nothing in this repository speaks to the second.
+- **VULN-038 was found by the pre-flight, not by a test.** An ambient
+  `ANTHROPIC_BASE_URL` decided where every credential-bearing request went,
+  because the adapter passed a base URL only when given one and was never given
+  one. Fixed with a validated, https-only, pinned `AI_BASE_URL`. Recorded here
+  as well as in the vulnerability log because of what it says about the class:
+  **an optional field on a trust boundary is a decision delegated to whoever
+  fills it in**, and when the fallback is a third party's environment lookup,
+  "optional" means "ambient".
+- **A live run in this container would have been wrong, not just unproven.**
+  This is the sharpest single fact from the task. Had the credential been
+  present and had VULN-038 not been found first, the request would have gone to
+  the ambient host, returned something plausible, and been reported as a
+  successful Anthropic call. A verification that can silently verify the wrong
+  thing is worse than no verification, and only checking the destination
+  revealed it (RISK-AI-16).
+- **`AI_BASE_URL` is now a security-relevant setting an operator can get wrong.**
+  It is validated as an https URL and nothing more — it is not allowlisted to
+  known-good hosts, because a legitimate enterprise gateway or regional endpoint
+  cannot be enumerated in advance. An operator who points it at a hostile host
+  sends the credential and authorized coursework there. The control is
+  configuration review, not code (RISK-AI-17).
+- **The `aiProvider` test seam is a new injection point in `buildApp`.** It
+  exists so the "denied requests never reach the provider" property is provable
+  over HTTP, and it mirrors the existing `mail` seam exactly. Production never
+  passes it and the configured selection runs when it is absent — but it is one
+  more way a future caller could substitute behaviour, and it is recorded rather
+  than left implicit.
+- **Everything Task 014 recorded remains true and unresolved**, including that
+  the per-actor quota is not a financial control (RISK-AI-07), that retries are
+  deliberately off (RISK-AI-13), and that questions are not logged so abuse
+  cannot be investigated (RISK-AI-06).
 
 ## Added in Task 014
 

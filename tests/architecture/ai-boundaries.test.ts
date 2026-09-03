@@ -205,6 +205,61 @@ describe('rule 2 — the vendor SDK is confined to platform/ai', () => {
   });
 });
 
+describe('rule 2a — only the composition root may CONSTRUCT a provider', () => {
+  /**
+   * ═══════════════════════════════════════════════════════════════════════════
+   * ADDED IN TASK 015, BECAUSE DEFECT F1 ESCAPED RULE 2
+   * ═══════════════════════════════════════════════════════════════════════════
+   *
+   * Rule 2 forbids the vendor SDK outside `platform/ai`. That is necessary and
+   * it is not sufficient, and the gap is easy to miss: a module can import the
+   * ADAPTER instead of the SDK, construct its own provider, and call it
+   * directly. No vendor import appears anywhere, rule 2 stays green, and the
+   * call has bypassed authorization, the server-owned deadline, the output
+   * validation, the citation intersection and the grounding decision — every
+   * control Task 013 and Task 014 exist to provide.
+   *
+   * The injected defect did exactly that and rule 2 passed. So the rule is
+   * about CONSTRUCTION, not just about imports: providers are built once, in
+   * the composition root, and handed to modules that only ever see the
+   * `AiProvider` interface. A module that can build one can bypass everything
+   * wrapped around one.
+   */
+  const FACTORIES = ['createAnthropicAdapter', 'createGroundedComposer'];
+
+  /** The composition root, plus the AI boundary that defines them. */
+  const ALLOWED = ['apps/api/src/app.ts', 'apps/api/src/platform/ai'];
+
+  it.each(FACTORIES)('%s is constructed only in the composition root', (factory) => {
+    for (const file of sourceFiles('apps/api/src')) {
+      const relative = file.slice(ROOT.length + 1);
+      if (ALLOWED.some((allowed) => relative.startsWith(allowed))) continue;
+      expect({ file: relative, uses: readFileSync(file, 'utf8').includes(factory) }).toEqual({
+        file: relative,
+        uses: false,
+      });
+    }
+  });
+
+  it('and the composition root DOES construct one', () => {
+    // The mirror assertion. Without it the rule above passes with the whole
+    // feature deleted.
+    const app = read('apps/api/src/app.ts');
+    for (const factory of FACTORIES) expect(app).toContain(factory);
+  });
+
+  it('the assistant module receives a provider and never builds one', () => {
+    // Stated separately because this is the module an author would most
+    // plausibly "just add a provider" to.
+    const assistantSource = sourceFiles('apps/api/src/modules/assistant')
+      .map((file) => readFileSync(file, 'utf8'))
+      .join('\n');
+    for (const factory of FACTORIES) expect(assistantSource).not.toContain(factory);
+    // It takes one as a dependency instead.
+    expect(assistantSource).toMatch(/provider: AiProvider|readonly provider: AiProvider/);
+  });
+});
+
 describe('rule 2b — the model can reach nothing', () => {
   const adapter = read('apps/api/src/platform/ai/anthropic.adapter.ts');
 

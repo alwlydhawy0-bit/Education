@@ -66,9 +66,33 @@ node --experimental-strip-types tools/live-check/seed-assistant.ts
 The results of all three runs are recorded under "What was actually verified" in
 `docs/security/limitations.md`.
 
-## Task 014 — the first live provider call
+## Task 014/015 — the first live provider call
 
-**Not performed.** No provider credential exists in this development
+**Attempted in Task 015 on 2026-09-03 against commit `ca3379e`. NOT PERFORMED —
+blocked at the credential gate.**
+
+`AI_API_KEY` was absent from the process environment and from `.env`. Presence
+was checked as a boolean; no value, length or prefix was read. Nothing was
+substituted — in particular not the Claude Code harness's own Anthropic
+configuration, which is present in this container but is not this application's
+credential.
+
+**Before running the procedure below, check where requests would actually go.**
+The pre-flight found VULN-038: an ambient `ANTHROPIC_BASE_URL` was choosing the
+destination for every credential-bearing request, so a "live verification" run
+here would have reached that host and reported success. `AI_BASE_URL` now pins
+it. Confirm the value you expect:
+
+```sh
+node -e 'console.log(require("./apps/api/src/platform/config.ts"))' # or simply:
+grep AI_BASE_URL .env
+```
+
+The full go-live checklist is in `docs/security/ai-security.md` §4c. Twenty-two
+of its twenty-four rows are covered by the automated suite; the two that are not
+are "a credential exists" and "a real model answers correctly".
+
+**Original Task 014 note.** No provider credential exists in this development
 environment, so no request has ever been made to a real model from this
 repository. The adapter is exercised against the real SDK over a stubbed
 transport (`tests/unit/anthropic-adapter.test.ts`), which proves how the

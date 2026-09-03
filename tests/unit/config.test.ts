@@ -223,6 +223,24 @@ describe('AI provider configuration', () => {
     }
   });
 
+  it('pins the provider destination, and requires https', () => {
+    // VULN-038. The destination of a credential-bearing request is a security
+    // decision, so it is a validated configuration value with a safe default
+    // rather than whatever `ANTHROPIC_BASE_URL` happens to say.
+    expect(loadConfig({ ...base }).AI_BASE_URL).toBe('https://api.anthropic.com');
+    expect(loadConfig({ ...base, AI_BASE_URL: 'https://gateway.example.com' }).AI_BASE_URL).toBe(
+      'https://gateway.example.com',
+    );
+    for (const bad of [
+      'http://gateway.example.com', // plaintext: the credential would travel in clear
+      'not-a-url',
+      'ftp://example.com',
+      '',
+    ]) {
+      expect(() => loadConfig({ ...base, AI_BASE_URL: bad })).toThrow();
+    }
+  });
+
   it('never places the provider credential in the public config', () => {
     const config = loadConfig({
       ...base,
@@ -308,6 +326,7 @@ describe('the environment allowlist and the schema cannot disagree', () => {
       'AI_API_KEY',
       'AI_MODEL',
       'AI_MAX_OUTPUT_TOKENS',
+      'AI_BASE_URL',
       'AI_TIMEOUT_MS',
     ]) {
       expect({ key, read: allowlisted.has(key) }).toEqual({ key, read: true });

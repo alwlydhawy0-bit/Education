@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import type { AllowedAiModel } from './models.ts';
+import { DEFAULT_AI_BASE_URL, type AllowedAiModel } from './models.ts';
 import {
   AiProviderError,
   type AiCompletion,
@@ -124,6 +124,16 @@ export interface AnthropicAdapterOptions {
   /** Per-attempt deadline in milliseconds. With no retries, also the total. */
   readonly timeoutMs: number;
   /**
+   * Where requests are sent. REQUIRED, and required for a reason (VULN-038).
+   *
+   * The SDK falls back to `process.env.ANTHROPIC_BASE_URL` when this is
+   * absent, which put the destination of credential-bearing requests under the
+   * control of an ambient variable nothing here read or validated. Making it a
+   * required field means the caller must decide, the configuration layer
+   * validates it, and the ambient variable can never take effect.
+   */
+  readonly baseURL: string;
+  /**
    * TEST SEAM ONLY, and narrow on purpose.
    *
    * Injecting `fetch` lets the whole adapter — the real SDK, its real parsing
@@ -133,7 +143,6 @@ export interface AnthropicAdapterOptions {
    * hand-written imitation of it.
    */
   readonly fetch?: typeof globalThis.fetch;
-  readonly baseURL?: string;
 }
 
 export function createAnthropicAdapter(options: AnthropicAdapterOptions): AiProvider {
@@ -158,8 +167,22 @@ export function createAnthropicAdapter(options: AnthropicAdapterOptions): AiProv
      * to, and the decision stays with the person rather than with a loop.
      */
     maxRetries: 0,
+    /**
+     * ALWAYS EXPLICIT, and never behind a spread guard (VULN-038).
+     *
+     * `...(options.baseURL ? { baseURL: options.baseURL } : {})` is what this
+     * used to be, and it is the whole bug: an omitted base URL does not mean
+     * "use the default", it means "let `ANTHROPIC_BASE_URL` choose" — and the
+     * environment is not a party to a decision about where a credential and a
+     * child's coursework are sent.
+     *
+     * The field is REQUIRED, so a caller cannot omit it. The coalesce is the
+     * second layer, for the caller that reaches this from JavaScript or through
+     * a type assertion: even then the fallback is this platform's own default,
+     * never the environment's.
+     */
+    baseURL: options.baseURL ?? DEFAULT_AI_BASE_URL,
     ...(options.fetch ? { fetch: options.fetch } : {}),
-    ...(options.baseURL ? { baseURL: options.baseURL } : {}),
   });
 
   return {

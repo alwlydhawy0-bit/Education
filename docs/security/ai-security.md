@@ -14,6 +14,13 @@
 > default provider remains the offline composer. **Real provider behaviour is
 > untested.** See §6.
 >
+> **Task 015 attempted the first live call and stopped at the credential gate**
+> (2026-09-03, commit `ca3379e`). The application's `AI_API_KEY` was absent from
+> both the process environment and `.env`. No harness or ambient credential was
+> substituted — doing so would have proved nothing about this platform and would
+> have spent someone else's credential. Result: **BLOCKED — NO APPLICATION
+> CREDENTIAL.** The pre-flight checks did, however, find VULN-038 (§4c).
+>
 > **What does not exist:** the AI Tutor, the general-purpose AI Assistant, the
 > multi-product gateway, conversations, tools, embeddings, a vector store, and
 > every product surface described in the original design below. Sections marked
@@ -449,6 +456,22 @@ fact that the deployment's key is bad is not broadcast to a child.
   tool definition. The model cannot publish a lesson, record progress, reach
   another learner or touch the network, because there is nothing to call.
 
+### Where requests are sent (VULN-038)
+
+**Pinned, validated, and never inherited from the environment.** The vendor SDK
+defaults its base URL to `process.env.ANTHROPIC_BASE_URL`; Task 014's adapter
+passed one only when given one and was never given one, so an ambient variable
+decided where the platform's credential and a child's coursework were sent.
+
+`AI_BASE_URL` is now configuration: a validated URL, required to be `https://`,
+defaulting to `https://api.anthropic.com`. The adapter's `baseURL` is a
+**required** field passed unconditionally, with a coalesce to the platform
+default as a second layer for any caller that reaches it untyped.
+
+Found by probing the running adapter during the pre-flight checks for the first
+live call — the moment it mattered most, since the container running those
+checks sets that variable for unrelated reasons.
+
 ### Model configuration
 
 Server-side, allowlisted (`platform/ai/models.ts`), validated at boot. There is
@@ -461,6 +484,81 @@ the visible answer.
 
 Naming a provider without a credential is a **startup failure**, not a runtime
 one.
+
+---
+
+## 4c. Task 015 — the first-live-call gate
+
+**Attempted 2026-09-03, against commit `ca3379e`. Result: BLOCKED.**
+
+### The credential gate
+
+`AI_API_KEY` was absent from the process environment and from `.env`. Presence
+was checked as a boolean; no value, length, prefix or hash was read or printed.
+
+Nothing was substituted. Specifically **not** the Claude Code harness's own
+Anthropic configuration, which is present in this container: it is not this
+application's credential, spending it would prove nothing about this platform,
+and a report saying "live call succeeded" on the back of it would be false in
+the way that matters most.
+
+**A blocked first call is the correct outcome of a gate, not a failed task.**
+
+### What the pre-flight found
+
+The gate is worth running even when it stops you. Checking where a request would
+actually go turned up **VULN-038**: an ambient `ANTHROPIC_BASE_URL` silently
+chose the destination for every credential-bearing request. A live verification
+run in this container would have reached that host, returned a plausible answer,
+and been reported as a successful call to Anthropic.
+
+### The go-live checklist
+
+Every item below is verified in the automated suite **except the two marked
+`LIVE`**, which cannot be established without a credential. Re-run this before
+enabling a provider for the first time.
+
+| #   | Check                                                                          | Status                 |
+| --- | ------------------------------------------------------------------------------ | ---------------------- |
+| 1   | Application credential exists                                                  | **LIVE — absent here** |
+| 2   | Credential is server-side only, secret-bearing, absent from the bundle         | ✅                     |
+| 3   | Exactly one provider; no second vendor                                         | ✅                     |
+| 4   | SDK confined to `platform/ai`; only the composition root constructs a provider | ✅                     |
+| 5   | Model is server-selected and allowlisted                                       | ✅                     |
+| 6   | Output ceiling server-selected and range-validated                             | ✅                     |
+| 7   | Destination pinned to a validated `https://` URL                               | ✅                     |
+| 8   | Streaming disabled                                                             | ✅                     |
+| 9   | Retries disabled — one request, one upstream call                              | ✅                     |
+| 10  | No tools declared                                                              | ✅                     |
+| 11  | Authentication precedes the quota, which precedes the provider                 | ✅                     |
+| 12  | RLS active; application authorization active; both before retrieval            | ✅                     |
+| 13  | Only authorized passages reach the provider                                    | ✅                     |
+| 14  | Denied requests never reach the provider                                       | ✅                     |
+| 15  | Answer-key and assessment tables never read                                    | ✅                     |
+| 16  | No identity, credential or platform metadata on the wire                       | ✅                     |
+| 17  | Provider errors normalized; no vendor text escapes                             | ✅                     |
+| 18  | Citations validated against the retrieved set                                  | ✅                     |
+| 19  | Grounding server-decided                                                       | ✅                     |
+| 20  | Server-owned deadline holds even if the adapter ignores it                     | ✅                     |
+| 21  | Read-only: no platform state mutated                                           | ✅                     |
+| 22  | Frontend bundle carries no credential                                          | ✅                     |
+| 23  | Isolated test environment; before/after DB comparison possible                 | ✅                     |
+| 24  | Real provider answers correctly, cites honestly, handles Arabic                | **LIVE — unknown**     |
+
+Rows 1 and 24 are the whole of what remains. Everything else is a property of
+this platform and holds regardless of which model is behind the interface.
+
+### Proving the negative
+
+`tests/security/assistant-provider-gate.test.ts` exists for one assertion no
+other suite can make: **a refused request never reaches the provider.**
+
+Over HTTP a 404 looks identical whether the server refused before retrieval or
+called the provider, sent it another school's lesson, and discarded the answer.
+The difference is the entire point — in the second case the material has already
+left the building. So the app is built with a counting provider and the
+assertions are made where the boundary is: authorized request → one call with
+authorized passages only; every denied shape → **zero calls**.
 
 ---
 

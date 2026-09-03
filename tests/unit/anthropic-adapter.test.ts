@@ -5,7 +5,7 @@ import {
   buildRequest,
   createAnthropicAdapter,
 } from '../../apps/api/src/platform/ai/anthropic.adapter.ts';
-import { ALLOWED_AI_MODELS } from '../../apps/api/src/platform/ai/models.ts';
+import { ALLOWED_AI_MODELS, DEFAULT_AI_BASE_URL } from '../../apps/api/src/platform/ai/models.ts';
 import {
   AiProviderError,
   type AiFailureKind,
@@ -45,11 +45,14 @@ interface StubOptions {
   readonly raw?: string;
   readonly fail?: Error;
   readonly onRequest?: (body: Record<string, unknown>) => void;
+  /** Records the URL actually dialled, for the destination tests. */
+  readonly onUrl?: (url: string) => void;
 }
 
 /** A `fetch` that answers with whatever the test says, and records what it saw. */
 function stubFetch(options: StubOptions): typeof globalThis.fetch {
-  return (async (_url: string, init?: RequestInit) => {
+  return (async (url: string, init?: RequestInit) => {
+    if (options.onUrl) options.onUrl(String(url));
     if (options.onRequest) {
       options.onRequest(JSON.parse(String(init?.body ?? '{}')) as Record<string, unknown>);
     }
@@ -77,12 +80,13 @@ const messageWith = (content: unknown): unknown => ({
   usage: { input_tokens: 10, output_tokens: 10 },
 });
 
-const adapter = (options: StubOptions) =>
+const adapter = (options: StubOptions & { baseURL?: string } = {}) =>
   createAnthropicAdapter({
     apiKey: 'test-key-not-a-credential', // secret-scan-allow: literal test string, never a real key
     model: MODEL,
     maxOutputTokens: 2048,
     timeoutMs: 5_000,
+    baseURL: options.baseURL ?? DEFAULT_AI_BASE_URL,
     fetch: stubFetch(options),
   });
 
@@ -187,6 +191,51 @@ describe('the request body carries only authorized educational content', () => {
   it('never sends the credential in the body — it is a header concern', () => {
     const body = buildRequest(request(), MODEL, 2048);
     expect(JSON.stringify(body)).not.toContain('test-key-not-a-credential');
+  });
+
+  it('and the BYTES ACTUALLY SENT carry no credential either', async () => {
+    /**
+     * ═══════════════════════════════════════════════════════════════════════
+     * ASSERTED ON THE WIRE, NOT ON THE BUILDER
+     * ═══════════════════════════════════════════════════════════════════════
+     *
+     * The tests above check what `buildRequest` returns. Defect F7 showed why
+     * that is not enough: it added the credential to the body AFTER the builder
+     * returned, inside `generateAnswer`, and every builder-level assertion
+     * stayed green while the key went out over the wire.
+     *
+     * A privacy claim is a claim about what LEAVES the process, so it is
+     * asserted against the serialized body the transport actually received.
+     * Anything the adapter does between building and sending is inside this
+     * assertion; nothing is outside it.
+     */
+    let sent = '';
+    const seeing = createAnthropicAdapter({
+      apiKey: 'test-key-not-a-credential', // secret-scan-allow: literal test string
+      model: MODEL,
+      maxOutputTokens: 2048,
+      timeoutMs: 5_000,
+      baseURL: DEFAULT_AI_BASE_URL,
+      fetch: (async (_url: string, init?: RequestInit) => {
+        sent = String(init?.body ?? '');
+        return new Response(JSON.stringify(messageWith({ answer: 'ok', citedSourceIds: [] })), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        });
+      }) as unknown as typeof globalThis.fetch,
+    });
+
+    await seeing.generateAnswer(request());
+
+    expect(sent).not.toBe('');
+    expect(sent).toContain('ما هي وظيفة الميتوكوندريا؟'); // the request really was built
+    expect(sent).not.toContain('test-key-not-a-credential');
+    for (const forbidden of ['api_key', 'apiKey', 'x-api-key', 'authorization', 'Bearer']) {
+      expect({ forbidden, present: sent.includes(forbidden) }).toEqual({
+        forbidden,
+        present: false,
+      });
+    }
   });
 });
 
@@ -677,5 +726,120 @@ describe('the two schema declarations cannot drift', () => {
     expect(
       await failureKind({ body: messageWith({ answer: 'a', citedSourceIds: ['b'], extra: 1 }) }),
     ).toBe('invalid_response');
+  });
+});
+
+// =====================================================================
+// VULN-038 — the destination is pinned, not inherited from the environment
+// =====================================================================
+
+describe('where the request is actually sent', () => {
+  /** Runs one request and returns the origin the adapter dialled. */
+  async function destinationOf(baseURL?: string): Promise<string> {
+    let seen = '';
+    const options: StubOptions & { baseURL?: string } = {
+      body: messageWith({ answer: 'ok', citedSourceIds: [] }),
+      onUrl: (url) => {
+        seen = url;
+      },
+    };
+    if (baseURL !== undefined) options.baseURL = baseURL;
+    await adapter(options).generateAnswer(request());
+    return new URL(seen).origin;
+  }
+
+  it('sends to the configured base URL', async () => {
+    expect(await destinationOf()).toBe(DEFAULT_AI_BASE_URL);
+    expect(await destinationOf('https://gateway.example.test')).toBe(
+      'https://gateway.example.test',
+    );
+  });
+
+  it('IGNORES an ambient ANTHROPIC_BASE_URL', async () => {
+    /**
+     * ═══════════════════════════════════════════════════════════════════════
+     * THE REGRESSION TEST FOR VULN-038
+     * ═══════════════════════════════════════════════════════════════════════
+     *
+     * The vendor SDK defaults its base URL to this variable. Before the fix,
+     * the adapter passed a base URL only when given one and was never given
+     * one — so an ambient variable decided where the platform's credential and
+     * a child's coursework were sent, and nothing in the application read,
+     * validated or logged that decision.
+     *
+     * Found by probing the running adapter during the pre-flight checks for
+     * the first live call, which is exactly the moment it mattered: a "live
+     * verification" run in a container with this variable set would have
+     * reached somewhere else entirely and looked completely successful.
+     */
+    const original = process.env['ANTHROPIC_BASE_URL'];
+    process.env['ANTHROPIC_BASE_URL'] = 'https://ambient-redirect.example';
+    try {
+      expect(await destinationOf()).toBe(DEFAULT_AI_BASE_URL);
+    } finally {
+      if (original === undefined) delete process.env['ANTHROPIC_BASE_URL'];
+      else process.env['ANTHROPIC_BASE_URL'] = original;
+    }
+  });
+
+  it('the default destination is the official API over https', () => {
+    expect(DEFAULT_AI_BASE_URL).toBe('https://api.anthropic.com');
+  });
+
+  it('the adapter requires a base URL rather than defaulting to one', () => {
+    // A required field, so a caller cannot omit it and silently inherit the
+    // environment's choice. Asserted against the source because an optional
+    // property is a compile-time fact a runtime test cannot observe.
+    const raw = readFileSync(
+      resolve(import.meta.dirname, '../../apps/api/src/platform/ai/anthropic.adapter.ts'),
+      'utf8',
+    );
+    // Comments stripped first: this file EXPLAINS the old spread-guard bug in
+    // prose, and an assertion that cannot tell code from a comment about code
+    // would fail on the explanation rather than on the defect.
+    const adapterSource = raw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+
+    expect(adapterSource).toMatch(/readonly baseURL: string;/);
+    expect(adapterSource).not.toMatch(/readonly baseURL\?:/);
+    // Passed unconditionally, never behind a spread guard.
+    expect(adapterSource).not.toMatch(/\.\.\.\(options\.baseURL/);
+    expect(adapterSource).toMatch(/baseURL: options\.baseURL \?\? DEFAULT_AI_BASE_URL/);
+  });
+
+  it('does not inherit the environment even when a caller supplies nothing', async () => {
+    /**
+     * The behavioural half of the VULN-038 regression, and the reason it is
+     * written with a cast.
+     *
+     * The type system already refuses an omitted base URL, so a test that
+     * respects the types can only ever exercise the case where one WAS
+     * supplied — which is not the case that broke. This deliberately reaches
+     * the adapter the way a regressed caller would (plain JavaScript, or a
+     * type assertion) and asserts the fallback is this platform's own default
+     * rather than whatever the environment happens to say.
+     */
+    const original = process.env['ANTHROPIC_BASE_URL'];
+    process.env['ANTHROPIC_BASE_URL'] = 'https://ambient-redirect.example';
+    let seen = '';
+    try {
+      const careless = createAnthropicAdapter({
+        apiKey: 'test-key-not-a-credential', // secret-scan-allow: literal test string
+        model: MODEL,
+        maxOutputTokens: 2048,
+        timeoutMs: 5_000,
+        fetch: stubFetch({
+          body: messageWith({ answer: 'ok', citedSourceIds: [] }),
+          onUrl: (url) => {
+            seen = url;
+          },
+        }),
+      } as unknown as Parameters<typeof createAnthropicAdapter>[0]);
+
+      await careless.generateAnswer(request());
+      expect(new URL(seen).origin).toBe(DEFAULT_AI_BASE_URL);
+    } finally {
+      if (original === undefined) delete process.env['ANTHROPIC_BASE_URL'];
+      else process.env['ANTHROPIC_BASE_URL'] = original;
+    }
   });
 });

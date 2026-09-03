@@ -22,3 +22,29 @@ export const ALLOWED_AI_MODELS = ['claude-opus-5', 'claude-sonnet-5', 'claude-ha
 export type AllowedAiModel = (typeof ALLOWED_AI_MODELS)[number];
 
 export const DEFAULT_AI_MODEL: AllowedAiModel = 'claude-opus-5';
+
+/**
+ * Where provider requests are sent.
+ *
+ * ═══════════════════════════════════════════════════════════════════════════
+ * WHY THIS IS PINNED AND NOT LEFT TO THE SDK (VULN-038)
+ * ═══════════════════════════════════════════════════════════════════════════
+ *
+ * The vendor SDK defaults its base URL to `process.env.ANTHROPIC_BASE_URL`.
+ * Task 014's adapter only passed a base URL when one was handed to it, and
+ * nothing ever handed it one — so the destination of every request was decided
+ * by an ambient environment variable that no part of this application read,
+ * validated, or logged.
+ *
+ * That is a data-exfiltration path, not a configuration nicety. Those requests
+ * carry the platform's credential in an `x-api-key` header and authorized
+ * curriculum passages in the body. Anything able to set an environment
+ * variable — a compromised base image, a careless deployment template, a
+ * developer's shell — could silently redirect all of it to a host of its
+ * choosing, and every response would still look completely normal.
+ *
+ * Found by probing the running adapter with an ambient value set, during the
+ * pre-flight checks for the first live call. The adapter now ALWAYS passes an
+ * explicit base URL, so the ambient variable can never take effect.
+ */
+export const DEFAULT_AI_BASE_URL = 'https://api.anthropic.com';

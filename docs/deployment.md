@@ -26,21 +26,81 @@ a fact that can drift silently: renaming the web package, adding a root
 `index.html`, or setting `build.outDir` would each break a deploy while every
 other test stayed green.
 
-## 2. Vercel settings that `vercel.json` cannot express
+## 2. The Project Settings, and the failure they cause when wrong
 
-**`vercel.json` is read from the project's Root Directory, and Root Directory is
-a dashboard-only setting.** This is the one deployment input that no test in this
-repository can verify, and it is the first thing to check when a deploy fails
-while the build is known good:
+**`vercel.json` is read FROM the Root Directory, and Root Directory is a
+dashboard-only setting.** It is the one deployment input no test in this
+repository can verify, and it is the first thing to check when the build
+succeeds but the deployment does not.
 
-- **Root Directory must be the repository root** (empty). If it is set to
-  `apps/web`, Vercel looks for `apps/web/vercel.json`, does not find it, and
-  falls back to dashboard settings — and `outputDirectory: apps/web/dist` would
-  then resolve to `apps/web/apps/web/dist`, which does not exist.
-- The **Node version** comes from `engines.node` in the root `package.json`,
-  currently `>=22.12.0`. That range has no upper bound and there is no `.nvmrc`,
-  so the build silently follows whatever major Vercel offers as
-  highest-satisfying. See §7.
+### The Task 019-A.1 failure
+
+```
+✓ 73 modules transformed
+✓ built in 1.36s
+   ...creating /vercel/path0/apps/web/dist
+Error: No Output Directory named "dist" found after the Build completed.
+```
+
+Read the quoted name: Vercel looked for **`dist`**. `vercel.json` says
+`apps/web/dist`, and `git log` shows it has said exactly that in **every**
+revision since it was created — it has never contained `dist`.
+
+**Therefore `vercel.json` was not applied to that deployment.** Vercel fell back
+to Project Settings, whose Output Directory is `dist`. Two ways that happens:
+
+1. **Build & Output Settings are overridden in the dashboard.** An Output
+   Directory typed in during earlier debugging keeps winning.
+2. **The deployment built a commit from before `vercel.json` existed** (it was
+   added in `160e69d`).
+
+Note also what the error rules _out_: Root Directory is **not** `apps/web`.
+Had it been, Vercel would have looked in `<root>/dist` =
+`/vercel/path0/apps/web/dist`, which the log shows Vite had just created, and
+the deployment would have succeeded.
+
+### The required settings
+
+Root Directory is the repository root, so `outputDirectory` carries the prefix:
+
+| Setting              | Required value                           |
+| -------------------- | ---------------------------------------- |
+| **Root Directory**   | _(empty — the repository root)_          |
+| **Framework Preset** | Other                                    |
+| **Build Command**    | Override **OFF** (inherit `vercel.json`) |
+| **Output Directory** | Override **OFF** (inherit `vercel.json`) |
+| **Install Command**  | Override **OFF** (inherit `vercel.json`) |
+| **Node.js Version**  | 22.x                                     |
+
+If any Override toggle is on, turn it off so `vercel.json` governs. If the
+dashboard must carry the values instead, they are exactly: build
+`pnpm --filter @edu/web build`, output **`apps/web/dist`**, install
+`pnpm install --frozen-lockfile`.
+
+### Why Root Directory cannot be `apps/web`
+
+Tempting, because then Output Directory would simply be `dist`. It is wrong for
+this repository, and the reason is now a test rather than a claim
+(`deployment-config.test.ts`, "at least one workspace dependency resolves
+OUTSIDE apps/web"):
+
+- `apps/web` depends on `@edu/contracts`, which resolves to
+  `packages/contracts` — **outside** `apps/web`.
+- `pnpm-lock.yaml` and `pnpm-workspace.yaml` also live at the repository root.
+- Vercel copies only files inside the Root Directory into the build unless
+  "Include source files outside of the Root Directory" is enabled. So this
+  option trades one required setting for another, and adds a way to fail.
+
+Measured correction: a scoped install in `apps/web` does **not** fail with
+`ERR_PNPM_WORKSPACE_PKG_NOT_FOUND` under pnpm 10.33 — pnpm walks up and links
+the package. An earlier comment in the test file said otherwise. The real
+constraint is file inclusion, above.
+
+### Node version
+
+From `engines.node` in the root `package.json`, currently `>=22.12.0`. That
+range has no upper bound and there is no `.nvmrc`, so the build silently
+follows whatever major Vercel offers as highest-satisfying. See §7.
 
 ## 3. Verified build facts
 

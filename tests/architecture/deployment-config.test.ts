@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, readFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 
 /**
  * The deployment build configuration must describe the repository it is in.
@@ -28,6 +28,19 @@ interface VercelConfig {
   installCommand?: string;
   buildCommand?: string;
   outputDirectory?: string;
+}
+
+/** Every workspace package directory, from the globs pnpm-workspace.yaml declares. */
+function workspacePackageDirs(): string[] {
+  const yaml = readFileSync(join(ROOT, 'pnpm-workspace.yaml'), 'utf8');
+  const roots = [...yaml.matchAll(/^\s*-\s*'?([^'\n]+?)\/\*'?\s*$/gm)].map((m) => m[1]);
+  return roots.flatMap((r) => {
+    const base = join(ROOT, r ?? '');
+    if (!existsSync(base)) return [];
+    return readdirSync(base)
+      .map((name) => join(base, name))
+      .filter((dir) => existsSync(join(dir, 'package.json')));
+  });
 }
 
 const vercel = JSON.parse(readFileSync(join(ROOT, 'vercel.json'), 'utf8')) as VercelConfig;
@@ -63,9 +76,43 @@ describe('vercel.json describes this repository', () => {
       range.startsWith('workspace:'),
     );
     expect(workspaceDeps.length).toBeGreaterThan(0);
-    // Installing from the repository root is what resolves them. An install
-    // scoped to apps/web fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND.
+    // Installing from the repository root is what resolves them, and the
+    // lockfile and pnpm-workspace.yaml both live there.
     expect(vercel.installCommand).toBe('pnpm install --frozen-lockfile');
+  });
+
+  it('at least one workspace dependency resolves OUTSIDE apps/web', () => {
+    // Task 019-A.1. This is the fact that decides Vercel's Root Directory, so
+    // it is derived rather than asserted in prose.
+    //
+    // Vercel resolves `outputDirectory` relative to the Root Directory, and
+    // reads `vercel.json` FROM that directory. Setting it to `apps/web` is
+    // therefore tempting — `dist` would then be the output. But by default
+    // Vercel copies only files inside the Root Directory into the build, and
+    // this package's own dependencies reach outside it. Root Directory must
+    // stay at the repository root, which is why `outputDirectory` carries the
+    // `apps/web/` prefix.
+    //
+    // An earlier version of this comment claimed a scoped install fails with
+    // ERR_PNPM_WORKSPACE_PKG_NOT_FOUND. Measured under pnpm 10.33 it does not:
+    // pnpm walks up, finds the workspace root and links the package. The real
+    // constraint is the one below — the files simply are not there.
+    const webDir = dirname(WEB_VITE_CONFIG);
+    const names = new Set(
+      Object.entries(webPackage.dependencies ?? {})
+        .filter(([, range]) => range.startsWith('workspace:'))
+        .map(([name]) => name),
+    );
+
+    const outside: string[] = [];
+    for (const dir of workspacePackageDirs()) {
+      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name: string };
+      if (!names.has(pkg.name)) continue;
+      // `..` as the first segment means the dependency lives outside apps/web.
+      if (relative(webDir, dir).split(sep)[0] === '..') outside.push(pkg.name);
+    }
+
+    expect(outside.length).toBeGreaterThan(0);
   });
 
   it('publishes the directory the build actually writes to', () => {

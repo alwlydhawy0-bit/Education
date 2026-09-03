@@ -1,4 +1,5 @@
 import type { Tx } from '../../platform/db.ts';
+import { RETRIEVAL_STOP_WORDS } from './stop-words.ts';
 
 /**
  * Retrieval for the learning assistant.
@@ -115,6 +116,10 @@ export interface AssistantRepository {
  * working. Short tokens are dropped: in both languages they are overwhelmingly
  * particles, and they match everything.
  *
+ * FUNCTION WORDS ARE DROPPED TOO, which the length filter alone does not
+ * achieve — `ما`, `هي`, `explain` and `lesson` are all long enough to survive
+ * it. Retrieving on those is what produced RISK-AI-09.
+ *
  * ── WHY THE TERMS ARE JOINED WITH `|` AND NOT HANDED TO `plainto_tsquery` ──
  *
  * `plainto_tsquery` ANDs every term. A learner asking "What is mitochondria?"
@@ -139,12 +144,27 @@ export interface AssistantRepository {
  * matters: there is no character left that could mean anything to the parser.
  */
 function searchTerms(question: string): string {
-  return question
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    .filter((token) => token.length > 1)
-    .slice(0, 40)
-    .join(' | ');
+  return (
+    question
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/u)
+      .filter((token) => token.length > 1)
+      /**
+       * ── FUNCTION WORDS REMOVED (RISK-AI-09, VULN-039) ────────────────────
+       *
+       * The `simple` FTS configuration carries no stop-word list, so without
+       * this every Arabic question matched every lesson on `ما` and `هي` alone.
+       * Measured: "ما هي عاصمة اليابان؟" — the capital of Japan — retrieved all
+       * four paragraphs of a lesson about cells, and the server went on to
+       * label the answer `course_material`.
+       *
+       * See `stop-words.ts` for why this is a reviewable word list rather than
+       * a tuned relevance score.
+       */
+      .filter((token) => !RETRIEVAL_STOP_WORDS.has(token))
+      .slice(0, 40)
+      .join(' | ')
+  );
 }
 
 /**

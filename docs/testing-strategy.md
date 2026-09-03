@@ -113,6 +113,38 @@ The rule: **stub the transport, not the dependency.** The seam belongs at the
 lowest boundary you control, because everything above it is code you shipped and
 therefore code that can be wrong.
 
+### Evaluation — added in Task 016
+
+A fifth project, `tests/evaluation`, in its own group after `security`. It seeds
+a controlled curriculum through the real authoring API and runs a hand-written
+gold dataset against it over real HTTP.
+
+**It is a different kind of suite from the other four.** They assert that a
+known property holds. This one MEASURES, and reports numbers that are expected
+to be imperfect — recall@k, MRR, false-grounding counts. Only the safety
+properties are gated; retrieval quality is a baseline to improve against,
+because a threshold invented to make today's run green would quietly become the
+definition of good enough.
+
+Two rules came out of building it, both learned the hard way:
+
+**A measurement tool needs its own tests.** Defect injection removed the
+evaluator's expected-source check and every benchmark result stayed identical —
+the benchmark asserts on the PLATFORM's behaviour and merely reports the
+evaluator's. An evaluator that silently stopped checking would produce a
+cleaner report and nobody would know, which is the worst failure available to a
+tool whose output is trusted precisely because nobody re-derives it. Hence
+`tests/unit/evaluation-evaluator.test.ts`, which tests the evaluator as a pure
+function against inputs whose correct verdict is known by construction.
+
+**A benchmark must not be able to flatter itself.** The sharpest assertion in
+that file is that a case with perfect retrieval, a valid citation, correct
+grounding and every required keyword present is STILL `unresolved` — because
+"contains the word mitochondria" is not "correctly explains mitochondria". The
+dataset also carries a content hash, and the suite asserts its hard-category
+counts, so deleting the cases that fail is a visible diff rather than a quiet
+improvement.
+
 Task 014 also produced a finding of a different kind, and one worth naming
 because no amount of behavioural testing would have reached it. `loadConfig`
 reads the environment through an explicit allowlist, and Task 013 added three

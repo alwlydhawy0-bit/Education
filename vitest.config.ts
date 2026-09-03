@@ -30,7 +30,7 @@
  */
 import { defineConfig } from 'vitest/config';
 
-const dbProject = (name: 'integration' | 'security', groupOrder: number) => ({
+const dbProject = (name: 'integration' | 'security' | 'evaluation', groupOrder: number) => ({
   test: {
     name,
     include: [`tests/${name}/**/*.test.ts`],
@@ -81,6 +81,14 @@ export default defineConfig({
       // Each DB-backed project gets its own group so they never overlap.
       dbProject('integration', 1),
       dbProject('security', 2),
+      /**
+       * The AI evaluation benchmark (Task 016). Its own group, LAST, for the
+       * same reason the others are separated: it seeds a full curriculum and
+       * runs the dataset against it, and a run overlapping another DB project
+       * would truncate that corpus mid-benchmark and report meaningless
+       * numbers rather than failing loudly.
+       */
+      dbProject('evaluation', 3),
     ],
   },
 });

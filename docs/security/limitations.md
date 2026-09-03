@@ -261,6 +261,59 @@ the current state.
   disclosure decision that was never explicitly made, and it is out of this
   task's scope to change.
 
+## Added in Task 016
+
+- **THE EVALUATION FRAMEWORK MEASURES RETRIEVAL AND GROUNDING. IT HAS NEVER
+  MEASURED A MODEL.** No application credential exists (Task 015), so every
+  number in `docs/security/ai-evaluation.md` describes this platform's retrieval
+  and server-side enforcement. **Model-level production behaviour remains
+  unverified**, and no aggregate from the benchmark should be read otherwise
+  (RISK-AI-10/11/12 all remain open).
+- **RISK-AI-09 was measured, reduced, and NOT closed.** The benchmark reproduced
+  it deliberately and found it worse than Task 013 recorded: four of four
+  unanswerable Arabic questions were labelled `course_material`, because the
+  `simple` FTS configuration has no stop-word list and every Arabic question
+  matched every lesson on `ما` and `هي`. Recorded as VULN-039. The stop-word fix
+  took it to one. The remaining case grounds on `عدد` ("number"), a genuine
+  content word that must not be suppressed, and closing it needs relevance
+  scoring or semantic retrieval — a redesign this task did not do.
+- **The fix cost retrieval quality, and the cost is reported rather than
+  buried.** recall@5 and all-sources recall each fell from 1.00 to 0.889: one
+  answerable case (Arabic diacritics) stopped retrieving its expected paragraph.
+  Fewer irrelevant passages means fewer accidental hits. The benchmark exists so
+  that trade is visible.
+- **19 cases is a probe, not a survey.** 15 Arabic, 4 English, over one corpus of
+  two lessons. It measures whether specific known failure modes occur on
+  specific known content. **No claim of broad Arabic competence is made or
+  supported** — and Arabic answer _quality_ is entirely unmeasured, because no
+  model has produced an Arabic answer here (RISK-AI-01 remains open).
+- **Answer correctness is `unresolved` by construction, for every answerable
+  case.** The evaluator will not promote a case to `pass` on keyword presence:
+  "contains the word mitochondria" is not "correctly explains mitochondria". A
+  benchmark that flattered itself here would report green for a system that had
+  never answered anything right. Correctness needs a human reviewer, and
+  deliberately not a second model (RISK-AI-18).
+- **The faithful fixture cannot be wrong about what it was handed**, which is
+  what isolates the retrieval measurement — and is also why nothing in this
+  benchmark speaks to hallucination rates, refusal rates, or fluency.
+- **The server does not filter answer text.** The prompt-leaking fixture's
+  answer reaches the learner, and the test asserts that exactly. The defence
+  against a leaking model is that the system instructions contain no secret, not
+  that output is scrubbed. Stated because the opposite is easy to assume
+  (RISK-AI-19).
+- **The stop-word list is hand-written and permanently incomplete** in both
+  languages. A question built entirely from uncommon-but-irrelevant words can
+  still retrieve nothing useful and, if a provider cites it, still ground
+  falsely (RISK-AI-20).
+- **The benchmark's own integrity depends on nobody quietly editing the
+  dataset.** A stable id per case, a content hash in every report, and tests
+  asserting the hard-category counts are the mitigations. They make a weakening
+  edit visible in review; they do not prevent one.
+- **The `aiProvider` test seam is now used by two suites**, and the evaluation
+  corpus is seeded through the real authoring API on every run. Both are
+  development-only paths, and neither is reachable by a learner — asserted in
+  §17.10 — but both are surface that did not exist before Task 015.
+
 ## Added in Task 015
 
 - **THE FIRST LIVE PROVIDER CALL WAS ATTEMPTED AND DID NOT HAPPEN.** Verified

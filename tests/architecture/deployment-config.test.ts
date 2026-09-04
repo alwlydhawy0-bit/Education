@@ -45,6 +45,9 @@ function workspacePackageDirs(): string[] {
 
 const vercel = JSON.parse(readFileSync(join(ROOT, 'vercel.json'), 'utf8')) as VercelConfig;
 
+const WEB_VERCEL = join(ROOT, 'apps/web/vercel.json');
+const webVercel = JSON.parse(readFileSync(WEB_VERCEL, 'utf8')) as VercelConfig;
+
 const webPackage = JSON.parse(readFileSync(join(ROOT, 'apps/web/package.json'), 'utf8')) as {
   name: string;
   scripts: Record<string, string>;
@@ -167,5 +170,60 @@ describe('vercel.json describes this repository', () => {
     for (const ext of ['ts', 'js', 'mts', 'mjs']) {
       expect(existsSync(join(ROOT, `vite.config.${ext}`))).toBe(false);
     }
+  });
+});
+
+/**
+ * Vercel reads `vercel.json` FROM the Root Directory, and Root Directory is a
+ * dashboard-only setting no test here can read. Task 019-A.1: it was set to
+ * `apps/api`, so the root `vercel.json` was never opened at all — the deploy
+ * failed with `No Output Directory named "dist" found` while the build had
+ * just written apps/web/dist.
+ *
+ * The repository's answer is to describe the same build from BOTH sane Root
+ * Directories, so the deployment is correct whichever of the two is chosen.
+ * That means one fact is now written down twice, which is exactly the
+ * situation that needs a test saying the two agree.
+ */
+describe('the web build is described identically from both valid Root Directories', () => {
+  const webDir = dirname(WEB_VITE_CONFIG);
+
+  it('apps/web carries its own vercel.json', () => {
+    expect(existsSync(WEB_VERCEL)).toBe(true);
+  });
+
+  it('both configs resolve to the SAME output directory on disk', () => {
+    // Each outputDirectory is relative to the Root Directory that config
+    // belongs to. Resolve both and require one answer — this is the assertion
+    // the whole file exists for.
+    const fromRepoRoot = resolve(ROOT, vercel.outputDirectory ?? '');
+    const fromWebRoot = resolve(webDir, webVercel.outputDirectory ?? '');
+    expect(fromWebRoot).toBe(fromRepoRoot);
+    expect(fromRepoRoot).toBe(join(webDir, 'dist'));
+  });
+
+  it('both run the same build and install commands', () => {
+    // A build that differs by Root Directory is two products, not one.
+    expect(webVercel.buildCommand).toBe(vercel.buildCommand);
+    expect(webVercel.installCommand).toBe(vercel.installCommand);
+  });
+
+  it('both disable framework auto-detection', () => {
+    expect(webVercel.framework).toBeNull();
+  });
+
+  it('neither output path is absolute or parent-escaping', () => {
+    for (const out of [vercel.outputDirectory ?? '', webVercel.outputDirectory ?? '']) {
+      expect(out.startsWith('/')).toBe(false);
+      expect(out.split('/')).not.toContain('..');
+    }
+  });
+
+  it('there is no vercel.json in apps/api, which is not a static site', () => {
+    // apps/api is a Fastify server. Task 019-A.1 had the Vercel Root Directory
+    // pointed at it, and the only way to make that "work" would be an
+    // outputDirectory escaping into a sibling package — masking the
+    // misconfiguration rather than fixing it.
+    expect(existsSync(join(ROOT, 'apps/api/vercel.json'))).toBe(false);
   });
 });

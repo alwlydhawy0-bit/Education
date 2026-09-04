@@ -26,75 +26,96 @@ a fact that can drift silently: renaming the web package, adding a root
 `index.html`, or setting `build.outDir` would each break a deploy while every
 other test stayed green.
 
-## 2. The Project Settings, and the failure they cause when wrong
+## 2. Root Directory — the setting that broke three deployments
 
-**`vercel.json` is read FROM the Root Directory, and Root Directory is a
-dashboard-only setting.** It is the one deployment input no test in this
-repository can verify, and it is the first thing to check when the build
-succeeds but the deployment does not.
+**Vercel reads `vercel.json` FROM the Root Directory, and Root Directory is a
+dashboard-only setting.** No test in this repository can read it. It is the
+first thing to check when the build succeeds and the deployment does not.
 
-### The Task 019-A.1 failure
+### The proven cause (Task 019-A.1)
+
+The Root Directory was set to **`apps/api`**. Proof is in the install summary
+of the deployment log, not in reasoning about it:
 
 ```
-✓ 73 modules transformed
-✓ built in 1.36s
-   ...creating /vercel/path0/apps/web/dist
-Error: No Output Directory named "dist" found after the Build completed.
+Scope: all 7 workspace projects
+../..   | Progress: resolved 450, ...
+dependencies:
++ @anthropic-ai/sdk 0.123.0
++ @edu/authz 0.1.0 <- ../../packages/authz
++ @fastify/cookie 11.1.2      + @fastify/helmet 13.1.1
++ @fastify/rate-limit 10.3.0  + @node-rs/argon2 2.2.0
++ fastify 5.12.1  + pg 8.23.0  + zod 3.25.76
+devDependencies:
++ @types/pg 8.23.1
 ```
 
-Read the quoted name: Vercel looked for **`dist`**. `vercel.json` says
-`apps/web/dist`, and `git log` shows it has said exactly that in **every**
-revision since it was created — it has never contained `dist`.
+Three independent tells, all pointing at the same directory:
 
-**Therefore `vercel.json` was not applied to that deployment.** Vercel fell back
-to Project Settings, whose Output Directory is `dist`. Two ways that happens:
+1. **That is `apps/api`'s dependency set** — its exact twelve dependencies and
+   its single devDependency. It matches no other package in the repository.
+   pnpm prints the summary for the package in the current directory.
+2. **The `../..` prefix.** pnpm labels the workspace root relative to the
+   working directory. `../..` means the build ran two levels down.
+3. **`<- ../../packages/authz`** — workspace links printed relative to the same
+   working directory.
 
-1. **Build & Output Settings are overridden in the dashboard.** An Output
-   Directory typed in during earlier debugging keeps winning.
-2. **The deployment built a commit from before `vercel.json` existed** (it was
-   added in `160e69d`).
+Reproduced byte-for-byte by running `pnpm install --frozen-lockfile` with the
+working directory set to `apps/api`.
 
-Note also what the error rules _out_: Root Directory is **not** `apps/web`.
-Had it been, Vercel would have looked in `<root>/dist` =
-`/vercel/path0/apps/web/dist`, which the log shows Vite had just created, and
-the deployment would have succeeded.
+The failure follows mechanically:
 
-### The required settings
+| Step                           | What happened                                                                           |
+| ------------------------------ | --------------------------------------------------------------------------------------- |
+| Root Directory                 | `apps/api`                                                                              |
+| `vercel.json` lookup           | `apps/api/vercel.json` — **does not exist**, so the root `vercel.json` was never opened |
+| Install / Build                | taken from dashboard Project Settings instead                                           |
+| `pnpm --filter @edu/web build` | succeeded — it filters across the whole workspace, so it works from anywhere in it      |
+| Vite output                    | `/vercel/path0/apps/web/dist`                                                           |
+| Output Directory               | `dist`, resolved against the Root Directory → `apps/api/dist`                           |
+| Result                         | `No Output Directory named "dist" found`                                                |
 
-Root Directory is the repository root, so `outputDirectory` carries the prefix:
+Note what this explains that earlier guesses did not: the root `vercel.json`
+has said `apps/web/dist` in **every** revision since `160e69d` created it. It
+never said `dist`. It was not overridden — **it was never read**.
 
-| Setting              | Required value                           |
-| -------------------- | ---------------------------------------- |
-| **Root Directory**   | _(empty — the repository root)_          |
-| **Framework Preset** | Other                                    |
-| **Build Command**    | Override **OFF** (inherit `vercel.json`) |
-| **Output Directory** | Override **OFF** (inherit `vercel.json`) |
-| **Install Command**  | Override **OFF** (inherit `vercel.json`) |
-| **Node.js Version**  | 22.x                                     |
+### The fix
 
-If any Override toggle is on, turn it off so `vercel.json` governs. If the
-dashboard must carry the values instead, they are exactly: build
-`pnpm --filter @edu/web build`, output **`apps/web/dist`**, install
-`pnpm install --frozen-lockfile`.
+Set **Root Directory** to either of these. Both are now correct in the
+repository, and a fitness test asserts they describe the same build:
 
-### Why Root Directory cannot be `apps/web`
+| Root Directory              | Config that governs    | `outputDirectory` |
+| --------------------------- | ---------------------- | ----------------- |
+| _(empty — repository root)_ | `vercel.json`          | `apps/web/dist`   |
+| `apps/web`                  | `apps/web/vercel.json` | `dist`            |
 
-Tempting, because then Output Directory would simply be `dist`. It is wrong for
-this repository, and the reason is now a test rather than a claim
+`apps/web` is the smaller change from the current state and matches how the
+project is already configured (pointed at an app directory rather than the
+repository root). Either works. Then set every **Override** toggle for Build
+Command, Output Directory and Install Command **off**, so `vercel.json`
+governs rather than the dashboard.
+
+`apps/api` is never a valid Root Directory for this project: it is a Fastify
+server, not a static site, and the only way to make it "work" would be an
+`outputDirectory` escaping into a sibling package. A test forbids adding a
+`vercel.json` there.
+
+### Why the workspace root must remain reachable
+
+`apps/web` depends on `@edu/contracts`, which resolves to `packages/contracts`
+— **outside** `apps/web` — and `pnpm-lock.yaml` and `pnpm-workspace.yaml` live
+at the repository root. That is a derived test, not a claim
 (`deployment-config.test.ts`, "at least one workspace dependency resolves
-OUTSIDE apps/web"):
+OUTSIDE apps/web").
 
-- `apps/web` depends on `@edu/contracts`, which resolves to
-  `packages/contracts` — **outside** `apps/web`.
-- `pnpm-lock.yaml` and `pnpm-workspace.yaml` also live at the repository root.
-- Vercel copies only files inside the Root Directory into the build unless
-  "Include source files outside of the Root Directory" is enabled. So this
-  option trades one required setting for another, and adds a way to fail.
+The 019-A.1 log proves those files are already reachable: with Root Directory
+`apps/api`, pnpm resolved `../../packages/*` and installed all 7 workspace
+projects. So "Include source files outside of the Root Directory" is already
+in effect for this project and must stay that way.
 
 Measured correction: a scoped install in `apps/web` does **not** fail with
 `ERR_PNPM_WORKSPACE_PKG_NOT_FOUND` under pnpm 10.33 — pnpm walks up and links
-the package. An earlier comment in the test file said otherwise. The real
-constraint is file inclusion, above.
+the package. An earlier comment in the test file said otherwise.
 
 ### Node version
 

@@ -1,0 +1,15 @@
+# Everything the image must never contain, or would only invalidate its cache.
+.git
+node_modules
+**/node_modules
+**/dist
+.env
+.env.*
+!.env.example
+tests
+tools
+docs
+apps/web/src
+apps/web/index.html
+apps/web/vite.config.ts
+*.log

@@ -219,11 +219,44 @@ describe('the web build is described identically from both valid Root Directorie
     }
   });
 
-  it('there is no vercel.json in apps/api, which is not a static site', () => {
-    // apps/api is a Fastify server. Task 019-A.1 had the Vercel Root Directory
-    // pointed at it, and the only way to make that "work" would be an
-    // outputDirectory escaping into a sibling package — masking the
-    // misconfiguration rather than fixing it.
-    expect(existsSync(join(ROOT, 'apps/api/vercel.json'))).toBe(false);
+  /**
+   * apps/api/vercel.json is a WORKAROUND, not a third supported layout.
+   *
+   * The Vercel project's Root Directory is set to apps/api, and Vercel reads
+   * vercel.json FROM the Root Directory — so neither config above is ever
+   * opened, and six deployments failed with:
+   *
+   *   Error: No Output Directory named "dist" found after the Build completed.
+   *
+   * The quoted name is `dist`, not `apps/web/dist`, which is the proof: the
+   * repository's config was not read, and Vercel fell back to Project
+   * Settings. Root Directory is a dashboard-only setting.
+   *
+   * apps/api is a Fastify server. It is NOT the home of the web deployment,
+   * and this file says otherwise — which is why it escapes into a sibling
+   * package with `..`. DELETE IT once Root Directory is set to apps/web (or
+   * the repository root); the two configs above already cover both.
+   *
+   * While it exists it must point at the one real artifact, so a stale copy
+   * cannot outlive the build it claims to publish.
+   */
+  it('the apps/api workaround, if present, resolves to the same artifact', () => {
+    const apiVercelPath = join(ROOT, 'apps/api/vercel.json');
+    if (!existsSync(apiVercelPath)) return;
+    const apiVercel = JSON.parse(readFileSync(apiVercelPath, 'utf8')) as VercelConfig;
+    const fromApiRoot = resolve(join(ROOT, 'apps/api'), apiVercel.outputDirectory ?? '');
+    expect(fromApiRoot).toBe(join(webDir, 'dist'));
+    // Same build, or it is publishing something other than what it built.
+    expect(apiVercel.buildCommand).toBe(vercel.buildCommand);
+    expect(apiVercel.installCommand).toBe(vercel.installCommand);
+  });
+
+  it('only the apps/api workaround is allowed to escape its Root Directory', () => {
+    // The two supported layouts must stay clean. If someone "fixes" a future
+    // failure by adding `..` to one of them, that is a misconfiguration being
+    // papered over somewhere else, and this catches it.
+    for (const out of [vercel.outputDirectory ?? '', webVercel.outputDirectory ?? '']) {
+      expect(out.split('/')).not.toContain('..');
+    }
   });
 });

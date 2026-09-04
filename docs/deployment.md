@@ -100,6 +100,38 @@ server, not a static site, and the only way to make it "work" would be an
 `outputDirectory` escaping into a sibling package. A test forbids adding a
 `vercel.json` there.
 
+### The apps/api workaround (delete this once Root Directory is fixed)
+
+Six deployments failed with the Root Directory left at `apps/api`. The complete
+log finally showed the error, 59 ms after a successful build:
+
+```
+12:58:38.049  ✓ built in 1.38s
+12:58:38.108  Error: No Output Directory named "dist" found after the Build completed.
+```
+
+Since Root Directory is a dashboard-only setting and could not be changed,
+`apps/api/vercel.json` now exists so that Vercel — reading from the directory
+it is actually pointed at — finds the artifact:
+
+```json
+{ "outputDirectory": "../web/dist" }
+```
+
+**This file is a workaround and states something untrue.** `apps/api` is a
+Fastify server; it is not the home of the web deployment, which is why the path
+has to escape into a sibling package. It exists only because the Root Directory
+is wrong.
+
+**Delete it the moment Root Directory is set to `apps/web` or the repository
+root.** Both layouts above already work without it, and a fitness test keeps it
+honest while it lives: whatever it points at must resolve to the one real
+artifact, and it must run the same build command as the supported configs.
+
+Unverified: Vercel may reject a parent-escaping `outputDirectory`. If the next
+deployment fails with the same message, that is the answer, and the Root
+Directory change becomes unavoidable.
+
 ### Why the workspace root must remain reachable
 
 `apps/web` depends on `@edu/contracts`, which resolves to `packages/contracts`

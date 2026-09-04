@@ -1,5 +1,6 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 import { LocaleProvider } from './app/LocaleProvider.tsx';
 import { App } from './app/App.tsx';
 
@@ -10,6 +11,7 @@ createRoot(container).render(
   <StrictMode>
     <LocaleProvider>
       <App />
+      <SpeedInsights />
     </LocaleProvider>
   </StrictMode>,
 );

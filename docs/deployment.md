@@ -128,9 +128,14 @@ root.** Both layouts above already work without it, and a fitness test keeps it
 honest while it lives: whatever it points at must resolve to the one real
 artifact, and it must run the same build command as the supported configs.
 
-Unverified: Vercel may reject a parent-escaping `outputDirectory`. If the next
-deployment fails with the same message, that is the answer, and the Root
-Directory change becomes unavoidable.
+**Verified working.** Deployment `FNraDMJE9` of commit `317b56f` reached
+**Ready** in 17 s on 2026-09-04, serving `education-api-beige.vercel.app`. So
+Vercel does accept a parent-escaping `outputDirectory` — that was the open
+question, and this is the answer.
+
+It works, but it is still the wrong shape. Fixing Root Directory and deleting
+this file is a cleanup to do deliberately, when a failed deploy is cheap — not
+urgent now that the deployment is green.
 
 ### Why the workspace root must remain reachable
 

@@ -18,3 +18,4 @@ export { lessonProgressPolicy } from './policies/lesson-progress.policy.ts';
 export { objectiveProgressPolicy } from './policies/objective-progress.policy.ts';
 export { learningActivityPolicy } from './policies/learning-activity.policy.ts';
 export { assessmentAttemptPolicy } from './policies/assessment-attempt.policy.ts';
+export { experimentSessionPolicy } from './policies/experiment-session.policy.ts';

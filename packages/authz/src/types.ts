@@ -198,7 +198,8 @@ export type ResourceKind =
   | 'lesson_progress'
   | 'objective_progress'
   | 'learning_activity'
-  | 'assessment_attempt';
+  | 'assessment_attempt'
+  | 'experiment_session';
 
 export interface BaseResource {
   readonly kind: ResourceKind;
@@ -544,6 +545,59 @@ export interface AssessmentAttemptResource extends BaseResource {
   readonly observableByActorAsTeacher: boolean;
 }
 
+export type LabSessionState = 'in_progress' | 'submitted' | 'completed';
+
+/**
+ * One learner's run at one interactive lab.
+ *
+ * THERE IS NO `experiment` RESOURCE KIND, for the reason 0019 gives for having
+ * no `assessment` one: a lab has no lifecycle of its own. Its activity's status
+ * IS its status, so authoring, publishing and archiving a lab are
+ * `learning_activity:*` against the activity that carries it. Modelling the lab
+ * separately would create two rules for one visible object, and two rules can
+ * disagree.
+ *
+ * What DOES need its own kind is the session, because it is a record about a
+ * child. It is shaped after `AssessmentAttemptResource` deliberately: both
+ * answer "who may look at what this child did?", and a second, subtly different
+ * answer to a settled question is not extra safety — it is a disagreement
+ * waiting to be exploited from whichever side is looser.
+ *
+ * THE POLICY NEVER SEES THE OUTCOME. There is no `passed` here, exactly as
+ * there is no score on an attempt. Authorization decides who may look at a
+ * result; it takes no part in deciding one, and a policy that could read the
+ * verdict would invite a branch that behaved differently for a child who had
+ * done badly.
+ *
+ * There is also no `release`. A lab result is not withheld — there is no
+ * review policy on an experiment — so the vocabulary has no word for releasing
+ * one, and an endpoint that wanted to withhold a result would have to add the
+ * action here, in a diff somebody reads.
+ */
+export interface ExperimentSessionResource extends BaseResource {
+  readonly kind: 'experiment_session';
+  readonly learnerId: string;
+  readonly learnerOrganizationId: string | null;
+  readonly experimentId: string;
+  readonly lessonId: string;
+  readonly state: LabSessionState;
+  /**
+   * Whether the SUBJECT still reaches this lab through a class — §3's instant
+   * state isolation, asked at the application layer. The RLS update policy asks
+   * the same question independently on every write, so a stale `true` here
+   * costs nothing; a stale `false` merely refuses early.
+   */
+  readonly learnerMayWork: boolean;
+  /**
+   * ACTOR-RELATIVE. The learner is enrolled in a class the actor teaches AND
+   * this lab's lesson belongs to a course assigned to THAT SAME class. The
+   * conjunction is computed in SQL for the reason given on
+   * `LessonProgressResource`: teaching a class must never imply reading a
+   * student, and two coarser edges cannot express "the same class".
+   */
+  readonly observableByActorAsTeacher: boolean;
+}
+
 export type Resource =
   | NoteResource
   | UserResource
@@ -563,7 +617,8 @@ export type Resource =
   | LessonProgressResource
   | ObjectiveProgressResource
   | LearningActivityResource
-  | AssessmentAttemptResource;
+  | AssessmentAttemptResource
+  | ExperimentSessionResource;
 
 // --- Actions -------------------------------------------------------------
 // An action is `<resourceKind>:<verb>`. The engine enforces that the prefix
@@ -744,6 +799,30 @@ export const ASSESSMENT_ATTEMPT_ACTIONS = [
 
 export type AssessmentAttemptAction = (typeof ASSESSMENT_ATTEMPT_ACTIONS)[number];
 
+/**
+ * `start`, `save` and `submit` are three actions, not one `write`.
+ *
+ * They are different authorities over different objects at different moments.
+ * `start` is asked about a lab before any session exists. `save` is asked about
+ * a live session and is repeatable and reversible — it moves the scene the
+ * learner is building. `submit` is asked once, is final, and produces a verdict
+ * the school will act on.
+ *
+ * Collapsing `save` into `submit` would mean the decision that permitted a
+ * keystroke could be replayed to mark the work; collapsing `start` into either
+ * would mean the decision that opened a session could be replayed to close
+ * somebody else's.
+ */
+export const EXPERIMENT_SESSION_ACTIONS = [
+  'experiment_session:start',
+  'experiment_session:read',
+  'experiment_session:list',
+  'experiment_session:save',
+  'experiment_session:submit',
+] as const;
+
+export type ExperimentSessionAction = (typeof EXPERIMENT_SESSION_ACTIONS)[number];
+
 export type NoteAction = (typeof NOTE_ACTIONS)[number];
 export type UserAction = (typeof USER_ACTIONS)[number];
 export type ProfileAction = (typeof PROFILE_ACTIONS)[number];
@@ -770,7 +849,8 @@ export type Action =
   | LessonProgressAction
   | ObjectiveProgressAction
   | LearningActivityAction
-  | AssessmentAttemptAction;
+  | AssessmentAttemptAction
+  | ExperimentSessionAction;
 
 export const ALL_ACTIONS: readonly Action[] = [
   ...NOTE_ACTIONS,
@@ -792,6 +872,7 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...OBJECTIVE_PROGRESS_ACTIONS,
   ...LEARNING_ACTIVITY_ACTIONS,
   ...ASSESSMENT_ATTEMPT_ACTIONS,
+  ...EXPERIMENT_SESSION_ACTIONS,
 ];
 
 /** The two permissions that split authoring from publishing. See ADR 0009. */

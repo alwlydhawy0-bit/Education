@@ -15,6 +15,7 @@ import { lessonProgressPolicy } from './policies/lesson-progress.policy.ts';
 import { objectiveProgressPolicy } from './policies/objective-progress.policy.ts';
 import { learningActivityPolicy } from './policies/learning-activity.policy.ts';
 import { assessmentAttemptPolicy } from './policies/assessment-attempt.policy.ts';
+import { experimentSessionPolicy } from './policies/experiment-session.policy.ts';
 import {
   resourceKindForAction,
   type Action,
@@ -77,6 +78,7 @@ const DEFAULT_POLICIES: Readonly<Record<ResourceKind, PolicyFn>> = Object.freeze
   // carries: they share a lifecycle, so they must share a rule.
   learning_activity: learningActivityPolicy as unknown as PolicyFn,
   assessment_attempt: assessmentAttemptPolicy as unknown as PolicyFn,
+  experiment_session: experimentSessionPolicy as unknown as PolicyFn,
 });
 
 export function createPolicyEngine(

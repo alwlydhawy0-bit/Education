@@ -192,6 +192,33 @@ export const SecurityEventType = {
   ASSESSMENT_RESULT_RELEASED: 'assessment.result_released',
 
   /**
+   * Interactive labs (Task 009).
+   *
+   * LAB_SESSION_STARTED and LAB_SUBMITTED mirror their assessment
+   * counterparts, and for the same reason: a lab session is a record about a
+   * child that a school will act on, so "when did this child run this lab, and
+   * when did they hand it in?" has to be answerable from the audit trail alone.
+   * Neither carries the state the learner built, and neither carries the
+   * verdict — the trail is more widely readable than the work is.
+   *
+   * LAB_STATE_WRITE_REFUSED is the one that is not a mirror. It records a write
+   * the POLICY allowed and Row Level Security then matched zero rows for, which
+   * means the learner lost the lesson in the interval between the two — a class
+   * ended, a course was withdrawn, a lab was archived mid-session. It is
+   * expected, it is not an error, and it is worth counting: a burst of them
+   * across many learners is a roster change nobody warned the teachers about,
+   * and a burst from ONE actor across many sessions is somebody replaying a
+   * session id they no longer hold.
+   *
+   * Deliberately NOT declared: an event per lab denial. `authz.denied` already
+   * carries those, and a second path to the same fact would split the detection
+   * rule that reads them.
+   */
+  LAB_SESSION_STARTED: 'lab.session_started',
+  LAB_SUBMITTED: 'lab.submitted',
+  LAB_STATE_WRITE_REFUSED: 'lab.state_write_refused',
+
+  /**
    * Emitted on every authorization denial. A burst of these from one actor
    * across many resource ids is the primary IDOR/BOLA probing signal.
    */

@@ -8,4 +8,5 @@ export * from './class-courses.contract.ts';
 export * from './progress.contract.ts';
 export * from './mastery.contract.ts';
 export * from './assessment.contract.ts';
+export * from './experiment.contract.ts';
 export * from './assistant.contract.ts';

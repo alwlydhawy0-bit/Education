@@ -154,6 +154,46 @@ export const RATE_LIMIT_POLICIES = {
     rationale: 'Provider cost is real money. Keyed per actor so a shared IP is not a shared quota.',
   },
 
+  /**
+   * Starting a lab session (Task 009).
+   *
+   * THIS LIMITER CARRIES MORE WEIGHT THAN ITS ASSESSMENT COUNTERPART, and the
+   * reason is a deliberate product difference rather than an oversight. An
+   * assessment has `max_attempts`, enforced per learner by a database trigger.
+   * A LAB HAS NO ATTEMPT LIMIT AND SHOULD NOT: "keep adjusting it until the
+   * circuit works" is the pedagogy, not a loophole in it, and a lab that locked
+   * a child out after three tries would be a worse lab.
+   *
+   * So this is the only bound on how many sessions one source can open. It is
+   * still a SECONDARY control — what it protects is platform cost, not the
+   * validation rules, which stay hidden whatever a learner does: a submission
+   * answers "not yet", never "the voltage must be 5". A scripted grinder learns
+   * one bit per submission about a lab it is already allowed to attempt.
+   *
+   * Keyed by IP like every policy but `ai.request`, and a classroom shares one,
+   * so the number has to fit thirty children starting labs in a double period.
+   */
+  labSessionStart: {
+    name: 'lab.session_start',
+    max: 200,
+    timeWindow: '15 minutes',
+    rationale: 'The only bound on session creation: a lab has no attempt limit, by design.',
+  },
+
+  /**
+   * Submitting a lab.
+   *
+   * Marking runs `app_experiment_rule_holds` once per rule inside a trigger, so
+   * a submission is the most expensive request in this domain — the same shape
+   * of cost as `assessment.submit`, and bounded the same way.
+   */
+  labSubmit: {
+    name: 'lab.submit',
+    max: 200,
+    timeWindow: '15 minutes',
+    rationale: 'Marking is the expensive half of a lab, and repeated marking is how it is abused.',
+  },
+
   /** Guessing a verification token is the attack this bounds. */
   authVerifyEmail: {
     name: 'auth.verify_email',

@@ -222,16 +222,36 @@ CREATE FUNCTION app_session_lesson(p_session_id uuid) RETURNS uuid
 AS $$ SELECT app_experiment_lesson(app_session_experiment(p_session_id)) $$;
 
 /**
- * A label for an experiment, for the one place a name may cross a boundary
- * that the row itself may not. Mirrors `app_assessment_label`.
+ * The breadcrumb for a lab: what it is called, and where in the curriculum it
+ * sits. Mirrors `app_assessment_label` column for column, minus the pass mark,
+ * which a lab does not have.
+ *
+ * SECURITY DEFINER, and the reason is the same one that makes it a separate
+ * function rather than a join in the caller: a session belongs to its owner
+ * FOREVER, so a learner who has left the class must still be able to read back
+ * "Ohm's Law, Electricity, Physics 7" for work they did last term — while the
+ * lesson and course rows themselves have long since stopped being visible to
+ * them. A name is the one thing allowed across that boundary; nothing else on
+ * this path is.
  */
 CREATE FUNCTION app_experiment_label(p_experiment_id uuid)
-  RETURNS TABLE (title text, lesson_id uuid)
+  RETURNS TABLE (
+    activity_title  text,
+    lesson_id       uuid,
+    lesson_title    text,
+    course_id       uuid,
+    course_title    text,
+    simulation_type text
+  )
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
-  SELECT a.title, a.lesson_id
-  FROM learning_activities a
-  WHERE a.id = app_experiment_activity(p_experiment_id)
+  SELECT a.title, l.id, l.title, co.id, co.title, e.simulation_type
+    FROM experiments e
+    JOIN learning_activities a ON a.id = e.activity_id
+    JOIN lessons l             ON l.id = a.lesson_id
+    JOIN course_units u        ON u.id = l.unit_id
+    JOIN courses co            ON co.id = u.course_id
+   WHERE e.id = p_experiment_id
 $$;
 
 -- ============================================================================

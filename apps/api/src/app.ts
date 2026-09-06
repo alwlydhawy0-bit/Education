@@ -44,6 +44,9 @@ import { createGroundedComposer, type AiProvider } from './platform/ai/provider.
 import { assessmentRepository } from './modules/assessment/assessment.repository.ts';
 import { createAssessmentService } from './modules/assessment/assessment.service.ts';
 import { registerAssessmentRoutes } from './modules/assessment/assessment.routes.ts';
+import { experimentRepository } from './modules/experiment/experiment.repository.ts';
+import { createExperimentService } from './modules/experiment/experiment.service.ts';
+import { registerExperimentRoutes } from './modules/experiment/experiment.routes.ts';
 import { classCoursesRepository } from './modules/class-courses/class-courses.repository.ts';
 import { createClassCoursesService } from './modules/class-courses/class-courses.service.ts';
 import { registerClassCourseRoutes } from './modules/class-courses/class-courses.routes.ts';
@@ -357,6 +360,20 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     progress: { noteEngagement: progressRepository.noteEngagement },
   });
 
+  const experiment = createExperimentService({
+    db,
+    repository: experimentRepository,
+    engine,
+    securityEvents,
+    /**
+     * The same joint as the assessment module's, and narrow for the same
+     * reason: running a lab is evidence of engagement with a lesson, never of
+     * finishing one. Passing a lab is emphatically not completing a lesson, and
+     * there is no parameter here through which it could become one.
+     */
+    progress: { noteEngagement: progressRepository.noteEngagement },
+  });
+
   const notebook = createNotebookService({
     db,
     repository: notebookRepository,
@@ -395,6 +412,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerProgressRoutes(app, progress);
   registerMasteryRoutes(app, mastery);
   registerAssessmentRoutes(app, assessment);
+  registerExperimentRoutes(app, experiment);
   registerAssistantRoutes(app, {
     assistant,
     securityEvents,

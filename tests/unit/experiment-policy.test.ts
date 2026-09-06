@@ -139,8 +139,7 @@ describe('writing a lab session is the learner’s alone', () => {
 
   it.each(WRITES)('refuses a peer: %s', (action) => {
     const d = decide(peer, action, session());
-    expect(d.effect).toBe('deny');
-    expect(d.disclosure).toBe('hide');
+    expect(d.effect === 'deny' && d.disclosure).toBe('hide');
   });
 
   it.each(WRITES)('refuses the teacher of the shared class: %s', (action) => {
@@ -176,7 +175,7 @@ describe('writing a lab session is the learner’s alone', () => {
     const d = decide(learner, action, session({ learnerMayWork: false }));
     expect(d.effect).toBe('deny');
     expect(d.reason).toBe('experiment_session.lab_not_accessible');
-    expect(d.disclosure).toBe('hide');
+    expect(d.effect === 'deny' && d.disclosure).toBe('hide');
   });
 
   it.each(['submitted', 'completed'] as const)(
@@ -187,7 +186,7 @@ describe('writing a lab session is the learner’s alone', () => {
         expect(d.effect).toBe('deny');
         expect(d.reason).toBe('experiment_session.already_submitted');
         // `reveal`, not `hide`: it is their own session and they can see it.
-        expect(d.disclosure).toBe('reveal');
+        expect(d.effect === 'deny' && d.disclosure).toBe('reveal');
       }
     },
   );
@@ -252,8 +251,7 @@ describe('reading a lab session follows the relationship graph', () => {
 
   it.each(READS)('refuses a peer, and hides rather than refuses: %s', (action) => {
     const d = decide(peer, action, session());
-    expect(d.effect).toBe('deny');
-    expect(d.disclosure).toBe('hide');
+    expect(d.effect === 'deny' && d.disclosure).toBe('hide');
   });
 
   it('refuses an administrator with no organization at all', () => {

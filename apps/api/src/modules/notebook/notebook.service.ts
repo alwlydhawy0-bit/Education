@@ -1,4 +1,4 @@
-import { forbidden, notFound } from '@edu/kernel';
+import { forbidden, notFound, validationFailed } from '@edu/kernel';
 import {
   type Actor,
   type AuthorizationContext,
@@ -12,6 +12,7 @@ import type { CreateNoteRequest, ListNotesQuery, UpdateNoteRequest } from '@edu/
 import type { Database } from '../../platform/db.ts';
 import type { SecurityEventRecorder } from '../../platform/security/security-events.ts';
 import type { NoteRecord, NotebookRepository } from './notebook.repository.ts';
+import { checkMarkdown } from './markdown-safety.ts';
 
 export interface ActorContext {
   readonly actor: Actor;
@@ -65,6 +66,85 @@ export function createNotebookService(deps: NotebookServiceDeps): NotebookServic
       detail: { action, resourceKind: 'note', resourceId, reason },
       occurredAt: new Date(),
     });
+  }
+
+  /**
+   * The markdown gate.
+   *
+   * Refuses a body carrying an executable scheme in a LINK DESTINATION — the
+   * one XSS vector that survives HTML-escaping, because `[x](javascript:…)` is
+   * markdown's own syntax rather than embedded HTML. See `markdown-safety.ts`
+   * for why this rejects instead of stripping, and why prose and code fences
+   * mentioning such a scheme are left alone.
+   */
+  async function guardMarkdown(ctx: ActorContext, body: string | undefined): Promise<void> {
+    if (body === undefined) return;
+    const rejection = checkMarkdown(body);
+    if (!rejection) return;
+
+    await securityEvents.record({
+      type: SecurityEventType.WORKSPACE_MARKDOWN_REFUSED,
+      actorId: ctx.actor.id,
+      correlationId: ctx.correlationId,
+      ip: ctx.ip,
+      // The SCHEME and nothing else. Not the note, not the URL, not the text
+      // around it — this is a minor's private writing.
+      detail: { scheme: rejection.scheme, reason: rejection.reason },
+      occurredAt: new Date(),
+    });
+
+    throw validationFailed(
+      `A link in this note uses the ${rejection.scheme}: scheme, which is not allowed`,
+    );
+  }
+
+  /** PostgreSQL SQLSTATEs the workspace rules surface through. */
+  const FK_VIOLATION = '23503';
+  const INTEGRITY_VIOLATION = '23514';
+  const RAISED_INTEGRITY = '23000';
+
+  function pgCode(error: unknown): string | null {
+    return typeof error === 'object' && error !== null && 'code' in error
+      ? String((error as { code: unknown }).code)
+      : null;
+  }
+
+  /**
+   * Turns the database's own refusals into answers a client can act on.
+   *
+   * Each is a rule the DATABASE owns, and owns for a reason — the composite
+   * foreign keys hold against writers this service is not. Without this
+   * mapping they would surface as 500s, hiding a working control behind an
+   * apparent fault.
+   */
+  function translate(error: unknown): never {
+    const code = pgCode(error);
+    const message = error instanceof Error ? error.message : '';
+
+    // A parent that belongs to somebody else. A 404, not a 422: confirming the
+    // id names a real notebook is the one bit the caller is fishing for.
+    if (code === FK_VIOLATION && message.includes('same_owner_fk')) throw notFound();
+    if (code === FK_VIOLATION) {
+      throw validationFailed('That reference does not name anything you can attach to');
+    }
+    if (
+      (code === INTEGRITY_VIOLATION || code === RAISED_INTEGRITY) &&
+      /not studying/i.test(message)
+    ) {
+      throw validationFailed('You cannot attach a note to coursework you are not studying');
+    }
+    if (code === INTEGRITY_VIOLATION && message.includes('notes_single_anchor_ck')) {
+      throw validationFailed('A note is anchored to a course, a unit or a lesson — at most one');
+    }
+    throw error;
+  }
+
+  async function guarded<T>(run: () => Promise<T>): Promise<T> {
+    try {
+      return await run();
+    } catch (error) {
+      return translate(error);
+    }
   }
 
   async function denyToError(ctx: ActorContext, decision: Decision): Promise<never> {
@@ -142,31 +222,54 @@ export function createNotebookService(deps: NotebookServiceDeps): NotebookServic
     },
 
     async create(ctx, input) {
-      return db.withActor(ctx.actor.id, (tx) =>
-        // Ownership comes from the session, never from the request body — and
-        // the contract has no field for it either. The RLS INSERT policy
-        // (`owner_id = app_current_actor()`) rejects any other value.
-        repository.insert(tx, {
-          ownerId: ctx.actor.id,
-          organizationId: ctx.actor.organizationId,
-          title: input.title,
-          body: input.body,
-          visibility: input.visibility,
-        }),
+      await guardMarkdown(ctx, input.body);
+      return guarded(() =>
+        db.withActor(ctx.actor.id, (tx) =>
+          // Ownership comes from the session, never from the request body — and
+          // the contract has no field for it either. The RLS INSERT policy
+          // (`owner_id = app_current_actor()`) rejects any other value.
+          //
+          // The ANCHOR does come from the body, and is checked twice against
+          // the database rather than once here: `notes_insert_own` asks
+          // `app_actor_may_anchor_here`, and `notes_anchor` asks it again in a
+          // trigger. Neither is this service's opinion, which is the point —
+          // "may I study this?" is a question about live enrolment, and a copy
+          // of the answer in TypeScript would be a copy that could go stale.
+          repository.insert(tx, {
+            ownerId: ctx.actor.id,
+            organizationId: ctx.actor.organizationId,
+            title: input.title,
+            body: input.body,
+            visibility: input.visibility,
+            notebookId: input.notebookId ?? null,
+            courseId: input.courseId ?? null,
+            unitId: input.unitId ?? null,
+            lessonId: input.lessonId ?? null,
+          }),
+        ),
       );
     },
 
     async update(ctx, noteId, input) {
-      return db.withActor(ctx.actor.id, async (tx) => {
-        await authorizeNote(ctx, tx, noteId, 'note:update');
-        const updated = await repository.applyUpdate(tx, noteId, {
-          ...(input.title !== undefined ? { title: input.title } : {}),
-          ...(input.body !== undefined ? { body: input.body } : {}),
-          ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
-        });
-        if (!updated) throw notFound();
-        return updated;
-      });
+      await guardMarkdown(ctx, input.body);
+      return guarded(() =>
+        db.withActor(ctx.actor.id, async (tx) => {
+          await authorizeNote(ctx, tx, noteId, 'note:update');
+          const updated = await repository.applyUpdate(tx, noteId, {
+            ...(input.title !== undefined ? { title: input.title } : {}),
+            ...(input.body !== undefined ? { body: input.body } : {}),
+            ...(input.visibility !== undefined ? { visibility: input.visibility } : {}),
+            // Spread only when SENT, so `null` reaches the repository as a
+            // deliberate clear and an omitted field never touches the column.
+            ...(input.notebookId !== undefined ? { notebookId: input.notebookId } : {}),
+            ...(input.courseId !== undefined ? { courseId: input.courseId } : {}),
+            ...(input.unitId !== undefined ? { unitId: input.unitId } : {}),
+            ...(input.lessonId !== undefined ? { lessonId: input.lessonId } : {}),
+          });
+          if (!updated) throw notFound();
+          return updated;
+        }),
+      );
     },
 
     async remove(ctx, noteId) {

@@ -199,7 +199,9 @@ export type ResourceKind =
   | 'objective_progress'
   | 'learning_activity'
   | 'assessment_attempt'
-  | 'experiment_session';
+  | 'experiment_session'
+  | 'notebook'
+  | 'student_artifact';
 
 export interface BaseResource {
   readonly kind: ResourceKind;
@@ -598,6 +600,49 @@ export interface ExperimentSessionResource extends BaseResource {
   readonly observableByActorAsTeacher: boolean;
 }
 
+/**
+ * A notebook: the folder a learner files their notes in.
+ *
+ * IT HAS NO `visibility`, AND THAT IS THE DESIGN RATHER THAN AN OMISSION.
+ * `NoteResource` carries one because a student may choose to show a single note
+ * to their teacher. A notebook is a container whose contents are individually
+ * shareable, so sharing the container would share things the child never opened
+ * — including notes they write into it tomorrow. When per-notebook sharing is
+ * wanted it needs its own field, its own branch and its own review.
+ *
+ * The consequence is that `notebookPolicy` has no relationship branch at all.
+ * There is nothing for a teacher, a guardian, an administrator or a platform
+ * operator to match on.
+ */
+export interface NotebookResource extends BaseResource {
+  readonly kind: 'notebook';
+  readonly ownerId: string;
+  readonly organizationId: string | null;
+}
+
+export type ArtifactKind = 'image' | 'code_snippet' | 'pdf' | 'data_export';
+
+/**
+ * A registered personal file.
+ *
+ * STRICTER THAN A NOTE, deliberately. A note has a visibility its owner can
+ * open; an artifact has none, so a verified guardian who may read a SHARED note
+ * still cannot read the file attached to it. Files are the hardest thing to
+ * un-share and the easiest to misjudge the contents of, so the first version of
+ * this resource has no sharing at all.
+ *
+ * There is no `storageKey` here. The policy decides who may act on the row; it
+ * has no business knowing where the bytes would live, and a policy that carried
+ * the key would be one leak away from disclosing the storage layout.
+ */
+export interface StudentArtifactResource extends BaseResource {
+  readonly kind: 'student_artifact';
+  readonly ownerId: string;
+  readonly organizationId: string | null;
+  readonly artifactType: ArtifactKind;
+  readonly byteSize: number;
+}
+
 export type Resource =
   | NoteResource
   | UserResource
@@ -618,7 +663,9 @@ export type Resource =
   | ObjectiveProgressResource
   | LearningActivityResource
   | AssessmentAttemptResource
-  | ExperimentSessionResource;
+  | ExperimentSessionResource
+  | NotebookResource
+  | StudentArtifactResource;
 
 // --- Actions -------------------------------------------------------------
 // An action is `<resourceKind>:<verb>`. The engine enforces that the prefix
@@ -823,6 +870,46 @@ export const EXPERIMENT_SESSION_ACTIONS = [
 
 export type ExperimentSessionAction = (typeof EXPERIMENT_SESSION_ACTIONS)[number];
 
+/**
+ * A notebook is created, read, listed, renamed and deleted by one person.
+ *
+ * There is no `notebook:share`. `NOTE_ACTIONS` has `note:share` because a note
+ * can be shared; adding the verb here would create a vocabulary for something
+ * no policy branch implements, which is how a taxonomy starts advertising
+ * capabilities the system does not have.
+ */
+export const NOTEBOOK_ACTIONS = [
+  'notebook:create',
+  'notebook:read',
+  'notebook:list',
+  'notebook:update',
+  'notebook:delete',
+] as const;
+
+export type NotebookAction = (typeof NOTEBOOK_ACTIONS)[number];
+
+/**
+ * An artifact is registered, read, listed and deleted. THERE IS NO `:update`.
+ *
+ * Not an oversight to be filled in later: `edu_app` holds no UPDATE grant on
+ * `student_artifacts`, because a mutable row would make the storage quota a
+ * suggestion — register one byte, then edit the row to 25 MiB. Replacing an
+ * artifact is a delete and a fresh registration, and the vocabulary says so.
+ *
+ * There is also no `:download`. Nothing serves these bytes, because
+ * docs/security/file-security.md makes "never serve unscanned content" a
+ * non-negotiable and this platform has no scanner. When the pipeline exists,
+ * adding the action here is the visible diff that says so.
+ */
+export const STUDENT_ARTIFACT_ACTIONS = [
+  'student_artifact:create',
+  'student_artifact:read',
+  'student_artifact:list',
+  'student_artifact:delete',
+] as const;
+
+export type StudentArtifactAction = (typeof STUDENT_ARTIFACT_ACTIONS)[number];
+
 export type NoteAction = (typeof NOTE_ACTIONS)[number];
 export type UserAction = (typeof USER_ACTIONS)[number];
 export type ProfileAction = (typeof PROFILE_ACTIONS)[number];
@@ -850,7 +937,9 @@ export type Action =
   | ObjectiveProgressAction
   | LearningActivityAction
   | AssessmentAttemptAction
-  | ExperimentSessionAction;
+  | ExperimentSessionAction
+  | NotebookAction
+  | StudentArtifactAction;
 
 export const ALL_ACTIONS: readonly Action[] = [
   ...NOTE_ACTIONS,
@@ -873,6 +962,8 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...LEARNING_ACTIVITY_ACTIONS,
   ...ASSESSMENT_ATTEMPT_ACTIONS,
   ...EXPERIMENT_SESSION_ACTIONS,
+  ...NOTEBOOK_ACTIONS,
+  ...STUDENT_ARTIFACT_ACTIONS,
 ];
 
 /** The two permissions that split authoring from publishing. See ADR 0009. */

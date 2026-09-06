@@ -47,6 +47,9 @@ import { registerAssessmentRoutes } from './modules/assessment/assessment.routes
 import { experimentRepository } from './modules/experiment/experiment.repository.ts';
 import { createExperimentService } from './modules/experiment/experiment.service.ts';
 import { registerExperimentRoutes } from './modules/experiment/experiment.routes.ts';
+import { workspaceRepository } from './modules/workspace/workspace.repository.ts';
+import { createWorkspaceService } from './modules/workspace/workspace.service.ts';
+import { registerWorkspaceRoutes } from './modules/workspace/workspace.routes.ts';
 import { classCoursesRepository } from './modules/class-courses/class-courses.repository.ts';
 import { createClassCoursesService } from './modules/class-courses/class-courses.service.ts';
 import { registerClassCourseRoutes } from './modules/class-courses/class-courses.routes.ts';
@@ -374,6 +377,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     progress: { noteEngagement: progressRepository.noteEngagement },
   });
 
+  const workspace = createWorkspaceService({
+    db,
+    repository: workspaceRepository,
+    engine,
+    securityEvents,
+  });
+
   const notebook = createNotebookService({
     db,
     repository: notebookRepository,
@@ -404,6 +414,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     cookieSecure: config.SESSION_COOKIE_SECURE,
   });
   registerNotebookRoutes(app, notebook);
+  registerWorkspaceRoutes(app, workspace);
   registerUsersRoutes(app, users);
   registerOrganizationRoutes(app, organizations);
   registerRelationshipRoutes(app, classes, guardians);

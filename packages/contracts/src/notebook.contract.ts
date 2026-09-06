@@ -23,13 +23,43 @@ export const noteBodySchema = z.string().max(65_536);
  * This is the contract-level half of the IDOR defence: even if a handler were
  * careless, there is no field here for an attacker to put someone else's id in.
  */
+/**
+ * WHERE A NOTE HANGS IN THE CURRICULUM — at most one place, or nowhere.
+ *
+ * Three columns that must agree are three columns that one day will not. A
+ * lesson already determines its unit and its course, so the wider ids are
+ * resolved live rather than stored alongside; the same reasoning kept a
+ * `class_id` off `experiment_sessions` in 0024. The database says it too, as
+ * `notes_single_anchor_ck`.
+ *
+ * All three are nullable and all three are optional: a free-standing note is a
+ * real thing, and a learner does not need a course's permission to think.
+ */
+const anchorFields = {
+  notebookId: idSchema.nullable().optional(),
+  courseId: idSchema.nullable().optional(),
+  unitId: idSchema.nullable().optional(),
+  lessonId: idSchema.nullable().optional(),
+};
+
+const atMostOneAnchor = (v: Record<string, unknown>): boolean =>
+  [v['courseId'], v['unitId'], v['lessonId']].filter((x) => x !== null && x !== undefined).length <=
+  1;
+
+const singleAnchorMessage = {
+  message: 'a note is anchored to a course, a unit or a lesson — at most one',
+  path: ['lessonId'],
+};
+
 export const createNoteRequestSchema = z
   .object({
     title: noteTitleSchema,
     body: noteBodySchema.default(''),
     visibility: noteVisibilitySchema.default('private'),
+    ...anchorFields,
   })
-  .strict();
+  .strict()
+  .refine(atMostOneAnchor, singleAnchorMessage);
 
 export type CreateNoteRequest = z.infer<typeof createNoteRequestSchema>;
 
@@ -38,9 +68,11 @@ export const updateNoteRequestSchema = z
     title: noteTitleSchema.optional(),
     body: noteBodySchema.optional(),
     visibility: noteVisibilitySchema.optional(),
+    ...anchorFields,
   })
   .strict()
-  .refine((v) => Object.keys(v).length > 0, { message: 'At least one field must be provided' });
+  .refine((v) => Object.keys(v).length > 0, { message: 'At least one field must be provided' })
+  .refine(atMostOneAnchor, singleAnchorMessage);
 
 export type UpdateNoteRequest = z.infer<typeof updateNoteRequestSchema>;
 
@@ -52,6 +84,10 @@ export const noteResponseSchema = z
     body: z.string(),
     visibility: noteVisibilitySchema,
     state: z.enum(['active', 'archived', 'deleted']),
+    notebookId: idSchema.nullable(),
+    courseId: idSchema.nullable(),
+    unitId: idSchema.nullable(),
+    lessonId: idSchema.nullable(),
     createdAt: z.string().datetime(),
     updatedAt: z.string().datetime(),
   })
@@ -76,6 +112,12 @@ export const listNotesQuerySchema = createListQuerySchema({
   filters: {
     visibility: noteVisibilitySchema.optional(),
     state: z.enum(['active', 'archived']).optional(),
+    // Filtering by where a note hangs. There is no `ownerId` filter and never
+    // will be: WHOSE notes are being listed is decided by the route and the
+    // session, never by a query parameter.
+    notebookId: idSchema.optional(),
+    lessonId: idSchema.optional(),
+    courseId: idSchema.optional(),
   },
 });
 

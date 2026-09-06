@@ -219,6 +219,38 @@ export const SecurityEventType = {
   LAB_STATE_WRITE_REFUSED: 'lab.state_write_refused',
 
   /**
+   * A learner registered a personal file in their workspace (Task 010).
+   *
+   * Recorded because storage is the one resource on this platform a learner can
+   * consume without limit-by-design, and because the registry is the precursor
+   * to an upload pipeline: when bytes eventually arrive, this is the event that
+   * already says who asked for space and how much. A burst from one actor is
+   * quota-exhaustion behaviour; a burst across many actors from one address is
+   * something else again.
+   *
+   * Carries the declared type and the size. NEVER the filename and never the
+   * metadata — both are the learner's own words about their own file, and the
+   * audit trail is read by more people than the workspace is.
+   *
+   * Deliberately NOT declared: an event for reading or listing a workspace. A
+   * learner reading their own notes is not a security event, and recording it
+   * would build exactly the surveillance log this domain's policies exist to
+   * make unnecessary.
+   */
+  WORKSPACE_ARTIFACT_REGISTERED: 'workspace.artifact_registered',
+
+  /**
+   * Markdown was refused because a link destination carried an executable
+   * scheme — `javascript:`, `vbscript:` or `data:`.
+   *
+   * Almost always a paste from somewhere hostile rather than a child typing it,
+   * which is why it is worth a signal rather than only a 400. It carries the
+   * SCHEME and nothing else: not the note, not the URL, not the surrounding
+   * text.
+   */
+  WORKSPACE_MARKDOWN_REFUSED: 'workspace.markdown_refused',
+
+  /**
    * Emitted on every authorization denial. A burst of these from one actor
    * across many resource ids is the primary IDOR/BOLA probing signal.
    */

@@ -194,6 +194,24 @@ export const RATE_LIMIT_POLICIES = {
     rationale: 'Marking is the expensive half of a lab, and repeated marking is how it is abused.',
   },
 
+  /**
+   * Registering a workspace artifact (Task 010).
+   *
+   * The quota is the real control and it is enforced in the database, so this
+   * bounds something different: the RATE at which rows are created, which the
+   * quota does not touch at all. A learner could register a million one-byte
+   * artifacts and stay comfortably inside 256 MiB while filling the table.
+   *
+   * Keyed by IP like every policy but `ai.request`, so the number has to leave
+   * a classroom room to work in.
+   */
+  workspaceArtifact: {
+    name: 'workspace.artifact',
+    max: 120,
+    timeWindow: '15 minutes',
+    rationale: 'Row-count abuse, which a byte quota does not bound.',
+  },
+
   /** Guessing a verification token is the attack this bounds. */
   authVerifyEmail: {
     name: 'auth.verify_email',

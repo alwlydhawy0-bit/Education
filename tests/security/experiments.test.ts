@@ -810,6 +810,43 @@ describe('I — artifacts are append-only', () => {
     ).toHaveLength(1);
   });
 
+  it('refuses an append once the session has been submitted', async () => {
+    // THE CASE THAT SEPARATES `:save` FROM `:read` on this route, and it exists
+    // because a defect-injection round downgraded the authorization to `:read`
+    // and every other test here still passed. Appending is a WRITE, available
+    // at the moments a write is, and a finished session accepts none.
+    const w = await world();
+    const { session } = await startSession(w, w.learner);
+    await post(`/api/v1/experiment-sessions/${session.id}/submit`, w.learner.cookie, {
+      currentState: FAILING,
+    });
+    const response = await post(
+      `/api/v1/experiment-sessions/${session.id}/artifacts`,
+      w.learner.cookie,
+      { artifactType: 'snapshot' },
+    );
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('refuses a guardian and a teacher appending, though both may READ', async () => {
+    // The same separation from the other side: these two can see the session,
+    // so an authorization that asked only whether they may read it would let
+    // them write into a child's telemetry.
+    const w = await world();
+    const { session } = await startSession(w, w.learner);
+    for (const who of [w.guardian, w.teacher]) {
+      expect(
+        (await get(`/api/v1/experiment-sessions/${session.id}`, who.cookie)).statusCode,
+      ).toBe(200);
+      const response = await post(
+        `/api/v1/experiment-sessions/${session.id}/artifacts`,
+        who.cookie,
+        { artifactType: 'snapshot' },
+      );
+      expect(response.statusCode, who.id).toBe(404);
+    }
+  });
+
   it('refuses a peer appending to somebody else’s session', async () => {
     const w = await world();
     const { session } = await startSession(w, w.learner);

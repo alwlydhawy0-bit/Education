@@ -491,12 +491,27 @@ export const experimentRepository: ExperimentRepository = {
   },
 
   async appendArtifact(tx, sessionId, artifactType, payload) {
-    const { rows } = await tx.query<ArtifactRow>(
-      `INSERT INTO experiment_artifacts (session_id, artifact_type, payload)
-       VALUES ($1, $2, $3)
-       RETURNING id, session_id, artifact_type, payload, created_at`,
-      [sessionId, artifactType, JSON.stringify(payload)],
-    );
+    let rows: ArtifactRow[];
+    try {
+      ({ rows } = await tx.query<ArtifactRow>(
+        `INSERT INTO experiment_artifacts (session_id, artifact_type, payload)
+         VALUES ($1, $2, $3)
+         RETURNING id, session_id, artifact_type, payload, created_at`,
+        [sessionId, artifactType, JSON.stringify(payload)],
+      ));
+    } catch (error) {
+      // An INSERT the RLS check refuses RAISES rather than matching zero rows,
+      // so this is the shape the session updates express with a rowCount test.
+      // Both are the same event — the actor may not write here — and both must
+      // reach the caller as that rather than as an internal fault.
+      //
+      // Under correct policy this is unreachable: `experiment_session:save`
+      // has already refused. It exists because a defect-injection round
+      // downgraded that authorization to `:read` and the refusal came back as a
+      // 500, which is the wrong answer to the right question.
+      if (isRlsRefusal(error)) throw new SessionNotWritableError();
+      throw error;
+    }
     const row = rows[0];
     if (!row) throw new Error('The artifact was not written');
     return {
@@ -571,6 +586,17 @@ export const experimentRepository: ExperimentRepository = {
     return rows.map((row) => Guarded.of(toSession(row), toSessionResource(row)));
   },
 };
+
+/** PostgreSQL's SQLSTATE for a row rejected by a row-security policy. */
+const RLS_VIOLATION = '42501';
+
+function isRlsRefusal(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    (error as { code?: unknown }).code === RLS_VIOLATION
+  );
+}
 
 /**
  * A write the database accepted the shape of and Row Level Security then

@@ -322,6 +322,49 @@ describe('sessions belong to the learner who sat them', () => {
     expect(state.rows[0]?.current_state).toEqual({});
   });
 
+  it('refuses a teacher working through a lab even in their OWN name', async () => {
+    /**
+     * THE CASE THAT SEPARATES THE TWO CONJUNCTS in the session UPDATE policy,
+     * and the reason it exists as its own test.
+     *
+     * The policy asks both `app_actor_sees_experiment` and
+     * `app_actor_may_study_lesson`. For a LEARNER the two move together —
+     * leaving the class fails both — so every isolation test above passes with
+     * either one deleted, and a defect-injection round proved exactly that.
+     *
+     * A teacher is where they part. `app_actor_reaches_course` is satisfied by
+     * TEACHING as well as studying, so a teacher SEES the lab and may not STUDY
+     * it. Without the study conjunct, a teacher could work through a lab and
+     * have the database record a pass for them — which is not a disaster on its
+     * own, but it is the clause §3 rests on, and a clause no test can remove is
+     * a clause nobody is checking.
+     *
+     * The session is seeded directly because a teacher cannot create one: the
+     * INSERT policy refuses them, as the test above this one asserts.
+     */
+    const w = await world();
+    const session = await createLabSession({
+      experimentId: w.lab.experimentId,
+      userId: w.teacher.id,
+    });
+
+    expect(
+      await attempt(
+        w.teacher.id,
+        `UPDATE experiment_sessions SET current_state = '{"a":1}'::jsonb WHERE id = $1`,
+        [session],
+      ),
+    ).toBe(false);
+
+    expect(
+      await attempt(
+        w.teacher.id,
+        `UPDATE experiment_sessions SET status = 'submitted' WHERE id = $1`,
+        [session],
+      ),
+    ).toBe(false);
+  });
+
   it('refuses a TEACHER writing into a learner’s session', async () => {
     // A teacher marks; a teacher does not do the child's lab for them.
     const w = await world();

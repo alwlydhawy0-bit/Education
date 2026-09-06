@@ -1,7 +1,13 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import pg from 'pg';
-import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.ts';
+import {
+  bodylessWriteHeaders,
+  buildTestApp,
+  sessionCookieFrom,
+  writeHeaders,
+  type TestApp,
+} from '../setup/app.ts';
 import {
   addClassMember,
   assignCourseToClass,
@@ -1515,4 +1521,171 @@ describe('mastery, with RLS disabled', () => {
    * Same shape as the caveat recorded for assessments above: a redundant gate
    * makes its neighbour hard to observe.
    */
+});
+
+describe('the student workspace, with RLS disabled', () => {
+  /**
+   * THE BLOCK THAT ANSWERS "WHICH GATE DID THE WORK?" FOR THE WORKSPACE.
+   *
+   * A defect-injection round removed the `owner_id = $1` clause from the
+   * artifact listing query and from the quota query, and every test in
+   * `tests/security/workspace.test.ts` still passed — because RLS was quietly
+   * carrying both. That is fine until somebody adds a query path RLS does not
+   * cover, and then the redundancy nobody was checking turns out never to have
+   * existed.
+   *
+   * With BYPASSRLS every row is visible to the database client, so anything
+   * refused below was refused by the application: by the policy engine, by
+   * `Guarded`, or by the repository scoping its own SQL to the session.
+   */
+  async function makeNotebook(cookie: string, title = 'Private'): Promise<string> {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/me/notebooks',
+      headers: { ...writeHeaders, cookie },
+      payload: { title },
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    return response.json<{ id: string }>().id;
+  }
+
+  async function makeArtifact(cookie: string, byteSize = 4096): Promise<string> {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/me/artifacts',
+      headers: { ...writeHeaders, cookie },
+      payload: { artifactType: 'image', declaredContentType: 'image/png', byteSize },
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    return response.json<{ id: string }>().id;
+  }
+
+  it('refuses a peer reading another learner’s notebook by exact id', async () => {
+    const victim = await registerAndLogin('ws-victim@test.local');
+    const attacker = await registerAndLogin('ws-attacker@test.local');
+    const notebook = await makeNotebook(victim.cookie);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/me/notebooks/${notebook}`,
+      headers: { cookie: attacker.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('refuses a peer updating or deleting it', async () => {
+    const victim = await registerAndLogin('ws-victim2@test.local');
+    const attacker = await registerAndLogin('ws-attacker2@test.local');
+    const notebook = await makeNotebook(victim.cookie);
+
+    const updated = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/me/notebooks/${notebook}`,
+      headers: { ...writeHeaders, cookie: attacker.cookie },
+      payload: { title: 'Taken' },
+    });
+    expect(updated.statusCode).toBe(404);
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/me/notebooks/${notebook}`,
+      headers: { ...bodylessWriteHeaders, cookie: attacker.cookie },
+    });
+    expect(deleted.statusCode).toBe(404);
+  });
+
+  it('LISTS ONLY THE CALLER’S OWN NOTEBOOKS, with every row visible to the client', () => {
+    // The listing case, which is where a single gate is most expensive to be
+    // wrong about (VULN-017). The repository scopes by the session's own id, so
+    // the query returns one row even though the connection could see both.
+    return (async () => {
+      const victim = await registerAndLogin('ws-list-victim@test.local');
+      const attacker = await registerAndLogin('ws-list-attacker@test.local');
+      await makeNotebook(victim.cookie, 'Theirs');
+      await makeNotebook(attacker.cookie, 'Mine');
+
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/me/notebooks',
+        headers: { cookie: attacker.cookie },
+      });
+      expect(response.statusCode).toBe(200);
+      const items = response.json<{ items: { title: string }[] }>().items;
+      expect(items.map((i) => i.title)).toEqual(['Mine']);
+    })();
+  });
+
+  it('LISTS ONLY THE CALLER’S OWN ARTIFACTS', async () => {
+    const victim = await registerAndLogin('ws-art-victim@test.local');
+    const attacker = await registerAndLogin('ws-art-attacker@test.local');
+    await makeArtifact(victim.cookie, 8192);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/me/artifacts',
+      headers: { cookie: attacker.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ items: unknown[] }>().items).toEqual([]);
+  });
+
+  it('REPORTS ONLY THE CALLER’S OWN STORAGE USE', async () => {
+    // The quota query names the caller's id explicitly. With RLS off, a query
+    // that forgot to would sum the whole table and report somebody else's
+    // files as this learner's.
+    const victim = await registerAndLogin('ws-quota-victim@test.local');
+    const attacker = await registerAndLogin('ws-quota-attacker@test.local');
+    await makeArtifact(victim.cookie, 12_345);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/me/storage',
+      headers: { cookie: attacker.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ usedBytes: number; artifactCount: number }>();
+    expect(body.usedBytes).toBe(0);
+    expect(body.artifactCount).toBe(0);
+  });
+
+  it('refuses a peer reading or deleting another learner’s artifact by exact id', async () => {
+    const victim = await registerAndLogin('ws-del-victim@test.local');
+    const attacker = await registerAndLogin('ws-del-attacker@test.local');
+    const artifact = await makeArtifact(victim.cookie);
+
+    const read = await app.inject({
+      method: 'GET',
+      url: `/api/v1/me/artifacts/${artifact}`,
+      headers: { cookie: attacker.cookie },
+    });
+    expect(read.statusCode).toBe(404);
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/me/artifacts/${artifact}`,
+      headers: { ...bodylessWriteHeaders, cookie: attacker.cookie },
+    });
+    expect(deleted.statusCode).toBe(404);
+  });
+
+  it('refuses a peer reading another learner’s private note by exact id', async () => {
+    const victim = await registerAndLogin('ws-note-victim@test.local');
+    const attacker = await registerAndLogin('ws-note-attacker@test.local');
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/me/notes',
+      headers: { ...writeHeaders, cookie: victim.cookie },
+      payload: { title: 'Private', body: 'my working out' },
+    });
+    expect(created.statusCode).toBe(201);
+    const noteId = created.json<{ id: string }>().id;
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/me/notes/${noteId}`,
+      headers: { cookie: attacker.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain('my working out');
+  });
 });

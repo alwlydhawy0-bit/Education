@@ -411,6 +411,46 @@ describe('anchoring: what a learner may attach work to', () => {
     }
   });
 
+  it('refuses an unstudied anchor with the TRIGGER REMOVED, proving two gates', async () => {
+    /**
+     * THE TEST THAT MAKES "TWO GATES" A CLAIM RATHER THAN A COMMENT.
+     *
+     * The anchor rule is enforced twice: `notes_insert_own` asks
+     * `app_actor_may_anchor_here` in its WITH CHECK, and `notes_anchor` asks it
+     * again in a trigger. With both active a suite cannot tell which did the
+     * work — a defect-injection round removed the policy clause and every test
+     * here still passed, because the trigger silently carried it.
+     *
+     * So this disables the trigger, as superuser, and asserts the RLS policy
+     * refuses on its own. Its mirror — the trigger holding with the policy
+     * clause removed — is the UPDATE case below, which RLS structurally cannot
+     * express because `WITH CHECK` cannot see OLD.
+     */
+    const w = await world();
+    const seed = await seedDb();
+    await seed.query('ALTER TABLE notes DISABLE TRIGGER notes_anchor');
+    try {
+      const refused = await attempt(
+        w.learner.id,
+        `INSERT INTO notes (owner_id, organization_id, title, lesson_id) VALUES ($1, $2, 'no', $3)`,
+        [w.learner.id, w.orgA, w.unassignedLesson],
+      );
+      expect(refused).toBe(false);
+
+      // And the policy still ADMITS a lesson they do study, so the refusal
+      // above is the anchor clause and not the trigger's absence breaking
+      // inserts wholesale.
+      const permitted = await attempt(
+        w.learner.id,
+        `INSERT INTO notes (owner_id, organization_id, title, lesson_id) VALUES ($1, $2, 'ok', $3)`,
+        [w.learner.id, w.orgA, w.lesson],
+      );
+      expect(permitted).toBe(true);
+    } finally {
+      await seed.query('ALTER TABLE notes ENABLE TRIGGER notes_anchor');
+    }
+  });
+
   it('permits a free-standing note with no anchor at all', async () => {
     // A learner does not need a course's permission to think.
     const w = await world();

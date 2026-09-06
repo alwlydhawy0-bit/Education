@@ -652,6 +652,37 @@ describe('H — anchoring: retention without a way to reach new coursework', () 
     expect(edited.statusCode, edited.body).toBe(200);
   });
 
+  it('lets a learner CLEAR an anchor, which is not the same as omitting one', async () => {
+    /**
+     * THE CASE A DEFECT-INJECTION ROUND FOUND MISSING.
+     *
+     * `null` means "unfile this"; `undefined` means "leave it alone". The
+     * repository carries a boolean per nullable field to tell them apart,
+     * because COALESCE cannot. Collapsing the two makes unanchoring silently
+     * impossible — the request succeeds, the field does not move, and nothing
+     * tells the learner. No test covered it until this one.
+     */
+    const w = await world();
+    const book = await makeNotebook(w.learner);
+    const note = await makeNote(w.learner, { lessonId: w.lesson, notebookId: book.id });
+    expect(note.lessonId).toBe(w.lesson);
+    expect(note.notebookId).toBe(book.id);
+
+    const unanchored = await put(`/api/v1/me/notes/${note.id}`, w.learner.cookie, {
+      lessonId: null,
+    });
+    expect(unanchored.statusCode, unanchored.body).toBe(200);
+    expect(unanchored.json<NoteBody>().lessonId).toBeNull();
+    // And the field that was NOT sent is untouched.
+    expect(unanchored.json<NoteBody>().notebookId).toBe(book.id);
+
+    const unfiled = await put(`/api/v1/me/notes/${note.id}`, w.learner.cookie, {
+      notebookId: null,
+    });
+    expect(unfiled.statusCode).toBe(200);
+    expect(unfiled.json<NoteBody>().notebookId).toBeNull();
+  });
+
   it('refuses re-anchoring that note to coursework they can no longer study', async () => {
     const w = await world();
     const note = await makeNote(w.learner);

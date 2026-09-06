@@ -78,6 +78,32 @@ as **data, never as instructions** when it later reaches an LLM.
 5. Authorize before issuing a signed URL, not after.
 6. Fail closed at every stage.
 
+## What Task 010 built against this design, and what it deliberately did not
+
+`student_artifacts` (migration 0025) is a **metadata registry**, not a file
+store. It exists so the accounting and the naming are settled before the first
+byte arrives:
+
+- **No upload route and no download route.** Non-negotiable 3 — never serve
+  unscanned content — with no scanner means there is nothing safe to serve, so
+  nothing is offered. `student_artifact:download` is not in the action
+  vocabulary either; adding it is the visible diff that says the pipeline exists.
+- **Object keys are random and unrelated to the filename**, as stage 2 requires:
+  the key is `org/<organization>/user/<owner>/<artifact id>`, derived by a
+  database trigger. The API has no field through which a caller could supply
+  one, so non-negotiable 1 — never trust the filename — is structural here
+  rather than validated.
+- **An allow-list of accepted types**, per artifact type, as stage 1 requires.
+  `image/svg+xml` is excluded: a document that can carry script is not a picture.
+- **Size limits before the body is read**, as stage 1 requires: 25 MiB per
+  artifact and 256 MiB per learner, the latter enforced in a `BEFORE INSERT`
+  trigger because an application-level check races concurrent registrations.
+- **Per-user upload rate limits**, as stage 1 requires: `workspace.artifact`.
+
+Still absent, and still required before any byte is accepted: quarantine,
+magic-byte sniffing, malware scanning, a separate serving origin, and signed
+URLs issued after an authorization decision.
+
 ## Verification plan (when built)
 
 Upload of a polyglot; extension/content mismatch; oversized file; archive bomb;

@@ -34,6 +34,7 @@ is one that gets forgotten. Tracked as RISK-RATE-01.
 | `lab.session_start`    | 200 / 15 min  | IP       | **The only bound on session creation** — a lab has no attempt limit, by design. See below.                            |
 | `lab.submit`           | 200 / 15 min  | IP       | Marking runs one rule check per rule inside a trigger, so a submission is the expensive request in that domain.        |
 | `ai.request`           | 60 / hour     | **actor** | Provider cost is real money. The only per-actor policy: a class sharing a NAT must not share a quota.                 |
+| `workspace.artifact`   | 120 / 15 min  | IP       | **Row-count abuse, which the byte quota does not bound** — a million one-byte registrations fit inside 256 MiB.       |
 
 Limits live in one catalogue rather than as numbers scattered across route
 definitions, so the whole throttling posture is reviewable on one screen.

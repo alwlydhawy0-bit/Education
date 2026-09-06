@@ -146,16 +146,28 @@ export const statePayloadSchema = z.record(z.string(), z.unknown());
 export type StatePayload = z.infer<typeof statePayloadSchema>;
 
 /**
- * Byte ceilings, stated here so an oversized payload is a 400 rather than a
- * database error surfacing as a 500.
+ * Byte ceilings, stated here so an oversized payload is a 400 naming the field
+ * rather than a database error surfacing as a 500.
  *
- * These are the SQL CHECK values, and the CHECK remains the real limit: this
- * bound is measured on the JSON text, the constraint on the stored `jsonb`, and
- * the two do not agree to the byte. The API's job is to refuse the obviously
- * absurd early; the database's is to be right.
+ * THREE LIMITS IN A DELIBERATE ORDER, smallest first:
+ *
+ *   1. these values          — a 400 that says which field was too big
+ *   2. Fastify's `bodyLimit` — 256 KiB, a 413 at the transport, no field named
+ *   3. the SQL CHECK         — 256 KiB on the stored `jsonb`, the real limit
+ *
+ * `SESSION_STATE_MAX_BYTES` is 192 KiB rather than the CHECK's 256 KiB
+ * SPECIFICALLY so that order holds. Set equal to the CHECK, it also equalled
+ * the body limit, and since the JSON envelope adds bytes around the state, the
+ * transport refused first every time — this schema's rule was unreachable over
+ * HTTP, and the caller got a 413 with no indication of which field to shrink.
+ * Found by a security test that expected a 400 and got a 413.
+ *
+ * A limit that can never fire is not defence in depth; it is a comment that
+ * looks like a control. The database CHECK stays where it is, as the backstop
+ * for any writer that is not this API.
  */
 export const INITIAL_CONFIG_MAX_BYTES = 65_536;
-export const SESSION_STATE_MAX_BYTES = 262_144;
+export const SESSION_STATE_MAX_BYTES = 196_608;
 export const ARTIFACT_PAYLOAD_MAX_BYTES = 131_072;
 
 const withinBytes = (limit: number) => (value: unknown) =>

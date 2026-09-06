@@ -574,6 +574,104 @@ describe('artifacts are append-only', () => {
   });
 });
 
+describe('an author writes a lab through the application role', () => {
+  /**
+   * THE CASE THE FIRST PROBE DID NOT HAVE, and the gap that let a defect
+   * through to the HTTP suite.
+   *
+   * Every fixture above seeds as superuser, because constructing a scenario is
+   * not the thing under test. The consequence is that no assertion here
+   * exercised the INSERT policy on `experiments` — and that policy resolved the
+   * school by looking the row up in `experiments` by its own id, which during
+   * an INSERT's WITH CHECK is not yet visible. It refused every author.
+   *
+   * So the write path gets its own block, run as `edu_app` like everything else
+   * in this file.
+   */
+  async function draftActivity(w: Awaited<ReturnType<typeof world>>): Promise<string> {
+    const seed = await seedDb();
+    const { rows } = await seed.query<{ id: string }>(
+      `INSERT INTO learning_activities (lesson_id, position, activity_type, title, status)
+       VALUES ($1, 99, 'simulation', 'Draft lab', 'draft') RETURNING id`,
+      [w.lesson],
+    );
+    const id = rows[0]?.id;
+    if (!id) throw new Error('Failed to seed a draft activity');
+    return id;
+  }
+
+  it('lets an author insert an experiment and its rules', async () => {
+    const w = await world();
+    const activityId = await draftActivity(w);
+
+    const inserted = await attempt(
+      w.author.id,
+      `INSERT INTO experiments (activity_id, simulation_type) VALUES ($1, 'circuit')`,
+      [activityId],
+    );
+    expect(inserted).toBe(true);
+
+    const experimentId = (
+      await db.withActor(w.author.id, (tx) =>
+        tx.query<{ id: string }>('SELECT id FROM experiments WHERE activity_id = $1', [activityId]),
+      )
+    ).rows[0]?.id;
+    expect(experimentId).toBeDefined();
+
+    expect(
+      await attempt(
+        w.author.id,
+        `INSERT INTO experiment_validation_rules (experiment_id, rules) VALUES ($1, $2)`,
+        [experimentId, JSON.stringify({ rules: [{ path: 'a.b', op: 'exists' }] })],
+      ),
+    ).toBe(true);
+  });
+
+  it('refuses an author at ANOTHER school', async () => {
+    const w = await world();
+    const activityId = await draftActivity(w);
+    const seed = await seedDb();
+    const foreign = await createUser({
+      email: 'foreign-author@b.test',
+      roles: ['content_author'],
+      organizationId: w.orgB,
+    });
+    void seed;
+
+    expect(
+      await attempt(
+        foreign.id,
+        `INSERT INTO experiments (activity_id, simulation_type) VALUES ($1, 'circuit')`,
+        [activityId],
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses a LEARNER inserting an experiment', async () => {
+    const w = await world();
+    const activityId = await draftActivity(w);
+    expect(
+      await attempt(
+        w.learner.id,
+        `INSERT INTO experiments (activity_id, simulation_type) VALUES ($1, 'circuit')`,
+        [activityId],
+      ),
+    ).toBe(false);
+  });
+
+  it('refuses a learner inserting validation rules for an existing lab', async () => {
+    const w = await world();
+    const draft = await createExperiment({ lessonId: w.lesson, status: 'draft', withoutRules: true });
+    expect(
+      await attempt(
+        w.learner.id,
+        `INSERT INTO experiment_validation_rules (experiment_id, rules) VALUES ($1, '{"rules":[]}')`,
+        [draft.experimentId],
+      ),
+    ).toBe(false);
+  });
+});
+
 describe('publication freezes the lab', () => {
   it('refuses an edit to a published experiment', async () => {
     const w = await world();

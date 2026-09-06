@@ -667,24 +667,57 @@ CREATE POLICY experiment_artifacts_definer_all ON experiment_artifacts
 
 -- ── experiments: the question, visible to whoever may see the activity ──────
 
+-- ALSO RESOLVED FROM `activity_id`, AND FOR A LESS OBVIOUS REASON THAN THE
+-- WRITE POLICIES BELOW.
+--
+-- `INSERT ... RETURNING` requires the SELECT policy to admit the row just
+-- written. `app_actor_sees_experiment(id)` resolves the activity by looking the
+-- row up in `experiments` — which, mid-INSERT, cannot see itself — so the
+-- helper answered NULL, the EXISTS answered false, and PostgreSQL rejected the
+-- insert with "new row violates row-level security policy". An INSERT WITHOUT
+-- `RETURNING` succeeded, which is what made this look like a write-permission
+-- problem when it was a read-visibility one.
+--
+-- `app_actor_sees_activity` takes the activity id directly, and `activity_id`
+-- is a column on the row, so there is no self-lookup left anywhere in this
+-- table's policies. `app_actor_sees_experiment` remains for the SESSION
+-- policies, where the experiment row is somebody else's and already committed.
 CREATE POLICY experiments_select ON experiments FOR SELECT TO edu_app
-  USING (app_actor_sees_experiment(id));
+  USING (app_actor_sees_activity(activity_id));
 
+-- THE SCHOOL IS RESOLVED FROM `activity_id`, NOT FROM `id`.
+--
+-- `app_experiment_organization(id)` looks the row up in `experiments` — and
+-- during an INSERT's WITH CHECK the row being inserted is not visible to a
+-- query against its own table, so the helper answered NULL and the policy
+-- refused every insert. Authoring a lab was impossible: `new row violates
+-- row-level security policy for table "experiments"`, on every attempt.
+--
+-- `activity_id` is a column ON the new row, and it names an activity that
+-- already exists, so resolving through it asks the same question of data the
+-- check can actually see. This is the same mistake as the `to_jsonb` trigger
+-- defect recorded above — a rule written in terms of a lookup of the row it is
+-- deciding about — and it was found the same way, by exercising the real path
+-- rather than by reading the policy.
+--
+-- The RLS probe missed it because its fixtures seed as superuser. That gap is
+-- now closed by a case in tests/integration/rls-experiments.test.ts that
+-- authors a lab as `edu_app`.
 CREATE POLICY experiments_insert ON experiments FOR INSERT TO edu_app
   WITH CHECK (
     (app_actor_authors_content() OR app_actor_publishes_content())
-    AND app_experiment_organization(id) IS NOT NULL
-    AND app_experiment_organization(id) = app_actor_organization()
+    AND app_activity_organization(activity_id) IS NOT NULL
+    AND app_activity_organization(activity_id) = app_actor_organization()
   );
 
 CREATE POLICY experiments_update ON experiments FOR UPDATE TO edu_app
   USING (
     (app_actor_authors_content() OR app_actor_publishes_content())
-    AND app_experiment_organization(id) = app_actor_organization()
+    AND app_activity_organization(activity_id) = app_actor_organization()
   )
   WITH CHECK (
     (app_actor_authors_content() OR app_actor_publishes_content())
-    AND app_experiment_organization(id) = app_actor_organization()
+    AND app_activity_organization(activity_id) = app_actor_organization()
   );
 
 -- ── validation rules: THE ANSWER KEY. No learner branch exists. ─────────────

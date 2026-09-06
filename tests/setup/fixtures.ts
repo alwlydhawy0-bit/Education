@@ -43,7 +43,10 @@ export async function truncateAll(): Promise<void> {
     `TRUNCATE notes, objective_evidence, learning_objectives,
               assessment_attempt_answers, assessment_attempts,
               assessment_answer_keys, assessment_options, assessment_questions,
-              assessments, learning_activities,
+              assessments,
+              experiment_artifacts, experiment_sessions,
+              experiment_validation_rules, experiments,
+              learning_activities,
               lesson_progress, guardian_relationships, teacher_assignments,
               class_course_assignments, class_memberships,
               classes, lessons, course_units, courses, curricula, education_levels,
@@ -721,6 +724,105 @@ export async function createAttempt(options: {
     // computes. A fixture that wrote a score directly would be testing against
     // a number no learner could ever have received.
     await db.query(`UPDATE assessment_attempts SET status = 'submitted' WHERE id = $1`, [id]);
+  }
+  return id;
+}
+
+/**
+ * Seeds an experiment with its validation rules, and only then moves the
+ * activity to its requested status.
+ *
+ * The order is not a convenience — it is the only order the schema permits.
+ * `experiment_validation_rules_draft_only` refuses an INSERT once the activity
+ * is published, and `learning_activities_experiment_publication` refuses the
+ * publication until the experiment exists and its rules are well formed. A
+ * fixture that created a published activity first would deadlock against its
+ * own schema, which is exactly what an author would hit.
+ */
+export async function createExperiment(options: {
+  lessonId: string;
+  simulationType?: 'circuit' | 'physics' | 'logic_gate' | 'code_sandbox';
+  title?: string;
+  initialConfig?: Record<string, unknown>;
+  /** `{"rules": [...]}`. Defaults to a rule set nothing has to satisfy. */
+  rules?: Record<string, unknown>;
+  /** Omit the rules row entirely, to construct the unpublishable state. */
+  withoutRules?: boolean;
+  status?: ContentStatus;
+  createdBy?: string | null;
+  activityType?: 'simulation' | 'experiment';
+  position?: number;
+}): Promise<{ activityId: string; experimentId: string }> {
+  const db = await seedDb();
+  const status = options.status ?? 'draft';
+
+  const { activityId } = await createActivity({
+    lessonId: options.lessonId,
+    activityType: options.activityType ?? 'simulation',
+    title: options.title ?? 'Close the circuit',
+    status: 'draft',
+    createdBy: options.createdBy ?? null,
+    ...(options.position === undefined ? {} : { position: options.position }),
+  });
+
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO experiments (activity_id, simulation_type, initial_config)
+     VALUES ($1, $2, $3) RETURNING id`,
+    [
+      activityId,
+      options.simulationType ?? 'circuit',
+      JSON.stringify(options.initialConfig ?? {}),
+    ],
+  );
+  const experimentId = rows[0]?.id;
+  if (!experimentId) throw new Error('Failed to seed experiment');
+
+  if (!options.withoutRules) {
+    await db.query(`INSERT INTO experiment_validation_rules (experiment_id, rules) VALUES ($1, $2)`, [
+      experimentId,
+      JSON.stringify(options.rules ?? { rules: [] }),
+    ]);
+  }
+
+  if (status !== 'draft') {
+    const [publishedAt, archivedAt] = lifecycleStamps(status);
+    await db.query(
+      `UPDATE learning_activities
+          SET status = $2, published_at = $3, archived_at = $4
+        WHERE id = $1`,
+      [activityId, status, publishedAt, archivedAt],
+    );
+  }
+
+  return { activityId, experimentId };
+}
+
+/**
+ * Seeds a lab session directly, so a test can construct a state a learner
+ * could not reach — a session belonging to somebody who has since left the
+ * class, or one already submitted.
+ *
+ * `submit` goes through the real UPDATE path, so `passed` is whatever the
+ * database decided from the rules. A fixture that wrote `passed` itself would
+ * be asserting against an outcome no learner could ever have received.
+ */
+export async function createLabSession(options: {
+  experimentId: string;
+  userId: string;
+  state?: Record<string, unknown>;
+  submit?: boolean;
+}): Promise<string> {
+  const db = await seedDb();
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO experiment_sessions (experiment_id, user_id, current_state)
+     VALUES ($1, $2, $3) RETURNING id`,
+    [options.experimentId, options.userId, JSON.stringify(options.state ?? {})],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed lab session');
+
+  if (options.submit) {
+    await db.query(`UPDATE experiment_sessions SET status = 'submitted' WHERE id = $1`, [id]);
   }
   return id;
 }

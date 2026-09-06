@@ -179,8 +179,26 @@ CREATE FUNCTION app_experiment_lesson(p_experiment_id uuid) RETURNS uuid
   LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$ SELECT app_activity_lesson(app_experiment_activity(p_experiment_id)) $$;
 
+/**
+ * INVOKER RIGHTS, NOT DEFINER — and the whole visibility model turns on it.
+ *
+ * `app_actor_sees_activity` is itself invoker-rights on purpose: it is an
+ * EXISTS over `learning_activities`, and what makes it an authorization check
+ * rather than a lookup is that the caller's own Row Level Security decides
+ * which activities exist for them. Wrapping it in a SECURITY DEFINER function
+ * runs that EXISTS as the table OWNER, for whom every row exists, so it
+ * returns true unconditionally.
+ *
+ * It was written SECURITY DEFINER, matching its neighbours here rather than
+ * its counterpart in 0019, and `experiments_select` therefore admitted
+ * everybody — a draft lab to a learner, and a lab to a teacher at another
+ * school. Found by the probe in tests/integration/rls-experiments.test.ts
+ * before any application code existed. Every sibling in the schema
+ * (`app_actor_sees_lesson`, `_activity`, `_assessment`, `_question`) is
+ * invoker-rights; this one is now the fifth.
+ */
 CREATE FUNCTION app_actor_sees_experiment(p_experiment_id uuid) RETURNS boolean
-  LANGUAGE sql STABLE SECURITY DEFINER SET search_path = pg_catalog, public
+  LANGUAGE sql STABLE SET search_path = pg_catalog, public
 AS $$ SELECT app_actor_sees_activity(app_experiment_activity(p_experiment_id)) $$;
 
 CREATE FUNCTION app_experiment_organization(p_experiment_id uuid) RETURNS uuid
@@ -495,9 +513,16 @@ CREATE TRIGGER experiment_sessions_start
  * discarded, and the outcome is computed here from the rules the learner cannot
  * read. A payload claiming `passed: true` reaches this trigger and leaves it
  * carrying whatever the rules actually decided.
+ *
+ * SECURITY DEFINER for one reason, exactly as `assessment_attempt_submit_guard`
+ * is in 0019: `app_experiment_state_satisfies` is granted to nobody, because
+ * anyone who could call it could probe the answer key a state at a time. The
+ * marking has to happen somewhere the learner cannot stand, and this trigger is
+ * that place. It reads no table the learner named and returns nothing to them
+ * but the verdict.
  */
 CREATE FUNCTION experiment_session_submit_guard() RETURNS trigger
-  LANGUAGE plpgsql SET search_path = pg_catalog, public
+  LANGUAGE plpgsql SECURITY DEFINER SET search_path = pg_catalog, public
 AS $$
 DECLARE
   satisfied boolean;
@@ -749,6 +774,32 @@ CREATE POLICY experiment_artifacts_insert ON experiment_artifacts FOR INSERT TO 
 -- a child did.
 -- ============================================================================
 
+-- EXECUTE ON A FUNCTION IS GRANTED TO PUBLIC BY DEFAULT. Declining to name a
+-- function in the GRANT list below does not withhold it — PostgreSQL has
+-- already given it to everyone, `edu_app` included. Withholding takes an
+-- explicit REVOKE, which is why every migration from 0006 onward writes one.
+--
+-- 0024 shipped its first revision without this block, so
+-- `app_experiment_state_satisfies` — the marker, which reads the answer key —
+-- was callable by the application role despite the comment at the foot of this
+-- file saying it was not. A learner could have called it with candidate states
+-- and read the rules back one bit at a time. Found by the probe; the note at
+-- the foot of the file was true about the GRANT and false about the effect.
+REVOKE ALL ON FUNCTION app_experiment_activity(uuid)              FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_experiment_lesson(uuid)                FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_actor_sees_experiment(uuid)            FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_experiment_organization(uuid)          FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_session_experiment(uuid)               FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_session_owner(uuid)                    FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_session_status(uuid)                   FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_session_lesson(uuid)                   FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_experiment_label(uuid)                 FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_experiment_path_is_safe(text)          FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_experiment_state_at(jsonb, text)       FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_experiment_rule_holds(jsonb, jsonb)    FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_experiment_rules_are_well_formed(uuid) FROM PUBLIC;
+REVOKE ALL ON FUNCTION app_experiment_state_satisfies(uuid, jsonb) FROM PUBLIC;
+
 GRANT SELECT, INSERT, UPDATE ON experiments                 TO edu_app;
 GRANT SELECT, INSERT, UPDATE ON experiment_validation_rules TO edu_app;
 GRANT SELECT, INSERT, UPDATE ON experiment_sessions         TO edu_app;
@@ -766,7 +817,18 @@ GRANT EXECUTE ON FUNCTION app_experiment_label(uuid)                 TO edu_app;
 GRANT EXECUTE ON FUNCTION app_experiment_path_is_safe(text)          TO edu_app;
 GRANT EXECUTE ON FUNCTION app_experiment_state_at(jsonb, text)       TO edu_app;
 GRANT EXECUTE ON FUNCTION app_experiment_rule_holds(jsonb, jsonb)    TO edu_app;
-GRANT EXECUTE ON FUNCTION app_experiment_rules_are_well_formed(uuid) TO edu_app;
 
--- NOT granted to edu_app: app_experiment_state_satisfies. It is the marker, and
--- it reads the answer key. Only the submit trigger calls it.
+-- REVOKED AND NEVER GRANTED, both of them:
+--
+--   app_experiment_state_satisfies      the marker. It reads the answer key,
+--                                       so a caller who could invoke it could
+--                                       probe the rules a state at a time.
+--                                       Only the submit trigger calls it.
+--   app_experiment_rules_are_well_formed the publication gate, mirroring
+--                                       `app_assessment_is_well_formed` in
+--                                       0019, which is likewise revoked and
+--                                       never granted. Only the publication
+--                                       trigger calls it.
+--
+-- Both are SECURITY DEFINER and both run inside a trigger, which is why
+-- withholding EXECUTE costs the application nothing.

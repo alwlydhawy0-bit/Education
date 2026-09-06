@@ -40,7 +40,8 @@ export async function truncateAll(): Promise<void> {
   // created by migration 0007 — truncating them would leave registration unable
   // to grant the default role.
   await db.query(
-    `TRUNCATE notes, objective_evidence, learning_objectives,
+    `TRUNCATE student_artifacts, notes, student_notebooks,
+              objective_evidence, learning_objectives,
               assessment_attempt_answers, assessment_attempts,
               assessment_answer_keys, assessment_options, assessment_questions,
               assessments,
@@ -824,5 +825,74 @@ export async function createLabSession(options: {
   if (options.submit) {
     await db.query(`UPDATE experiment_sessions SET status = 'submitted' WHERE id = $1`, [id]);
   }
+  return id;
+}
+
+/**
+ * Seeds a notebook directly.
+ *
+ * As superuser, like every fixture here — which is exactly why the RLS suite
+ * ALSO writes one through `edu_app`. VULN-042 was a write policy no test
+ * exercised, because seeding as superuser is what makes fixtures convenient.
+ */
+export async function createNotebook(options: {
+  ownerId: string;
+  organizationId?: string | null;
+  title?: string;
+  description?: string;
+}): Promise<string> {
+  const db = await seedDb();
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO student_notebooks (owner_id, organization_id, title, description)
+     VALUES ($1, $2, $3, $4) RETURNING id`,
+    [
+      options.ownerId,
+      options.organizationId ?? null,
+      options.title ?? 'Physics',
+      options.description ?? '',
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed notebook');
+  return id;
+}
+
+/**
+ * Seeds an artifact registration directly.
+ *
+ * `storageKey` is deliberately NOT a parameter: the insert trigger derives it
+ * and discards anything sent in that column. A fixture that could set it would
+ * be testing against a key no caller could ever produce.
+ */
+export async function createArtifact(options: {
+  ownerId: string;
+  noteId?: string | null;
+  sessionId?: string | null;
+  artifactType?: 'image' | 'code_snippet' | 'pdf' | 'data_export';
+  byteSize?: number;
+  declaredContentType?: string;
+  originalFilename?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<string> {
+  const db = await seedDb();
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO student_artifacts
+       (owner_id, note_id, session_id, artifact_type, storage_key,
+        declared_content_type, original_filename, byte_size, metadata)
+     VALUES ($1, $2, $3, $4, 'ignored-by-the-trigger', $5, $6, $7, $8)
+     RETURNING id`,
+    [
+      options.ownerId,
+      options.noteId ?? null,
+      options.sessionId ?? null,
+      options.artifactType ?? 'image',
+      options.declaredContentType ?? 'image/png',
+      options.originalFilename ?? 'diagram.png',
+      options.byteSize ?? 1024,
+      JSON.stringify(options.metadata ?? {}),
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed artifact');
   return id;
 }

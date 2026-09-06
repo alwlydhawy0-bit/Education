@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { TEST_SUPERUSER_URL } from './env.ts';
 
@@ -40,7 +41,8 @@ export async function truncateAll(): Promise<void> {
   // created by migration 0007 — truncating them would leave registration unable
   // to grant the default role.
   await db.query(
-    `TRUNCATE student_artifacts, notes, student_notebooks,
+    `TRUNCATE curriculum_embeddings,
+              student_artifacts, notes, student_notebooks,
               objective_evidence, learning_objectives,
               assessment_attempt_answers, assessment_attempts,
               assessment_answer_keys, assessment_options, assessment_questions,
@@ -894,5 +896,83 @@ export async function createArtifact(options: {
   );
   const id = rows[0]?.id;
   if (!id) throw new Error('Failed to seed artifact');
+  return id;
+}
+
+/**
+ * The embedding dimension the schema is built for. Mirrors
+ * `EMBEDDING_DIMENSIONS` in the API; asserted equal by an architecture test, so
+ * the two cannot drift into a shape the column would reject.
+ */
+export const TEST_EMBEDDING_DIMENSIONS = 768;
+
+/**
+ * A deterministic unit vector, so a test can say "these two are close" and
+ * "these two are far" without depending on an embedding model.
+ *
+ * `seed` picks a direction: the same seed always gives the same vector, and
+ * different seeds give vectors whose cosine distance grows with the gap. That
+ * is all a retrieval test needs — the ORDER is the thing under test, and the
+ * security properties are independent of it (0023, restated in 0026).
+ */
+export function testVector(seed: number, dimensions = TEST_EMBEDDING_DIMENSIONS): number[] {
+  const raw = Array.from({ length: dimensions }, (_unused, i) =>
+    Math.sin((i + 1) * 0.017 + seed * 1.7),
+  );
+  const norm = Math.sqrt(raw.reduce((sum, v) => sum + v * v, 0)) || 1;
+  return raw.map((v) => v / norm);
+}
+
+export const asVectorLiteral = (values: readonly number[]): string => `[${values.join(',')}]`;
+
+/** The digest the freshness guard compares against. Mirrors the API's. */
+export function testSourceHash(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/**
+ * Seeds one embedding row directly.
+ *
+ * As superuser, like every fixture here — which is why the RLS suite ALSO
+ * writes one through `edu_app`. VULN-042 was an insert policy that refused
+ * every legitimate author and survived a whole suite, because seeding as
+ * superuser is what makes fixtures convenient.
+ *
+ * `courseId`, `unitId` and `organizationId` are NOT parameters: the ancestry
+ * trigger derives all three from the lesson. A fixture that could set them
+ * would be testing against rows no writer could produce.
+ */
+export async function createEmbedding(options: {
+  lessonId: string;
+  chunkIndex?: number;
+  chunkContent?: string;
+  seed?: number;
+  embeddingModel?: string;
+  sourceHash?: string;
+  metadata?: Record<string, unknown>;
+}): Promise<string> {
+  const db = await seedDb();
+  const content = options.chunkContent ?? 'Mitochondria are the powerhouse of the cell.';
+  const { rows } = await db.query<{ id: string }>(
+    `INSERT INTO curriculum_embeddings
+       (lesson_id, course_id, unit_id, chunk_index, chunk_content,
+        embedding, embedding_model, source_hash, metadata)
+     VALUES ($1,
+             '00000000-0000-4000-8000-000000000000',
+             '00000000-0000-4000-8000-000000000000',
+             $2, $3, $4::vector, $5, $6, $7)
+     RETURNING id`,
+    [
+      options.lessonId,
+      options.chunkIndex ?? 0,
+      content,
+      asVectorLiteral(testVector(options.seed ?? 1)),
+      options.embeddingModel ?? 'test-deterministic-768',
+      options.sourceHash ?? testSourceHash(content),
+      JSON.stringify(options.metadata ?? {}),
+    ],
+  );
+  const id = rows[0]?.id;
+  if (!id) throw new Error('Failed to seed embedding');
   return id;
 }

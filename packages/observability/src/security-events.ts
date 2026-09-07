@@ -355,6 +355,44 @@ export const SecurityEventType = {
   AI_OUTPUT_REJECTED: 'ai.output_rejected',
 
   /**
+   * A learner turn the guardrail layer refused to send (Task 012).
+   *
+   * Carries the RULE IDS that fired and nothing else — never the message, never
+   * a fragment of it. What a child typed is the most sensitive data in this
+   * domain and this trail is read by more people than the conversation is.
+   *
+   * The value of the event is not that it stopped an attack; the layers that
+   * decide access ran first and would have refused regardless. It is that a
+   * BURST of these from one account is a signal an operator can act on, and
+   * without the event there is nothing to burst.
+   */
+  AI_TUTOR_TURN_BLOCKED: 'ai_tutor.turn_blocked',
+
+  /**
+   * The tutor was asked something its material does not cover (Task 012).
+   *
+   * Recorded rather than raised. A learner asking about next term's topic is
+   * ordinary; the same learner sweeping many lessons for one that answers is
+   * catalog probing, and the difference is visible in the trail rather than in
+   * the response, which stays identical either way.
+   */
+  AI_TUTOR_OUT_OF_SCOPE: 'ai_tutor.out_of_scope',
+
+  /**
+   * An adult read a child's conversation (Task 012).
+   *
+   * WHICH AUTHORITY THEY USED is the point of this event — teaching the learner
+   * or moderating the school are different powers with different reach, and an
+   * audit that could not tell them apart would be unable to answer the only
+   * question anybody will ask of it.
+   *
+   * This is the one read on the platform that is audited. Everywhere else,
+   * reads are not recorded (see RISK-PROGRESS-02) — a gap this task does not
+   * close in general, but would not have been defensible to repeat here.
+   */
+  AI_TUTOR_TRANSCRIPT_READ: 'ai_tutor.transcript_read',
+
+  /**
    * Emitted at startup when the running security posture deviates from the safe
    * defaults (rate limiting off, insecure cookies, debug logging). The
    * configuration loader refuses these outright in production and staging, so

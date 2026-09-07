@@ -213,6 +213,47 @@ export const RATE_LIMIT_POLICIES = {
   },
 
   /**
+   * One turn of an AI tutor conversation (Task 012).
+   *
+   * KEYED PER ACTOR, like `aiRequest`, and for the same reason: a classroom of
+   * thirty behind one school NAT must not share a quota, and one learner
+   * scripting a loop must not be able to spend the school's provider budget
+   * from behind it.
+   *
+   * TIGHTER THAN `aiRequest` (40 an hour against 60), because a conversation
+   * turn costs more than a single question does: it carries retrieved passages
+   * AND up to ten replayed turns, so the same number of requests buys the
+   * provider considerably more text to read. The limit is on the expensive
+   * thing rather than on the visible one.
+   *
+   * It is a COST and ABUSE control, not a correctness one. Nothing about
+   * authorization depends on it, and the security suite asserts the boundaries
+   * hold with rate limiting switched off entirely.
+   */
+  tutorMessage: {
+    name: 'tutor.message',
+    max: 40,
+    timeWindow: '1 hour',
+    rationale: 'A conversation turn carries sources and history, so it costs more than a question.',
+  },
+
+  /**
+   * Starting a tutor conversation (Task 012).
+   *
+   * Cheap in itself — a row and a scope check — but it is the operation that
+   * MULTIPLIES the expensive one: without a bound, a script could open a
+   * thousand conversations and spend a fresh message budget in each. Bounding
+   * creation is what stops the per-conversation cost being unbounded in
+   * aggregate.
+   */
+  tutorConversation: {
+    name: 'tutor.conversation',
+    max: 30,
+    timeWindow: '1 hour',
+    rationale: 'Bounds the multiplier on the per-turn budget rather than the row cost.',
+  },
+
+  /**
    * Rebuilding a course's knowledge-base index (Task 011).
    *
    * THE MOST EXPENSIVE REQUEST ON THE PLATFORM: it reads every published lesson

@@ -39,6 +39,30 @@ export interface AiSource {
   readonly text: string;
 }
 
+/**
+ * One earlier turn in the same conversation.
+ *
+ * ADDED IN TASK 012, and it is the most dangerous field in this interface —
+ * more so than `sources`, which at least everybody already treats as hostile.
+ *
+ * BOTH ROLES ARE UNTRUSTED, and the second one is the surprise. A `learner`
+ * turn is obviously untrusted: it is text a child typed. A `tutor` turn is
+ * MODEL OUTPUT BEING FED BACK IN, which means a single successful manipulation
+ * does not end when the response is sent — it is replayed into the context of
+ * every subsequent turn, as something that looks like the assistant's own
+ * established behaviour. That is how a one-shot jailbreak becomes a persistent
+ * one, and it is a failure mode single-turn assistants simply do not have.
+ *
+ * So history is carried as TYPED TURNS rather than as a pre-joined string, for
+ * the same reason `sources` is: an adapter cannot accidentally concatenate a
+ * previous answer into an instruction position, because there is no string for
+ * it to concatenate. The type is the boundary.
+ */
+export interface AiConversationTurn {
+  readonly role: 'learner' | 'tutor';
+  readonly text: string;
+}
+
 export interface AiRequest {
   /**
    * The platform's own instructions. Server-authored, constant, and never
@@ -49,6 +73,14 @@ export interface AiRequest {
   readonly question: string;
   /** Authorized passages, in priority order. May be empty. */
   readonly sources: readonly AiSource[];
+  /**
+   * Earlier turns of this conversation, oldest first. May be empty.
+   *
+   * Optional so that every existing single-turn caller keeps compiling and
+   * keeps behaving identically — a conversation is a superset of a question,
+   * not a replacement for one.
+   */
+  readonly history?: readonly AiConversationTurn[];
   /** Hard deadline in milliseconds. */
   readonly timeoutMs: number;
   /**

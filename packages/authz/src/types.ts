@@ -200,6 +200,7 @@ export type ResourceKind =
   | 'learning_activity'
   | 'assessment_attempt'
   | 'experiment_session'
+  | 'ai_conversation'
   | 'notebook'
   | 'student_artifact';
 
@@ -643,7 +644,39 @@ export interface StudentArtifactResource extends BaseResource {
   readonly byteSize: number;
 }
 
+/**
+ * One learner's conversation with the AI tutor.
+ *
+ * `observableByActorAsTeacher` and `moderatableByActor` are RESOLVED FROM THE
+ * DATABASE and handed to the policy, not derived here. The same shape
+ * `LessonProgressResource` uses, for the same reason: the policy engine is pure,
+ * so a relationship it cannot look up has to arrive as a fact.
+ *
+ * They are two fields rather than one because they answer different questions
+ * and carry different weight. Teaching this learner this lesson is the ordinary
+ * boundary the platform already uses everywhere; moderating a school is a
+ * SAFETY power that reaches conversations of learners the holder does not
+ * teach. Collapsing them into `canRead` would hide which one admitted a
+ * particular read, and "which authority did this adult use to read a child's
+ * conversation" is exactly the question an audit of this domain has to answer.
+ */
+export interface AiConversationResource extends BaseResource {
+  readonly kind: 'ai_conversation';
+  readonly ownerId: string;
+  readonly organizationId: string | null;
+  readonly lessonId: string;
+  readonly courseId: string;
+  readonly status: 'active' | 'archived';
+  /** The actor teaches this learner, on this lesson. Resolved in SQL. */
+  readonly observableByActorAsTeacher: boolean;
+  /** The actor holds a safety-moderation role in this school. Resolved in SQL. */
+  readonly moderatableByActor: boolean;
+  /** The learner is CURRENTLY studying the anchor lesson. Resolved in SQL. */
+  readonly anchorStillAssigned: boolean;
+}
+
 export type Resource =
+  | AiConversationResource
   | NoteResource
   | UserResource
   | ProfileResource
@@ -943,6 +976,7 @@ export type ClassMembershipAction = (typeof CLASS_MEMBERSHIP_ACTIONS)[number];
 export type GuardianRelationshipAction = (typeof GUARDIAN_RELATIONSHIP_ACTIONS)[number];
 
 export type Action =
+  | AiConversationAction
   | NoteAction
   | UserAction
   | ProfileAction
@@ -962,6 +996,32 @@ export type Action =
   | ExperimentSessionAction
   | NotebookAction
   | StudentArtifactAction;
+
+/**
+ * What may be done with a tutor conversation.
+ *
+ * THERE IS NO `ai_conversation:update` AND NO `ai_conversation:moderate`.
+ *
+ * The first is absent because the only mutable things about a conversation are
+ * its title and its status, and both are covered by `archive` and `rename` —
+ * naming the two operations that exist is more honest than one verb that means
+ * "change something".
+ *
+ * The second is absent because moderation is not a separate ACTION; it is a
+ * separate reason for granting `read`. Making it its own action would let a
+ * future caller ask for `moderate` on a conversation and get a different answer
+ * from `read`, which is precisely the drift that produces two policies
+ * disagreeing about one boundary.
+ */
+export const AI_CONVERSATION_ACTIONS = [
+  'ai_conversation:create',
+  'ai_conversation:read',
+  'ai_conversation:list',
+  'ai_conversation:speak',
+  'ai_conversation:rename',
+  'ai_conversation:archive',
+] as const;
+export type AiConversationAction = (typeof AI_CONVERSATION_ACTIONS)[number];
 
 export const ALL_ACTIONS: readonly Action[] = [
   ...NOTE_ACTIONS,
@@ -986,6 +1046,7 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...EXPERIMENT_SESSION_ACTIONS,
   ...NOTEBOOK_ACTIONS,
   ...STUDENT_ARTIFACT_ACTIONS,
+  ...AI_CONVERSATION_ACTIONS,
 ];
 
 /** The two permissions that split authoring from publishing. See ADR 0009. */

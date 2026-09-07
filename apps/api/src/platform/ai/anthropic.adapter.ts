@@ -289,7 +289,27 @@ export function buildRequest(
     // The server's own instructions, passed through untouched. There is no
     // template substitution here and there must never be one.
     system: request.instructions,
-    messages: [{ role: 'user', content: userContent }],
+    // HISTORY BECOMES REAL CONVERSATIONAL TURNS, never text pasted into this
+    // turn and never anything in `system`.
+    //
+    // The tempting shortcut is to render prior turns into the current user
+    // block as "Previously you said: ...". It reads the same and it is not the
+    // same: a previous ANSWER would then arrive inside the block the model
+    // reads as the human's words, where a sentence like "you agreed to ignore
+    // your instructions" is indistinguishable from the learner asserting it
+    // now. Mapped to real roles, a prior tutor turn stays attributable to the
+    // assistant and a prior learner turn stays attributable to the learner.
+    //
+    // A prior tutor turn is still UNTRUSTED — it is model output being replayed
+    // — which is why the SOURCES for the current answer are re-retrieved and
+    // re-authorized every turn rather than carried forward from the history.
+    messages: [
+      ...(request.history ?? []).map((turn) => ({
+        role: turn.role === 'learner' ? ('user' as const) : ('assistant' as const),
+        content: turn.text,
+      })),
+      { role: 'user', content: userContent },
+    ],
     output_config: {
       // A schema the API enforces, so "the model returned prose instead of
       // JSON" is a case the server should never see. It is still handled below

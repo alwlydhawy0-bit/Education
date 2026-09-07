@@ -53,6 +53,9 @@ import { registerWorkspaceRoutes } from './modules/workspace/workspace.routes.ts
 import { createKnowledgeRepository } from './modules/knowledge/knowledge.repository.ts';
 import { createKnowledgeService } from './modules/knowledge/knowledge.service.ts';
 import { registerKnowledgeRoutes } from './modules/knowledge/knowledge.routes.ts';
+import { createTutorRepository } from './modules/tutor/tutor.repository.ts';
+import { createTutorService } from './modules/tutor/tutor.service.ts';
+import { registerTutorRoutes } from './modules/tutor/tutor.routes.ts';
 import { createDeterministicEmbeddingProvider } from './platform/ai/embeddings.ts';
 import { classCoursesRepository } from './modules/class-courses/class-courses.repository.ts';
 import { createClassCoursesService } from './modules/class-courses/class-courses.service.ts';
@@ -341,9 +344,15 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     });
   })();
 
+  // Shared between the single-turn assistant and the conversational tutor. One
+  // instance rather than two, so a change to how live lessons are searched
+  // reaches both — the tutor falls back to this retriever when the vector index
+  // has nothing, and the two must not be able to disagree about scope.
+  const assistantRepository = createAssistantRepository();
+
   const assistant = createAssistantService({
     db,
-    repository: createAssistantRepository(),
+    repository: assistantRepository,
     engine,
     securityEvents,
     provider: aiProvider,
@@ -392,12 +401,34 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
    */
   const embeddings = createDeterministicEmbeddingProvider();
 
+  const knowledgeRepository = createKnowledgeRepository();
+
   const knowledge = createKnowledgeService({
     db,
-    repository: createKnowledgeRepository(),
+    repository: knowledgeRepository,
     engine,
     securityEvents,
     embeddings,
+  });
+
+  /**
+   * The AI tutor (Task 012).
+   *
+   * It composes rather than duplicates: Task 011's vector retriever for
+   * relevance, Task 013's live full-text retriever as the floor that cannot go
+   * stale, the same policy engine, the same provider abstraction. The only
+   * thing this module owns is the conversation.
+   */
+  const tutor = createTutorService({
+    db,
+    repository: createTutorRepository(),
+    knowledge: knowledgeRepository,
+    assistant: assistantRepository,
+    embeddings,
+    engine,
+    securityEvents,
+    provider: aiProvider,
+    timeoutMs: config.AI_TIMEOUT_MS,
   });
 
   const workspace = createWorkspaceService({
@@ -439,6 +470,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerNotebookRoutes(app, notebook);
   registerWorkspaceRoutes(app, workspace);
   registerKnowledgeRoutes(app, knowledge);
+  registerTutorRoutes(app, tutor);
   registerUsersRoutes(app, users);
   registerOrganizationRoutes(app, organizations);
   registerRelationshipRoutes(app, classes, guardians);

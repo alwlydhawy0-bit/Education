@@ -2386,3 +2386,214 @@ describe('the AI tutor, with RLS disabled', () => {
     expect(response.body).not.toContain('SCHOOLBONLY');
   });
 });
+
+describe('projects and portfolios, with RLS disabled', () => {
+  /**
+   * THE BLOCK THAT ANSWERS "WHICH GATE DID THE WORK?" FOR THE PUBLIC ROUTE.
+   *
+   * `GET /portfolios/share/:key` is the only unauthenticated content route on
+   * this platform, which makes it the one place where standing on a single gate
+   * is least acceptable — and where it was, when this block was first written.
+   *
+   * The resolver originally carried no WHERE clause at all: it selected from
+   * `student_portfolios` and let RLS match the key. That reads well and is
+   * wrong, because with RLS removed it returned whatever portfolio happened to
+   * be first, to anybody, for any key. The repository now asks the same
+   * predicate itself — published, and the presented key matches this row —
+   * from the same transaction-local GUC. These tests are what that fix is for.
+   */
+  async function makeProject(
+    cookie: string,
+    classId: string,
+    visibility: string,
+    title = 'Work',
+  ): Promise<string> {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/projects',
+      headers: { ...writeHeaders, cookie },
+      payload: { title, classId, visibility },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const id = created.json<{ id: string }>().id;
+    await app.inject({
+      method: 'PUT',
+      url: `/api/v1/projects/${id}`,
+      headers: { ...writeHeaders, cookie },
+      payload: { status: 'submitted' },
+    });
+    return id;
+  }
+
+  async function publish(cookie: string, projectId: string): Promise<string> {
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/me/portfolio',
+      headers: { ...writeHeaders, cookie },
+      payload: { title: 'My work' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/me/portfolio/items',
+      headers: { ...writeHeaders, cookie },
+      payload: { projectId },
+    });
+    const published = await app.inject({
+      method: 'POST',
+      url: '/api/v1/me/portfolio/publish',
+      headers: { ...writeHeaders, cookie },
+      // An explicit empty object: `writeHeaders` declares a JSON content type,
+      // and Fastify rejects a body-less request that claims to have one.
+      payload: {},
+    });
+    expect(published.statusCode, published.body).toBe(200);
+    return published.json<{ shareToken: string }>().shareToken;
+  }
+
+  /** One school, one class, two learners in it. */
+  async function classWorld() {
+    const org = await createOrganization('Layered School');
+    const klass = await createClass(org, 'L1');
+    const owner = await registerAndLogin('pf-owner@test.local');
+    const peer = await registerAndLogin('pf-peer@test.local');
+
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      await raw.query('UPDATE users SET organization_id = $1 WHERE id = ANY($2::uuid[])', [
+        org,
+        [owner.id, peer.id],
+      ]);
+    } finally {
+      await raw.end();
+    }
+    await addClassMember(klass, owner.id);
+    await addClassMember(klass, peer.id);
+    return { org, klass, owner, peer };
+  }
+
+  it('REFUSES A PEER READING ANOTHER LEARNER’S PRIVATE PROJECT, with every row visible', async () => {
+    const w = await classWorld();
+    const project = await makeProject(w.owner.cookie, w.klass, 'private');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: `/api/v1/projects/${project}`,
+      headers: { cookie: w.peer.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('REFUSES A PEER UPDATING OR DELETING IT', async () => {
+    const w = await classWorld();
+    const project = await makeProject(w.owner.cookie, w.klass, 'class');
+
+    const updated = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/projects/${project}`,
+      headers: { ...writeHeaders, cookie: w.peer.cookie },
+      payload: { title: 'Mine now' },
+    });
+    expect(updated.statusCode).toBe(404);
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/v1/projects/${project}`,
+      headers: { ...bodylessWriteHeaders, cookie: w.peer.cookie },
+    });
+    expect(deleted.statusCode).toBe(404);
+  });
+
+  it('LISTS ONLY THE CALLER’S OWN PROJECTS', async () => {
+    const w = await classWorld();
+    await makeProject(w.owner.cookie, w.klass, 'public', 'Theirs');
+    await makeProject(w.peer.cookie, w.klass, 'public', 'Mine');
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/me/projects',
+      headers: { cookie: w.peer.cookie },
+    });
+    const items = response.json<{ items: { title: string }[] }>().items;
+    expect(items.map((i) => i.title)).toEqual(['Mine']);
+  });
+
+  it('REFUSES A PEER READING ANOTHER LEARNER’S PORTFOLIO', async () => {
+    const w = await classWorld();
+    const project = await makeProject(w.owner.cookie, w.klass, 'public');
+    await publish(w.owner.cookie, project);
+
+    // `/me/portfolio` resolves by the SESSION's id in the repository's own SQL,
+    // so the peer gets their own absence rather than the owner's page.
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/me/portfolio',
+      headers: { cookie: w.peer.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('SERVES NOTHING FOR A WRONG KEY, with every portfolio visible to the client', async () => {
+    const w = await classWorld();
+    const project = await makeProject(w.owner.cookie, w.klass, 'public', 'Published');
+    await publish(w.owner.cookie, project);
+
+    // THE CASE THAT FAILED. With RLS gone and no WHERE clause, this returned
+    // the owner's page to anybody presenting any well-formed key.
+    const wrong = await app.inject({
+      method: 'GET',
+      url: `/api/v1/portfolios/share/${'d'.repeat(64)}`,
+    });
+    expect(wrong.statusCode).toBe(404);
+    expect(wrong.body).not.toContain('Published');
+  });
+
+  it('SERVES NOTHING ONCE WITHDRAWN, with the row still there to be found', async () => {
+    const w = await classWorld();
+    const project = await makeProject(w.owner.cookie, w.klass, 'public', 'Published');
+    const token = await publish(w.owner.cookie, project);
+    expect((await app.inject({ url: `/api/v1/portfolios/share/${token}` })).statusCode).toBe(200);
+
+    await app.inject({
+      method: 'DELETE',
+      url: '/api/v1/me/portfolio/publish',
+      headers: { ...bodylessWriteHeaders, cookie: w.owner.cookie },
+    });
+
+    const after = await app.inject({ url: `/api/v1/portfolios/share/${token}` });
+    expect(after.statusCode).toBe(404);
+    expect(after.body).not.toContain('Published');
+  });
+
+  it('HIDES A PRIVATE PROJECT FROM THE PUBLIC PAGE, with every row readable', async () => {
+    const w = await classWorld();
+    const shown = await makeProject(w.owner.cookie, w.klass, 'public', 'Shown');
+    const token = await publish(w.owner.cookie, shown);
+
+    const hidden = await makeProject(w.owner.cookie, w.klass, 'private', 'HIDDENWORK');
+    await app.inject({
+      method: 'POST',
+      url: '/api/v1/me/portfolio/items',
+      headers: { ...writeHeaders, cookie: w.owner.cookie },
+      payload: { projectId: hidden },
+    });
+
+    const page = await app.inject({ url: `/api/v1/portfolios/share/${token}` });
+    expect(page.statusCode).toBe(200);
+    expect(page.body).not.toContain('HIDDENWORK');
+    expect(page.json<{ projects: unknown[] }>().projects).toHaveLength(1);
+  });
+
+  it('NEVER PUTS AN IDENTIFIER ON THE PUBLIC PAGE, whatever the database returns', async () => {
+    const w = await classWorld();
+    const project = await makeProject(w.owner.cookie, w.klass, 'public');
+    const token = await publish(w.owner.cookie, project);
+
+    // The sanitizer is a pure constructor, so this holds with no gate at all:
+    // it is the one control in this domain that does not depend on a query.
+    const body = (await app.inject({ url: `/api/v1/portfolios/share/${token}` })).body;
+    for (const secret of [project, w.owner.id, w.org, w.klass, token, 'pf-owner@test.local']) {
+      expect(body, `${secret} leaked`).not.toContain(secret);
+    }
+  });
+});

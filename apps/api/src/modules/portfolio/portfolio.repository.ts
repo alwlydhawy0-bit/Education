@@ -625,15 +625,30 @@ export const portfolioRepository: PortfolioRepository = {
   },
 
   /**
-   * The public read: one query, no ids in the result, no parameters.
+   * The public read: two queries, no ids in the result, and no parameters.
    *
-   * NO PARAMETERS IS THE POINT. The key is not in the WHERE clause — it is in
-   * the transaction's GUC, and RLS is what matches it against `share_token` and
-   * `public_slug`. So this function CANNOT be made to return the wrong
-   * portfolio by passing it a different argument, because there is no argument
-   * to pass. A caller who has not opened the door gets zero rows.
+   * NO PARAMETERS IS THE POINT. The key is never an argument — it lives in the
+   * transaction's GUC, read by `app_portfolio_key()`. So this function cannot
+   * be made to return a different portfolio by passing it a different value,
+   * because there is nothing to pass.
    *
-   * The SELECT list is the sanitizer's input and nothing more. No `id`, no
+   * THE WHERE CLAUSES ARE THE SECOND GATE, AND THEY WERE ADDED AFTER THE FACT.
+   * The first version had none: it selected from the tables and let RLS do all
+   * the filtering, on the reasoning that two places deciding one thing is how
+   * they come to disagree. Running the suite against `edu_app_norls` showed
+   * what that reasoning missed — with RLS removed, the resolver returned
+   * whatever portfolio happened to be first, to anybody, for any key. The
+   * platform's ONLY unauthenticated route was standing on a single gate, which
+   * is precisely the arrangement the rest of this architecture exists to avoid.
+   *
+   * These conditions are not a re-derivation of the rule from different facts,
+   * which is the drift the original reasoning feared. They are the SAME
+   * predicate — published, and the presented key matches this row — asked from
+   * the same GUC, in the layer that would still be running if the database's
+   * copy were dropped. Where they could disagree with RLS they answer more
+   * narrowly, and more narrowly on a public route is the safe direction.
+   *
+   * The SELECT lists are the sanitizer's input and nothing more. No `id`, no
    * `student_id`, no `share_token`, no `organization_id`, no timestamps — not
    * because `toPublicPortfolio` would drop them, but so that they are never in
    * the same object as the thing being serialized.
@@ -652,12 +667,20 @@ export const portfolioRepository: PortfolioRepository = {
     const { rows: portfolioRows } = await tx.query<{
       title: string;
       bio: string;
-    }>(`SELECT f.title, f.bio FROM student_portfolios f LIMIT 2`);
+    }>(
+      `SELECT f.title, f.bio
+         FROM student_portfolios f
+        WHERE f.is_published
+          AND app_portfolio_key() IS NOT NULL
+          AND (f.share_token = app_portfolio_key() OR f.public_slug = app_portfolio_key())
+        LIMIT 2`,
+    );
 
     // TWO ROWS IS IMPOSSIBLE AND THEREFORE WORTH REFUSING. `share_token` and
     // `public_slug` are both UNIQUE, so a key can match at most one portfolio;
-    // if it ever matched two, something has gone wrong with the policy and the
-    // safe answer is to serve nothing rather than to pick one.
+    // if it ever matched two, something has gone wrong below this line and the
+    // safe answer is to serve nothing rather than to pick one. `LIMIT 2` exists
+    // to make that detectable — `LIMIT 1` would silently serve the first.
     const portfolioRow = portfolioRows.length === 1 ? portfolioRows[0] : undefined;
     if (!portfolioRow) return null;
 
@@ -675,6 +698,12 @@ export const portfolioRepository: PortfolioRepository = {
               ${ARTIFACTS_JSON} AS artifacts
          FROM portfolio_items i
          JOIN student_projects p ON p.id = i.project_id
+         JOIN student_portfolios f ON f.id = i.portfolio_id
+        WHERE f.is_published
+          AND app_portfolio_key() IS NOT NULL
+          AND (f.share_token = app_portfolio_key() OR f.public_slug = app_portfolio_key())
+          AND p.visibility = 'public'
+          AND p.status <> 'draft'
         ORDER BY i.display_order, i.created_at
         LIMIT 500`,
     );

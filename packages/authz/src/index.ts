@@ -21,3 +21,4 @@ export { assessmentAttemptPolicy } from './policies/assessment-attempt.policy.ts
 export { experimentSessionPolicy } from './policies/experiment-session.policy.ts';
 export { notebookPolicy, studentArtifactPolicy } from './policies/workspace.policy.ts';
 export { aiConversationPolicy } from './policies/ai-conversation.policy.ts';
+export { studentProjectPolicy, studentPortfolioPolicy } from './policies/portfolio.policy.ts';

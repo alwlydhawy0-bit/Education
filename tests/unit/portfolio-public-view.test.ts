@@ -101,7 +101,7 @@ describe('toPublicPortfolio — no identifier leaves the boundary', () => {
           metadata: { uploaderEmail: SECRETS.email },
         },
       ],
-    } as ProjectSourceRow;
+    } as unknown as ProjectSourceRow;
 
     const view = toPublicPortfolio(dirtyPortfolio, [dirtyProject]);
     const serialized = JSON.stringify(view);

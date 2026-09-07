@@ -288,6 +288,42 @@ export const RATE_LIMIT_POLICIES = {
   },
 
   /** Guessing a verification token is the attack this bounds. */
+  /**
+   * THE PUBLIC PORTFOLIO RESOLVER — the only unauthenticated route on this
+   * platform that reads children's content.
+   *
+   * Tighter than every other read policy, and keyed by IP because there is no
+   * actor to key by. Two things make this the route that needs a number:
+   *
+   *   - A `public_slug` is a GUESSABLE NAME, not a secret. Somebody walking the
+   *     namespace — `/portfolios/share/ahmed`, `/omar`, `/sara` — is enumerating
+   *     children's public pages, and the only thing standing between them and
+   *     doing it quickly is this limit.
+   *
+   *   - Every miss is a database round trip that runs RLS over four tables, so
+   *     an unauthenticated caller can spend the platform's CPU without ever
+   *     logging in.
+   *
+   * A share token is 256 bits and not worth guessing at any rate, so the number
+   * is set for the slug case. 60 in 15 minutes leaves a classroom of learners
+   * opening each other's shared links comfortable room while making a walk of
+   * the namespace take a very long time.
+   */
+  publicPortfolio: {
+    name: 'portfolio.public',
+    max: 60,
+    timeWindow: '15 minutes',
+    rationale: 'Slug enumeration against an unauthenticated route serving minors\' pages.',
+  },
+
+  /** Creating or editing a project. Row-count abuse, as with artifacts. */
+  projectWrite: {
+    name: 'project.write',
+    max: 120,
+    timeWindow: '15 minutes',
+    rationale: 'Row-count abuse on a table with no byte quota to bound it.',
+  },
+
   authVerifyEmail: {
     name: 'auth.verify_email',
     max: 20,

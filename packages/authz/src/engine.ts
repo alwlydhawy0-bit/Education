@@ -19,6 +19,10 @@ import { experimentSessionPolicy } from './policies/experiment-session.policy.ts
 import { notebookPolicy, studentArtifactPolicy } from './policies/workspace.policy.ts';
 import { aiConversationPolicy } from './policies/ai-conversation.policy.ts';
 import {
+  studentPortfolioPolicy,
+  studentProjectPolicy,
+} from './policies/portfolio.policy.ts';
+import {
   resourceKindForAction,
   type Action,
   type AuthorizationContext,
@@ -84,6 +88,8 @@ const DEFAULT_POLICIES: Readonly<Record<ResourceKind, PolicyFn>> = Object.freeze
   ai_conversation: aiConversationPolicy as unknown as PolicyFn,
   notebook: notebookPolicy as unknown as PolicyFn,
   student_artifact: studentArtifactPolicy as unknown as PolicyFn,
+  student_project: studentProjectPolicy as unknown as PolicyFn,
+  student_portfolio: studentPortfolioPolicy as unknown as PolicyFn,
 });
 
 export function createPolicyEngine(

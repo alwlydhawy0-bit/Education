@@ -57,6 +57,9 @@ import { createTutorRepository } from './modules/tutor/tutor.repository.ts';
 import type { TutorRetriever } from './modules/tutor/retrieval.port.ts';
 import { createTutorService } from './modules/tutor/tutor.service.ts';
 import { registerTutorRoutes } from './modules/tutor/tutor.routes.ts';
+import { portfolioRepository } from './modules/portfolio/portfolio.repository.ts';
+import { createPortfolioService } from './modules/portfolio/portfolio.service.ts';
+import { registerPortfolioRoutes } from './modules/portfolio/portfolio.routes.ts';
 import { createDeterministicEmbeddingProvider } from './platform/ai/embeddings.ts';
 import { classCoursesRepository } from './modules/class-courses/class-courses.repository.ts';
 import { createClassCoursesService } from './modules/class-courses/class-courses.service.ts';
@@ -487,6 +490,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     securityEvents,
   });
 
+  const portfolio = createPortfolioService({
+    db,
+    repository: portfolioRepository,
+    engine,
+    securityEvents,
+  });
+
   const notebook = createNotebookService({
     db,
     repository: notebookRepository,
@@ -520,6 +530,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerWorkspaceRoutes(app, workspace);
   registerKnowledgeRoutes(app, knowledge);
   registerTutorRoutes(app, tutor);
+  registerPortfolioRoutes(app, portfolio);
   registerUsersRoutes(app, users);
   registerOrganizationRoutes(app, organizations);
   registerRelationshipRoutes(app, classes, guardians);

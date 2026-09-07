@@ -202,7 +202,9 @@ export type ResourceKind =
   | 'experiment_session'
   | 'ai_conversation'
   | 'notebook'
-  | 'student_artifact';
+  | 'student_artifact'
+  | 'student_project'
+  | 'student_portfolio';
 
 export interface BaseResource {
   readonly kind: ResourceKind;
@@ -675,6 +677,72 @@ export interface AiConversationResource extends BaseResource {
   readonly anchorStillAssigned: boolean;
 }
 
+
+export type ProjectVisibility = 'private' | 'class' | 'public';
+export type ProjectStatus = 'draft' | 'submitted' | 'featured';
+
+/**
+ * A piece of work a learner made and may choose to show.
+ *
+ * IT CARRIES `visibility` WHERE `NotebookResource` DELIBERATELY DOES NOT, and
+ * the contrast is the point of this domain. A notebook is private machinery; a
+ * project is a thing made to be shown, and the whole of TASK 013 is about the
+ * three settings a learner may choose between. So the field is here, the policy
+ * branches on it, and the database branches on it too.
+ *
+ * `sharesClassWithActor` and `reviewableByActor` are RESOLVED IN SQL and handed
+ * in as facts, the shape `AiConversationResource` uses. They are separate
+ * fields for the same reason: being a classmate and being the adult responsible
+ * for the class are different authorities that admit different things, and an
+ * audit has to be able to say which one was used.
+ *
+ * THERE IS NO `publiclyListed` FIELD, and its absence is deliberate. The public
+ * path never reaches this policy at all — a stranger has no actor, so there is
+ * no `ctx` to evaluate. That boundary is held by RLS plus the sanitizer in
+ * `public-view.ts`, and giving this policy a public branch would create a second
+ * place that decides it, free to drift from the first.
+ */
+export interface StudentProjectResource extends BaseResource {
+  readonly kind: 'student_project';
+  readonly ownerId: string;
+  readonly organizationId: string | null;
+  /** NULL when the learner made it outside any class. */
+  readonly classId: string | null;
+  readonly visibility: ProjectVisibility;
+  readonly status: ProjectStatus;
+  /** The actor is a learner in this project's class. Resolved in SQL. */
+  readonly sharesClassWithActor: boolean;
+  /** The actor teaches this class or administers this school. Resolved in SQL. */
+  readonly reviewableByActor: boolean;
+}
+
+/**
+ * A learner's portfolio: the page that presents chosen projects together.
+ *
+ * ONE PER LEARNER, enforced by a UNIQUE constraint on `student_id`, which is
+ * why every route that touches one is addressed as `/me/portfolio` rather than
+ * by id. The policy is correspondingly short: the owner, and nobody else.
+ *
+ * NO ADULT BRANCH, not even for the teacher who may read the projects inside
+ * it. A teacher reads a project because they supervise the work; a portfolio is
+ * an act of presentation the learner composes, and reading their draft
+ * arrangement of it is not part of supervising the work. The projects remain
+ * visible to that teacher through `studentProjectPolicy` either way, so nothing
+ * about oversight is lost.
+ *
+ * `isPublished` is here because `publish` is refused on a portfolio that has no
+ * public projects in it — see the policy — and that check needs the flag plus
+ * the count, not an id lookup.
+ */
+export interface StudentPortfolioResource extends BaseResource {
+  readonly kind: 'student_portfolio';
+  readonly ownerId: string;
+  readonly organizationId: string | null;
+  readonly isPublished: boolean;
+  /** How many `public` projects the portfolio currently lists. Resolved in SQL. */
+  readonly publicItemCount: number;
+}
+
 export type Resource =
   | AiConversationResource
   | NoteResource
@@ -698,7 +766,9 @@ export type Resource =
   | AssessmentAttemptResource
   | ExperimentSessionResource
   | NotebookResource
-  | StudentArtifactResource;
+  | StudentArtifactResource
+  | StudentProjectResource
+  | StudentPortfolioResource;
 
 // --- Actions -------------------------------------------------------------
 // An action is `<resourceKind>:<verb>`. The engine enforces that the prefix
@@ -965,6 +1035,59 @@ export const STUDENT_ARTIFACT_ACTIONS = [
 
 export type StudentArtifactAction = (typeof STUDENT_ARTIFACT_ACTIONS)[number];
 
+
+/**
+ * What may be done with a project.
+ *
+ * `feature` IS ITS OWN VERB rather than a flavour of `update`, because the
+ * authority behind it is a different one and reaches exactly one column. A
+ * teacher who could `update` could rewrite a child's description; a teacher who
+ * may `feature` may move `status` to 'featured' and nothing else. The database
+ * says the same thing twice — a separate `student_projects_feature` policy and
+ * the `student_project_review_guard` trigger — and this vocabulary is the third
+ * place, in the layer that can explain a refusal.
+ *
+ * THERE IS NO `student_project:publish`. Making a project public is an
+ * ordinary `update` of the `visibility` column by its owner, and inventing a
+ * verb for it would suggest somebody other than the owner might hold it.
+ */
+export const STUDENT_PROJECT_ACTIONS = [
+  'student_project:create',
+  'student_project:read',
+  'student_project:list',
+  'student_project:update',
+  'student_project:delete',
+  'student_project:feature',
+] as const;
+
+export type StudentProjectAction = (typeof STUDENT_PROJECT_ACTIONS)[number];
+
+/**
+ * What may be done with a portfolio.
+ *
+ * `curate` COVERS ADDING AND REMOVING ITEMS, and `portfolio_items` has no
+ * resource kind of its own. That is a judgement worth stating: an item has no
+ * independent authorization identity — its `owner_id` is the portfolio owner's,
+ * enforced by a composite foreign key rather than by a rule anybody has to
+ * remember — so a policy for it could only ever repeat the portfolio's. Two
+ * places stating one rule is how they come to disagree.
+ *
+ * `publish` and `unpublish` are separate verbs rather than an `update` of the
+ * flag, because they are the two moments this domain most needs to audit.
+ * "Who made this child's work visible to the internet, and when did they take
+ * it down again" is answerable from the action name alone.
+ */
+export const STUDENT_PORTFOLIO_ACTIONS = [
+  'student_portfolio:create',
+  'student_portfolio:read',
+  'student_portfolio:update',
+  'student_portfolio:curate',
+  'student_portfolio:publish',
+  'student_portfolio:unpublish',
+] as const;
+
+export type StudentPortfolioAction = (typeof STUDENT_PORTFOLIO_ACTIONS)[number];
+
 export type NoteAction = (typeof NOTE_ACTIONS)[number];
 export type UserAction = (typeof USER_ACTIONS)[number];
 export type ProfileAction = (typeof PROFILE_ACTIONS)[number];
@@ -995,7 +1118,9 @@ export type Action =
   | AssessmentAttemptAction
   | ExperimentSessionAction
   | NotebookAction
-  | StudentArtifactAction;
+  | StudentArtifactAction
+  | StudentProjectAction
+  | StudentPortfolioAction;
 
 /**
  * What may be done with a tutor conversation.
@@ -1047,6 +1172,8 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...NOTEBOOK_ACTIONS,
   ...STUDENT_ARTIFACT_ACTIONS,
   ...AI_CONVERSATION_ACTIONS,
+  ...STUDENT_PROJECT_ACTIONS,
+  ...STUDENT_PORTFOLIO_ACTIONS,
 ];
 
 /** The two permissions that split authoring from publishing. See ADR 0009. */

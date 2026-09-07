@@ -398,6 +398,47 @@ export const SecurityEventType = {
    * configuration loader refuses these outright in production and staging, so
    * this records the deviations that ARE permitted elsewhere.
    */
+  /**
+   * A learner published or withdrew their portfolio.
+   *
+   * BOTH ARE RECORDED, and the withdrawal is the more important of the two.
+   * Unpublishing rotates the share token, which invalidates every link ever
+   * handed out — including links this platform never saw. If a stranger later
+   * reports still being able to reach the page, this event is the record that
+   * says when the revocation happened and therefore whether the report is
+   * about a cache, a mirror, or a bug in the rotation.
+   */
+  PORTFOLIO_PUBLISHED: 'portfolio.published',
+  PORTFOLIO_UNPUBLISHED: 'portfolio.unpublished',
+
+  /**
+   * A teacher or administrator featured a learner's project.
+   *
+   * The one thing an adult may do TO a project, and the only write in this
+   * domain performed by somebody other than the owner. Recorded with the
+   * reviewer's id, because "who decided this child's work was exemplary" is a
+   * question a school may need answered — and because a reviewer featuring
+   * projects across classes they do not teach is a signal worth being able to
+   * find after the fact.
+   */
+  PROJECT_FEATURED: 'project.featured',
+
+  /**
+   * An unauthenticated caller presented a portfolio key that opened nothing.
+   *
+   * THE ONE ENUMERATION SIGNAL IN THIS DOMAIN, and it exists because the public
+   * resolver is the only route on this platform that answers without a session.
+   * A share token is 256 bits and not worth guessing; a SLUG is a guessable
+   * name, so a burst of misses from one address is somebody walking the
+   * namespace looking for children's pages. There is no actor to attribute it
+   * to, so the record carries the address and nothing about the key beyond
+   * whether it was token-shaped.
+   *
+   * The key itself is NEVER recorded. A valid token in a log is a working
+   * capability sitting in a file more people can read than the page it opens.
+   */
+  PORTFOLIO_PUBLIC_RESOLVE_FAILED: 'portfolio.public_resolve_failed',
+
   SECURITY_CONFIG_DEVIATION: 'security.config_deviation',
 } as const;
 

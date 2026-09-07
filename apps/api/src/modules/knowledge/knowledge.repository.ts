@@ -18,19 +18,28 @@ import type { CurriculumChunk, LessonSource } from './chunking.ts';
  * 2. EVERY RETRIEVAL JOINS THE LIVE LESSON. Not for the text — the chunk has
  *    that — but for the LIFECYCLE and the FRESHNESS. The join is what makes an
  *    archived lesson's chunks disappear with no invalidation path, and the
- *    `source_hash` comparison beside it is what stops an edited lesson serving
+ *    `source_updated_at` comparison beside it is what stops an edited lesson serving
  *    the text it used to have. Migration 0026 answers 0023's objections with
  *    these two clauses; deleting either re-opens one.
  *
- * FRESHNESS IS AN EQUALITY, NOT A RECOMPUTATION, and that is worth its own
- * paragraph because the first draft got it wrong. It hashed the lesson text in
- * SQL and compared the digest against one the indexer computed in TypeScript —
- * two implementations of one normalization (whitespace, field order, whether
- * objectives are included), whose inevitable drift would have presented as
- * "retrieval silently returns nothing" rather than as an error.
+ * FRESHNESS IS AN EQUALITY OVER AN EXACTLY-PRESERVED VALUE, and it took two
+ * mistakes to arrive at that sentence. The first draft hashed the lesson text
+ * in SQL and compared the digest against one the indexer computed in
+ * TypeScript — two implementations of one normalization (whitespace, field
+ * order, whether objectives are included), whose inevitable drift would have
+ * presented as "retrieval silently returns nothing" rather than as an error.
  * `lessons.updated_at` is already this platform's definition of "has this
  * changed" — it is the optimistic-concurrency precondition for every lesson
  * write — so reusing it means one definition and nothing to keep in sync.
+ *
+ * The second mistake was to think that settled it. Reusing one value is not
+ * enough if the value is reshaped in transit: `timestamptz` keeps microseconds
+ * and a JavaScript `Date` does not, so reading the column into a `Date` and
+ * writing it back stored a truncated copy and the equality was false for every
+ * chunk in the table. The feature returned an empty result to every learner,
+ * with no error anywhere. The lesson generalises past this column: an equality
+ * is only as good as the fidelity of the carrier between the two reads, so the
+ * timestamp travels as PostgreSQL's own text and is never parsed on the way.
  *
  * 3. NOTHING HERE READS A LEARNER'S WORKSPACE. `notes`, `student_notebooks`
  *    and `student_artifacts` appear in no query in this file, and
@@ -82,7 +91,7 @@ export interface KnowledgeRepository {
     chunks: readonly CurriculumChunk[],
     vectors: readonly number[][],
     model: string,
-    sourceUpdatedAtByLesson: ReadonlyMap<string, Date>,
+    sourceUpdatedAtByLesson: ReadonlyMap<string, string>,
   ): Promise<number>;
 
   /**
@@ -168,13 +177,22 @@ export function createKnowledgeRepository(): KnowledgeRepository {
         title: string;
         summary: string;
         content_body: string;
-        updated_at: Date;
+        updated_at: string;
         objectives: Array<{ id: string; statement: string }> | null;
       }>(
         `SELECT l.id AS lesson_id, l.unit_id, u.course_id,
                 app_course_organization(u.course_id) AS organization_id,
                 l.title, coalesce(l.summary, '') AS summary,
-                coalesce(l.content_body, '') AS content_body, l.updated_at,
+                coalesce(l.content_body, '') AS content_body,
+                -- ::text, NOT the bare column. node-pg parses timestamptz
+                -- into a JavaScript Date, which is MILLISECOND-resolution,
+                -- while the column is MICROSECOND-resolution. Round-tripping
+                -- through a Date truncates ...613776 to ...613, and the
+                -- freshness equality below is then false for every chunk that
+                -- was ever written: retrieval returns nothing, silently, for
+                -- everyone. Text is the only lossless carrier, so the value
+                -- never leaves that form between reading it and storing it.
+                l.updated_at::text AS updated_at,
                 (SELECT json_agg(json_build_object('id', o.id, 'statement', o.statement)
                                  ORDER BY o.position)
                    FROM learning_objectives o
@@ -240,7 +258,7 @@ export function createKnowledgeRepository(): KnowledgeRepository {
       const indexes: number[] = [];
       const contents: string[] = [];
       const literals: string[] = [];
-      const stamps: Date[] = [];
+      const stamps: string[] = [];
       const metadata: string[] = [];
 
       for (const [i, chunk] of chunks.entries()) {
@@ -265,7 +283,7 @@ export function createKnowledgeRepository(): KnowledgeRepository {
       const { rowCount } = await tx.query(
         `INSERT INTO curriculum_embeddings
            (lesson_id, course_id, unit_id, chunk_index, chunk_content,
-            embedding, embedding_model, source_hash, metadata)
+            embedding, embedding_model, source_updated_at, metadata)
          SELECT t.lesson_id,
                 t.lesson_id,   -- overwritten by curriculum_embeddings_ancestry
                 t.lesson_id,   -- overwritten by curriculum_embeddings_ancestry

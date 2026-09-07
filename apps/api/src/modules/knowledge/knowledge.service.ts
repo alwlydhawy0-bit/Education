@@ -128,7 +128,7 @@ export function createKnowledgeService(deps: KnowledgeServiceDeps): KnowledgeSer
         const removed = await repository.clearCourseIndex(tx, courseId, embeddings.model);
 
         const chunks: CurriculumChunk[] = [];
-        const sourceUpdatedAt = new Map<string, Date>();
+        const sourceUpdatedAt = new Map<string, string>();
         for (const lesson of lessons) {
           chunks.push(...chunkLesson(lesson));
           sourceUpdatedAt.set(lesson.lessonId, lesson.updatedAt);

@@ -77,12 +77,23 @@ export interface LessonSource extends ChunkAncestry {
   readonly contentBody: string;
   readonly objectives: ReadonlyArray<{ readonly id: string; readonly statement: string }>;
   /**
-   * The lesson's `updated_at` at the moment it was read.
+   * The lesson's `updated_at` at the moment it was read, as PostgreSQL's OWN
+   * text rendering of it — never a JavaScript `Date`.
    *
-   * Stored on every chunk cut from it and compared against the live column at
-   * retrieval time, so an edit makes the chunks invisible rather than stale.
+   * Stored on every chunk cut from it and compared for EQUALITY against the
+   * live column at retrieval time, so an edit makes the chunks invisible
+   * rather than stale.
+   *
+   * THE TYPE IS `string` FOR A REASON, and it cost a defect to learn it.
+   * `timestamptz` has microsecond resolution; a JavaScript `Date` has
+   * millisecond resolution. Reading the column into a `Date` and writing it
+   * back therefore stores `…613` where the row holds `…613776`, and the
+   * equality is false for EVERY chunk ever written — retrieval silently
+   * returns nothing at all, for everyone, forever. Keeping the value in the
+   * only representation that is lossless for it — the text PostgreSQL itself
+   * produced — is what makes the comparison mean what it reads as.
    */
-  readonly updatedAt: Date;
+  readonly updatedAt: string;
 }
 
 /** Collapses runs of whitespace without touching the characters themselves. */

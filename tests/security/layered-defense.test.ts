@@ -1689,3 +1689,273 @@ describe('the student workspace, with RLS disabled', () => {
     expect(response.body).not.toContain('my working out');
   });
 });
+
+describe('the curriculum knowledge base, with RLS disabled', () => {
+  /**
+   * THE BLOCK THAT ANSWERS "WHICH GATE DID THE WORK?" FOR VECTOR RETRIEVAL —
+   * and for this feature the answer has to be the application, because the
+   * application is where the requirement actually lives.
+   *
+   * Section 3 of the task forbids unbounded vector search filtered after the
+   * fact. RLS alone could satisfy "the learner never SEES another school's
+   * chunk" while completely failing that requirement: a policy is a predicate
+   * the planner may apply wherever it likes, and `ORDER BY embedding <=> $1
+   * LIMIT 10` under a row policy is entitled to rank first and discard after.
+   * The result would be correct and the property would be gone.
+   *
+   * `coursesInScope` is therefore computed in application SQL and passed in as
+   * an explicit `course_id = ANY($1)`, and this block is what proves that list
+   * is load-bearing rather than decorative. With BYPASSRLS every embedding row
+   * in the database is visible to the connection: if a school B learner still
+   * gets nothing from school A here, the pre-filter did it alone.
+   *
+   * The mirror image — RLS standing alone, with no application code in the
+   * path — is `tests/integration/rls-embeddings.test.ts`.
+   */
+  async function seedAndLogin(
+    email: string,
+    roles: readonly string[] | undefined,
+    organizationId: string | null,
+  ): Promise<{ id: string; cookie: string }> {
+    const user = await createUser({
+      email,
+      ...(roles ? { roles } : {}),
+      organizationId,
+      passwordHash: await hashPassword(PASSWORD),
+    });
+    const loggedIn = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: writeHeaders,
+      payload: { email, password: PASSWORD },
+    });
+    expect(loggedIn.statusCode).toBe(204);
+    return {
+      id: user.id,
+      cookie: `edu_session=${sessionCookieFrom(loggedIn.headers['set-cookie'])}`,
+    };
+  }
+
+  const MITOCHONDRIA = [
+    'The mitochondrion is the organelle where respiration releases energy.',
+    'Respiration in the mitochondrion converts glucose and oxygen into usable energy.',
+    'Energy released by respiration is carried around the cell as ATP molecules.',
+  ]
+    .join('\n\n')
+    .repeat(6);
+
+  /** Two schools, each with one enrolled learner and one indexed course. */
+  async function twoSchools() {
+    const orgA = await createOrganization('Vector School A');
+    const orgB = await createOrganization('Vector School B');
+    const levelId = await createEducationLevel();
+
+    const learnerA = await seedAndLogin('nrls-rag-learner-a@test.local', undefined, orgA);
+    const learnerB = await seedAndLogin('nrls-rag-learner-b@test.local', undefined, orgB);
+    const reviewerA = await seedAndLogin('nrls-rag-reviewer-a@test.local', ['reviewer'], orgA);
+    const reviewerB = await seedAndLogin('nrls-rag-reviewer-b@test.local', ['reviewer'], orgB);
+
+    const build = async (
+      organizationId: string,
+      code: string,
+      title: string,
+      marker: string,
+    ): Promise<string> => {
+      const curriculumId = await createCurriculum({ organizationId, code, status: 'published' });
+      const courseId = await createCourse({
+        organizationId,
+        curriculumId,
+        levelId,
+        title,
+        status: 'published',
+      });
+      const unitId = await createUnit({ courseId, status: 'published' });
+      await createLesson({
+        unitId,
+        title: `${title} lesson`,
+        status: 'published',
+        contentBody: `${marker} ${MITOCHONDRIA}`,
+      });
+      return courseId;
+    };
+
+    const courseA = await build(orgA, 'bio', 'School A biology', 'SCHOOLAONLY');
+    const courseB = await build(orgB, 'sci', 'School B biology', 'SCHOOLBONLY');
+
+    const classA = await createClass(orgA, 'Vector Class A');
+    await addClassMember(classA, learnerA.id);
+    await assignCourseToClass({ classId: classA, courseId: courseA });
+
+    const classB = await createClass(orgB, 'Vector Class B');
+    await addClassMember(classB, learnerB.id);
+    await assignCourseToClass({ classId: classB, courseId: courseB });
+
+    return { learnerA, learnerB, reviewerA, reviewerB, courseA, courseB, classA };
+  }
+
+  const indexCourse = async (cookie: string, courseId: string) => {
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/curriculum/courses/${courseId}/index`,
+      headers: { ...bodylessWriteHeaders, cookie },
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return response.json<{ chunksWritten: number }>();
+  };
+
+  const retrieve = async (cookie: string, payload: Record<string, unknown>) => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/rag/retrieve',
+      headers: { ...writeHeaders, cookie },
+      payload,
+    });
+    expect(response.statusCode, response.body).toBe(200);
+    return {
+      raw: response.body,
+      body: response.json<{
+        chunks: Array<{ courseId: string; content: string }>;
+        coursesInScope: number;
+      }>(),
+    };
+  };
+
+  it('CONFIRMS BOTH SCHOOLS ARE IN THE TABLE, so the next tests mean something', async () => {
+    const w = await twoSchools();
+    await indexCourse(w.reviewerA.cookie, w.courseA);
+    await indexCourse(w.reviewerB.cookie, w.courseB);
+
+    // Read with a raw connection and no actor set. Under RLS this is zero rows;
+    // here it must show both schools' vectors, which is what makes the
+    // isolation asserted below an application property rather than a database
+    // one. A test that passed because the rows were absent would prove nothing.
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      const { rows } = await raw.query<{ course_id: string }>(
+        'SELECT DISTINCT course_id FROM curriculum_embeddings',
+      );
+      expect(rows.map((r) => r.course_id).sort()).toEqual([w.courseA, w.courseB].sort());
+    } finally {
+      await raw.end();
+    }
+  });
+
+  it('gives a school B learner NOTHING from school A, on the query that matches it', async () => {
+    const w = await twoSchools();
+    await indexCourse(w.reviewerA.cookie, w.courseA);
+    await indexCourse(w.reviewerB.cookie, w.courseB);
+
+    // The same query text that school A's chunks were written from, so a
+    // ranking that ran before the filter would put them at the top.
+    const { raw, body } = await retrieve(w.learnerB.cookie, {
+      query: 'mitochondrion respiration energy',
+      topK: 20,
+    });
+    expect(raw).not.toContain('SCHOOLAONLY');
+    expect(body.coursesInScope).toBe(1);
+    for (const chunk of body.chunks) expect(chunk.courseId).toBe(w.courseB);
+  });
+
+  it('gives a school A learner NOTHING from school B, symmetrically', async () => {
+    const w = await twoSchools();
+    await indexCourse(w.reviewerA.cookie, w.courseA);
+    await indexCourse(w.reviewerB.cookie, w.courseB);
+
+    const { raw, body } = await retrieve(w.learnerA.cookie, {
+      query: 'mitochondrion respiration energy',
+      topK: 20,
+    });
+    expect(raw).not.toContain('SCHOOLBONLY');
+    for (const chunk of body.chunks) expect(chunk.courseId).toBe(w.courseA);
+  });
+
+  it('REFUSES A NAMED CROSS-TENANT courseId by narrowing to nothing, not by trusting it', async () => {
+    const w = await twoSchools();
+    await indexCourse(w.reviewerA.cookie, w.courseA);
+    await indexCourse(w.reviewerB.cookie, w.courseB);
+
+    // The client asks, explicitly and by exact id, for the other school's
+    // course. The filter is an INTERSECTION with what the actor may study, so
+    // naming a course cannot add it — and with RLS gone, the intersection is
+    // the only thing standing between this request and the row.
+    const { raw, body } = await retrieve(w.learnerA.cookie, {
+      query: 'mitochondrion respiration energy',
+      courseId: w.courseB,
+      topK: 20,
+    });
+    expect(body.chunks).toEqual([]);
+    expect(raw).not.toContain('SCHOOLBONLY');
+  });
+
+  it('gives a learner in no class an empty result, not the whole table', async () => {
+    const w = await twoSchools();
+    await indexCourse(w.reviewerA.cookie, w.courseA);
+    await indexCourse(w.reviewerB.cookie, w.courseB);
+    const outsider = await seedAndLogin('nrls-rag-outsider@test.local', undefined, null);
+
+    // An empty scope is the case where "filter afterwards" and "filter first"
+    // differ most sharply: post-hoc filtering of an unbounded search would have
+    // read every tenant's vectors to arrive at this same empty array.
+    const { raw, body } = await retrieve(outsider.cookie, {
+      query: 'mitochondrion respiration energy',
+      topK: 20,
+    });
+    expect(body.chunks).toEqual([]);
+    expect(body.coursesInScope).toBe(0);
+    expect(raw).not.toContain('SCHOOLAONLY');
+    expect(raw).not.toContain('SCHOOLBONLY');
+  });
+
+  it('still refuses a learner the right to REBUILD the index', async () => {
+    const w = await twoSchools();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/curriculum/courses/${w.courseA}/index`,
+      headers: { ...bodylessWriteHeaders, cookie: w.learnerA.cookie },
+    });
+    // Nothing about this refusal is the database's doing: `edu_app_norls` has
+    // the INSERT grant and BYPASSRLS. The policy engine refused it.
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('still refuses a reviewer indexing ANOTHER school’s course', async () => {
+    const w = await twoSchools();
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/v1/curriculum/courses/${w.courseB}/index`,
+      headers: { ...bodylessWriteHeaders, cookie: w.reviewerA.cookie },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('stops serving an EDITED lesson with RLS gone, so freshness is not a policy either', async () => {
+    const w = await twoSchools();
+    await indexCourse(w.reviewerA.cookie, w.courseA);
+    expect((await retrieve(w.learnerA.cookie, { query: 'mitochondrion respiration' })).body.chunks
+      .length).toBeGreaterThan(0);
+
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      await raw.query(
+        `UPDATE lessons SET content_body = 'Replaced text about ribosomes.', updated_at = now()
+          WHERE unit_id IN (SELECT id FROM course_units WHERE course_id = $1)`,
+        [w.courseA],
+      );
+    } finally {
+      await raw.end();
+    }
+
+    // The stale chunks are still in the table and still visible to this
+    // connection. The `source_updated_at = l.updated_at` join in the retrieval
+    // query is what withdraws them, and it is application SQL — no row policy
+    // is involved in freshness at all.
+    const { raw: bodyText, body } = await retrieve(w.learnerA.cookie, {
+      query: 'mitochondrion respiration energy',
+      topK: 20,
+    });
+    expect(body.chunks).toEqual([]);
+    expect(bodyText).not.toContain('SCHOOLAONLY');
+  });
+});

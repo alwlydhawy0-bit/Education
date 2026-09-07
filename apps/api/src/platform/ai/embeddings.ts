@@ -154,11 +154,6 @@ export function createDeterministicEmbeddingProvider(): EmbeddingProvider {
   };
 }
 
-/** The digest stored on every chunk and re-checked at retrieval time. */
-export function sourceHash(text: string): string {
-  return createHash('sha256').update(text, 'utf8').digest('hex');
-}
-
 /** pgvector's text input format. Built here so no caller hand-rolls it. */
 export function toVectorLiteral(values: readonly number[]): string {
   if (values.length !== EMBEDDING_DIMENSIONS) {

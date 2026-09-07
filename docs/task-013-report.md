@@ -254,9 +254,40 @@ All suites run against a database rebuilt from all 28 migrations by
 | HTTP / IDOR            | `tests/security/portfolio.test.ts` | 62 |
 | Layered defence (RLS off) | `tests/security/layered-defense.test.ts` (new block) | 10 |
 
-Whole-project gates: `pnpm typecheck` clean, `pnpm lint` clean,
-unit + architecture 1330 passing across 36 files, the two portfolio HTTP
-suites 151 passing.
+Whole-project gates: `pnpm typecheck` clean, `pnpm lint` clean, and the full
+six-project run **86 files / 2933 tests passing**, exit 0.
+
+### Live boot check
+
+The suites drive the app through `app.inject`. A booted server is a different
+thing, and it found something they could not: the first run returned **500** on
+the public route, from `function app_begin_public_portfolio(unknown) does not
+exist`. The development database was simply behind — migration 0028 had never
+been applied there. Not a code defect, but exactly the class of problem a boot
+check exists to catch, and it would have been a production outage on the one
+route with no session to fail closed on.
+
+After migrating, against a real process on a real database:
+
+| Check | Result |
+| ----- | ------ |
+| Published portfolio by `share_token` | 200, one project, correct body |
+| Same portfolio by `public_slug` | byte-identical to the token response |
+| Headers on the 200 | `cache-control: no-store`, `x-robots-tag: noindex` |
+| Token-shaped and slug-shaped misses | 404, identical bodies |
+| Malformed, traversal, SQL-shaped keys | 400, before any query |
+| Every other portfolio route, anonymous | 401 (nine routes checked) |
+| Zero leakage, searched by value | portfolio id, project id, student id, organization id, share token and email all absent |
+| Project set to `private` | page drops to zero projects on the next request |
+| Portfolio unpublished | old token 404, slug 404, token rotated |
+
+**One thing only the real logger could show.** The server's error log recorded
+the failing path as `/api/v1/portfolios/share/[REDACTED]` for the token-shaped
+key and `/api/v1/portfolios/share/noor-physics` for the slug. That is the right
+distinction made by accident of the existing redaction rules: a share token is a
+capability and must not sit in a log file; a slug is a public name and telling
+an operator which page failed is useful. Worth knowing it holds, since nothing
+asserts it.
 
 ### Defect injection round 12
 

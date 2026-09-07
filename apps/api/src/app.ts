@@ -54,6 +54,7 @@ import { createKnowledgeRepository } from './modules/knowledge/knowledge.reposit
 import { createKnowledgeService } from './modules/knowledge/knowledge.service.ts';
 import { registerKnowledgeRoutes } from './modules/knowledge/knowledge.routes.ts';
 import { createTutorRepository } from './modules/tutor/tutor.repository.ts';
+import type { TutorRetriever } from './modules/tutor/retrieval.port.ts';
 import { createTutorService } from './modules/tutor/tutor.service.ts';
 import { registerTutorRoutes } from './modules/tutor/tutor.routes.ts';
 import { createDeterministicEmbeddingProvider } from './platform/ai/embeddings.ts';
@@ -419,12 +420,60 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
    * stale, the same policy engine, the same provider abstraction. The only
    * thing this module owns is the conversation.
    */
+  /**
+   * THE ADAPTER THAT KNOWS ABOUT THREE MODULES, and the only place allowed to.
+   *
+   * `dependency-rules.test.ts` rule 3 forbids a module importing another, and
+   * caught the tutor importing both retrieval repositories directly. The fix is
+   * the one the rule's own comment prescribes: the tutor states what it needs
+   * (`TutorRetriever`), and the composition root — where cross-module knowledge
+   * is legitimate — supplies something that satisfies it.
+   *
+   * Both halves are independently scope-guarded, which is what makes combining
+   * them safe rather than merely convenient. `coursesInScope` narrows the vector
+   * search to courses the learner may study BEFORE it ranks; `searchCourse`
+   * runs under the learner's own row security against live lesson rows. Neither
+   * can widen the other, and the caller has already intersected the result with
+   * the conversation's own course before either is reached.
+   */
+  const tutorRetriever: TutorRetriever = {
+    coursesInScope: (tx, actorId) => knowledgeRepository.coursesInScope(tx, actorId),
+
+    async semantic(tx, { courseIds, question, topK }) {
+      // The question is embedded HERE, server-side, from text the guardrail
+      // layer has already sanitized. There is no path by which a caller could
+      // supply a vector and choose its own neighbourhood in the index.
+      const [queryVector] = await embeddings.embed([question]);
+      if (!queryVector) return [];
+      const chunks = await knowledgeRepository.similar(tx, {
+        courseIds,
+        queryVector,
+        model: embeddings.model,
+        topK,
+      });
+      return chunks.map((chunk) => ({
+        id: chunk.id,
+        lessonId: chunk.lessonId,
+        lessonTitle: chunk.lessonTitle,
+        text: chunk.content,
+      }));
+    },
+
+    async live(tx, { courseId, question, limit }) {
+      const chunks = await assistantRepository.searchCourse(tx, courseId, question, limit);
+      return chunks.map((chunk) => ({
+        id: chunk.id,
+        lessonId: chunk.lessonId,
+        lessonTitle: chunk.lessonTitle,
+        text: chunk.text,
+      }));
+    },
+  };
+
   const tutor = createTutorService({
     db,
     repository: createTutorRepository(),
-    knowledge: knowledgeRepository,
-    assistant: assistantRepository,
-    embeddings,
+    retriever: tutorRetriever,
     engine,
     securityEvents,
     provider: aiProvider,

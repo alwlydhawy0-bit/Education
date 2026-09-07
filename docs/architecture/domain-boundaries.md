@@ -235,11 +235,33 @@ is created.
 
 It writes to no other domain's tables at all.
 
+### `tutor` — **[BUILT]** (Task 012)
+
+Owns `ai_conversations` and `ai_messages`. The only domain on this platform
+whose READ set is deliberately wider than its WRITE set: a teacher who teaches
+the learner, an organization administrator and a safety moderator may read a
+transcript, and nobody but the learner may write to it. Nobody at all may edit
+one after the fact.
+
+It COMPOSES rather than duplicates, which is most of what is worth knowing about
+it. Retrieval is `knowledge`'s vector search with `assistant`'s live full-text
+search as a floor; the provider boundary is `platform/ai`; the policy engine and
+the class-course graph are the platform's. What this module actually owns is the
+conversation and the guardrails around one turn.
+
+It reads `lessons` and `course_units` for a lesson title, and that read is
+LEFT-joined on purpose: `lessons` is RLS-narrowed to the classes an actor is in,
+so an inner join would silently give a display lookup a veto over the moderation
+policy. It reads NO student-owned table and no answer key —
+`tests/architecture/tutor-boundaries.test.ts` enforces the list.
+
+It writes to no other domain's tables.
+
 ## Planned domains — **[DESIGNED]**, boundaries only
 
 `learning-paths` · `activities` ·
 `assessments` · `mastery` · `experiments` · `projects` · `portfolio` · `files` ·
-`ai-gateway` · `ai-tutor` · `ai-assistant` ·
+`ai-gateway` · `ai-assistant` ·
 `recommendations` · `community` · `moderation` · `notifications` · `analytics` ·
 `administration`.
 

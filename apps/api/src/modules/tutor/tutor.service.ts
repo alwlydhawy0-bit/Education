@@ -23,9 +23,7 @@ import {
   type AiProvider,
   type AiSource,
 } from '../../platform/ai/provider.ts';
-import type { KnowledgeRepository } from '../knowledge/knowledge.repository.ts';
-import type { EmbeddingProvider } from '../../platform/ai/embeddings.ts';
-import type { AssistantRepository } from '../assistant/assistant.repository.ts';
+import type { TutorRetriever } from './retrieval.port.ts';
 import {
   budgetSources,
   estimateTokens,
@@ -33,6 +31,7 @@ import {
   sanitizeStudentTurn,
 } from './guardrails.ts';
 import type { MessageRow, TutorRepository } from './tutor.repository.ts';
+import type { RetrievedPassage } from './retrieval.port.ts';
 
 export interface ActorContext {
   readonly actor: Actor;
@@ -44,9 +43,7 @@ export interface ActorContext {
 export interface TutorServiceDeps {
   readonly db: Database;
   readonly repository: TutorRepository;
-  readonly knowledge: KnowledgeRepository;
-  readonly assistant: AssistantRepository;
-  readonly embeddings: EmbeddingProvider;
+  readonly retriever: TutorRetriever;
   readonly engine: PolicyEngine;
   readonly securityEvents: SecurityEventRecorder;
   readonly provider: AiProvider;
@@ -122,9 +119,7 @@ export interface TutorService {
 }
 
 export function createTutorService(deps: TutorServiceDeps): TutorService {
-  const {
-    db, repository, knowledge, assistant, embeddings, engine, securityEvents, provider, timeoutMs,
-  } = deps;
+  const { db, repository, retriever, engine, securityEvents, provider, timeoutMs } = deps;
 
   const emit = (
     ctx: ActorContext,
@@ -394,45 +389,23 @@ export function createTutorService(deps: TutorServiceDeps): TutorService {
         // them safe: `coursesInScope` narrows the vector search to courses the
         // learner may study before it ranks, and `searchCourse` runs under the
         // learner's own RLS against live rows. Neither can widen the other.
-        const reachable = await knowledge.coursesInScope(tx, ctx.actor.id);
+        const reachable = await retriever.coursesInScope(tx, ctx.actor.id);
         const scoped = reachable.filter((id) => id === conversation.courseId);
 
-        const retrieved: Array<{ id: string; lessonId: string; lessonTitle: string; text: string }> =
-          [];
+        let retrieved: RetrievedPassage[] = [];
 
         if (scoped.length > 0) {
-          const [queryVector] = await embeddings.embed([turn.text]);
-          if (queryVector) {
-            const chunks = await knowledge.similar(tx, {
-              courseIds: scoped,
-              queryVector,
-              model: embeddings.model,
-              topK: MAX_SOURCES,
-            });
-            for (const chunk of chunks) {
-              retrieved.push({
-                id: chunk.id,
-                lessonId: chunk.lessonId,
-                lessonTitle: chunk.lessonTitle,
-                text: chunk.content,
-              });
-            }
-          }
-        }
+          retrieved = await retriever.semantic(tx, {
+            courseIds: scoped,
+            question: turn.text,
+            topK: MAX_SOURCES,
+          });
 
-        if (retrieved.length === 0) {
-          const live = await assistant.searchCourse(
-            tx,
-            conversation.courseId,
-            turn.text,
-            MAX_SOURCES,
-          );
-          for (const chunk of live) {
-            retrieved.push({
-              id: chunk.id,
-              lessonId: chunk.lessonId,
-              lessonTitle: chunk.lessonTitle,
-              text: chunk.text,
+          if (retrieved.length === 0) {
+            retrieved = await retriever.live(tx, {
+              courseId: conversation.courseId,
+              question: turn.text,
+              limit: MAX_SOURCES,
             });
           }
         }

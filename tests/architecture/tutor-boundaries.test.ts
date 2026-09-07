@@ -220,8 +220,9 @@ describe('the tutor never becomes the platform’s only gate', () => {
   it('re-retrieves sources every turn rather than carrying them forward', () => {
     // Carrying a conversation's sources forward would freeze the authorization
     // decision at the moment the conversation was opened.
-    expect(SERVICE).toContain('coursesInScope');
-    expect(SERVICE).toMatch(/knowledge\.similar\(/);
+    expect(SERVICE).toContain('retriever.coursesInScope');
+    expect(SERVICE).toMatch(/retriever\.semantic\(/);
+    expect(SERVICE).toMatch(/retriever\.live\(/);
     expect(SERVICE).not.toMatch(/retrieved_context_chunks_json[\s\S]{0,200}history/);
   });
 
@@ -245,6 +246,33 @@ describe('the tutor never becomes the platform’s only gate', () => {
   it('validates citations against the retrieved set', () => {
     expect(SERVICE).toMatch(/citedSourceIds/);
     expect(SERVICE).toMatch(/byId\.get\(/);
+  });
+});
+
+describe('the tutor imports no other module', () => {
+  it('depends on retrieval through a port it owns, not on another module', () => {
+    // `dependency-rules.test.ts` rule 3 enforces this platform-wide and caught
+    // the violation when the tutor first imported both retrieval repositories.
+    // Asserted again here, close to the module it constrains, because the
+    // general rule states WHAT is forbidden and this states WHY the alternative
+    // exists: the tutor names what it needs, and the composition root — the one
+    // place cross-module knowledge is legitimate — supplies it.
+    for (const [file, source] of apiCode) {
+      if (!file.startsWith(TUTOR_DIR)) continue;
+      expect(source, `${file} imports another module`).not.toMatch(
+        /from '\.\.\/(knowledge|assistant|curriculum|assessment|workspace|notebook)\//,
+      );
+    }
+    expect(SERVICE).toContain("from './retrieval.port.ts'");
+  });
+
+  it('keeps the port narrower than the repositories behind it', () => {
+    // The port cannot index, cannot write, and cannot be handed a vector — so a
+    // change to how retrieval works reaches the tutor through three methods.
+    const port = stripComments(read(`${TUTOR_DIR}/retrieval.port.ts`));
+    expect(port).not.toMatch(/index|insert|delete|queryVector|embedding/i);
+    const methods = [...port.matchAll(/^\s{2}(\w+)\(/gm)].map((m) => m[1]);
+    expect(methods.sort()).toEqual(['coursesInScope', 'live', 'semantic']);
   });
 });
 

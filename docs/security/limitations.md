@@ -306,6 +306,58 @@ the current state.
   new exposure — but it does DUPLICATE the exposure, and a backup of this table
   is a readable copy of a school's curriculum.
 
+## Added in Task 012 — the AI tutor
+
+- **No guardian may read a child's tutor conversations, and that is an OPEN
+  DECISION rather than a settled one.** A guardian can already read a note their
+  child shared and their child's progress, so the omission is deliberate and
+  contestable. The reasoning is that a child who believes a parent is reading
+  their questions asks different questions, and the ones they are least willing
+  to ask in front of a parent are sometimes the ones that most need answering —
+  but that is a judgement for a school and a family, not a default this platform
+  should impose either way. There is no branch to enable and no flag to set; a
+  decision would need a design (RISK-TUTOR-01).
+- **There is no retention policy and no deletion path.** A conversation lives
+  until its lesson, course or owner is deleted. For the most sensitive data on
+  the platform — a minor's unfiltered questions — that is the weakest answer
+  available. Nothing on this platform has a retention schedule yet, so this is
+  the general gap arriving in the domain where it matters most
+  (RISK-TUTOR-02).
+- **The guardrail layer is a filter, not a boundary, and a determined adult
+  could get past it.** It catches the shapes it knows; the input space is
+  infinite. Nothing behind it depends on it — RLS, the policy engine and the
+  scope-filtered retrieval decide access and run first — but the "keep the tutor
+  a tutor" and "record the attempt" properties are exactly as good as a
+  hand-written list, which is to say approximately (RISK-TUTOR-03).
+- **A blocked turn is recorded but nothing escalates.** A learner can attempt
+  fifty injections an hour within the rate limit and the only consequence is
+  fifty audit rows. There is no threshold, no alert and no notification to a
+  moderator (RISK-TUTOR-04).
+- **The tutor's answers are only as good as the offline composer.** With no
+  provider configured it quotes matching passages; the fluency of a real model
+  is untested here, and so is its behaviour under the multi-turn injection
+  surface this task introduced. Every safety property is asserted against the
+  SERVER's handling — what is sent, what is validated, what is stored — because
+  those are the ones that survive a change of model. None of it is evidence
+  about how a particular model behaves (RISK-TUTOR-05).
+- **Retrieval quality is unmeasured, and the vector index may be empty.**
+  Nothing re-indexes a course when a lesson is published or edited, so the tutor
+  falls back to full-text search over live lessons. That fallback cannot go
+  stale, so the failure is degraded relevance rather than lost coverage — but
+  nobody has measured either (RISK-TUTOR-06, and see RISK-RAG-02).
+- **Moderation reads are audited; nothing else about them is controlled.** A
+  moderator may read every conversation in their school, one at a time, with no
+  rate limit, no justification field and no notification to the learner. The
+  audit trail records who and which authority, which is a record after the fact
+  rather than a control (RISK-TUTOR-07).
+- **There is no streaming**, and the report says why: every safety property is
+  decided after the model stops speaking, so a token stream would show a child
+  a fluent ungrounded answer and discover afterwards that it had nothing to
+  cite.
+- **The conversation title is free text written by a child and shown to
+  adults.** It is length-capped and rendered as text rather than markup, and
+  nothing moderates what it says.
+
 ## Added in Task 016
 
 - **THE EVALUATION FRAMEWORK MEASURES RETRIEVAL AND GROUNDING. IT HAS NEVER
@@ -950,10 +1002,12 @@ in `ai-security.md`. Interactive experiments and a student workspace exist
 (Tasks 009-010).
 
 **Embeddings, a vector store and a curriculum knowledge base now exist too**
-(Task 011) and should be struck from the list above. What still does not exist
-is the thing they were built for: there is no AI conversational tutor, no
-retrieval-augmented ANSWER, and no user interface over any of it. Task 011
-built the index and the retrieval endpoint and stopped there deliberately.
+(Task 011), and **an AI conversational tutor with retrieval-augmented answers
+exists** (Task 012). All four should be struck from the list above.
+
+What still does not exist is any USER INTERFACE over the tutor, and the
+streaming API section 2D of that task asked for. Portfolios, research artifacts
+and community analytics remain unbuilt and were explicitly out of scope.
 
 ## Compliance
 

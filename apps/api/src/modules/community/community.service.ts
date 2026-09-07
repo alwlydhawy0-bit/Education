@@ -546,7 +546,7 @@ export function createCommunityService(deps: CommunityServiceDeps): CommunitySer
             actorModerates: false,
           });
 
-          const flag = await repository.createFlag(
+          const created = await repository.createFlag(
             tx,
             input.entityType,
             input.entityId,
@@ -560,7 +560,7 @@ export function createCommunityService(deps: CommunityServiceDeps): CommunitySer
             // NEVER THE REASON TEXT. A child's account of why a post frightened
             // them belongs in the moderation queue a teacher opens, not in an
             // audit log read by operators.
-            duplicate: flag === null,
+            duplicate: !created,
           });
 
           return { recorded: true };

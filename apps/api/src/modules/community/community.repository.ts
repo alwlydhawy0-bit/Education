@@ -329,13 +329,20 @@ export interface CommunityRepository {
     moderationStatus: ModerationStatus,
   ): Promise<ReplyRecord | null>;
 
+  /**
+   * Files a report. Returns whether a NEW row was written.
+   *
+   * IT RETURNS A BOOLEAN RATHER THAN THE ROW, and that is not a simplification
+   * — see the implementation. Reading the row back is a read the caller is not
+   * always entitled to make.
+   */
   createFlag(
     tx: Tx,
     entityType: FlagEntityType,
     entityId: string,
     reason: string,
     raisedBy: 'member' | 'automated_filter',
-  ): Promise<FlagRecord | null>;
+  ): Promise<boolean>;
   listFlags(tx: Tx, query: ListFlagsQuery): Promise<Guarded<FlagRecord>[]>;
   resolveFlagsFor(
     tx: Tx,
@@ -561,22 +568,35 @@ export const communityRepository: CommunityRepository = {
    * automated flag passes `raised_by = 'automated_filter'`, which the CHECK
    * pairs with a null reporter.
    *
-   * A DUPLICATE RETURNS NULL RATHER THAN THROWING. One person reporting the
-   * same post twice is a double-click, not an error worth showing a child.
+   * THERE IS NO `RETURNING` CLAUSE, AND THAT IS THE WHOLE POINT OF THIS
+   * COMMENT. The first version ended `ON CONFLICT DO NOTHING RETURNING id`, and
+   * every post the automated filter caught died with
+   * "new row violates row-level security policy for table content_flags" —
+   * pointing at the INSERT, which was fine.
+   *
+   * PostgreSQL applies SELECT policies to a RETURNING clause. An automated flag
+   * has a NULL `reporter_id`, so `content_flags_select` admits it only to
+   * somebody who moderates the class — and the caller here is the LEARNER whose
+   * post was just flagged. The write succeeded; reading the result back did
+   * not, and the error named the write.
+   *
+   * The fix is not to widen the read policy. Letting the flagged author see the
+   * automated flag would show them its `reason`, which names the term that
+   * matched — turning the queue into the word-list oracle that `content-filter.ts`
+   * is careful not to be. So the row is written and not read: `rowCount` says
+   * whether it was new, which is all any caller needs.
+   *
+   * A DUPLICATE IS `false` RATHER THAN AN ERROR. One person reporting the same
+   * post twice is a double-click, not something to tell a child off for.
    */
   async createFlag(tx, entityType, entityId, reason, raisedBy) {
-    const { rows } = await tx.query<{ id: string }>(
+    const { rowCount } = await tx.query(
       `INSERT INTO content_flags (entity_type, entity_id, thread_id, reason, raised_by)
        VALUES ($1, $2, '00000000-0000-0000-0000-000000000000', $3, $4)
-       ON CONFLICT DO NOTHING
-       RETURNING id`,
+       ON CONFLICT DO NOTHING`,
       [entityType, entityId, reason, raisedBy],
     );
-    const id = rows[0]?.id;
-    if (!id) return null;
-    const { rows: saved } = await tx.query<FlagRow>(`${flagSelect()} WHERE f.id = $1`, [id]);
-    const row = saved[0];
-    return row ? toFlag(row) : null;
+    return (rowCount ?? 0) > 0;
   },
 
   async listFlags(tx, query) {

@@ -261,6 +261,51 @@ the current state.
   disclosure decision that was never explicitly made, and it is out of this
   task's scope to change.
 
+## Added in Task 011 — the curriculum knowledge base
+
+- **The embedding provider is not semantic.** It is a hashed bag-of-tokens: 768
+  dimensions, deterministic, reproducible, no network call. It matches shared
+  VOCABULARY, not shared meaning. Every retrieval test in the suite is therefore
+  a test of the PIPELINE — scope, freshness, lifecycle, isolation — and none of
+  them is evidence that retrieval returns relevant results. Swapping in a real
+  model changes the quality of the answers and none of the security properties,
+  which is the point of the abstraction, but the quality has not been measured
+  and no evaluation exists for it (RISK-RAG-01).
+- **A re-index is not automatic.** Publishing or editing a lesson does not
+  update the knowledge base; somebody with publish standing must call the index
+  endpoint. Retrieval FAILS CLOSED in the meantime — the freshness equality
+  hides the stale chunks, so an edited lesson serves nothing rather than serving
+  its old text — but "nothing" is a silent degradation with no alert and no
+  staleness metric anywhere (RISK-RAG-02).
+- **Nothing records what a learner ASKED.** This is deliberate — a question is a
+  record of what a child did not understand, and the audit trail is read by more
+  people than the lesson is — but it means a prompt-injection or catalog-probing
+  campaign conducted through `/rag/retrieve` leaves only ids and counts behind.
+  The trade is privacy now against forensics later, resolved in favour of
+  privacy, and it should be revisited if the endpoint is ever exposed to an
+  audience wider than enrolled learners (RISK-RAG-03).
+- **`coursesInScope` tells a caller how many courses they may study.** It is
+  their own number and reveals nothing about anyone else, but it is one bit more
+  than strictly necessary to answer the question asked, and a caller can watch
+  it change over time to infer roster edits they were not told about
+  (RISK-RAG-04).
+- **The HNSW index is built with default parameters** (`m`, `ef_construction`)
+  and no recall measurement. Recall is a quality property, not a security one —
+  a missed neighbour is a worse answer, never a leaked one, because the scope
+  filter runs first — but nobody has established what the recall IS
+  (RISK-RAG-05).
+- **Chunk boundaries are structural, not semantic.** Paragraphs and headings,
+  packed to a 1,200-character budget. A definition split across a boundary is
+  retrievable as two halves and may be quoted as one. No evaluation covers it.
+- **Nothing bounds the total size of the index.** A course with a thousand
+  lessons produces a proportional number of rows, and there is no quota, no
+  eviction and no reporting on the table's growth. Indexing is rate-limited to
+  20 calls an hour, which bounds the rate but not the total.
+- **The index holds curriculum text at rest with no encryption beyond the
+  database's own.** That is the same posture as `lessons` itself, so it adds no
+  new exposure — but it does DUPLICATE the exposure, and a backup of this table
+  is a readable copy of a school's curriculum.
+
 ## Added in Task 016
 
 - **THE EVALUATION FRAMEWORK MEASURES RETRIEVAL AND GROUNDING. IT HAS NEVER
@@ -901,7 +946,14 @@ Courses, lessons, curriculum, activities, assessments, mastery, lesson
 authoring and lifecycle, learner delivery, email, password reset and account
 recovery DO now exist (Tasks 004-012). A single grounded learning assistant
 exists (Task 013) and is a much narrower thing than either AI product described
-in `ai-security.md`.
+in `ai-security.md`. Interactive experiments and a student workspace exist
+(Tasks 009-010).
+
+**Embeddings, a vector store and a curriculum knowledge base now exist too**
+(Task 011) and should be struck from the list above. What still does not exist
+is the thing they were built for: there is no AI conversational tutor, no
+retrieval-augmented ANSWER, and no user interface over any of it. Task 011
+built the index and the retrieval endpoint and stopped there deliberately.
 
 ## Compliance
 

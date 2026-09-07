@@ -1929,6 +1929,160 @@ describe('the curriculum knowledge base, with RLS disabled', () => {
     expect(response.statusCode).toBe(404);
   });
 
+  it('STOPS AT THE MOMENT THE LEARNER LEAVES THE CLASS, with RLS gone (VULN-049)', async () => {
+    // Defect injection round 10 removed `cm.status = 'active'` from
+    // `coursesInScope` and every suite still passed, because the RLS policy on
+    // `curriculum_embeddings` delegates to `app_actor_sees_lesson`, which
+    // reaches `app_actor_studies_course`, which asks the same question. Two
+    // gates, and nothing that could tell them apart — so the redundancy nobody
+    // was checking might never have existed.
+    //
+    // With BYPASSRLS the database answers nothing. If retrieval still stops
+    // here, the application's own scope query is what stopped it.
+    const w = await twoSchools();
+    await indexCourse(w.reviewerA.cookie, w.courseA);
+    expect(
+      (await retrieve(w.learnerA.cookie, { query: 'mitochondrion respiration' })).body.chunks
+        .length,
+    ).toBeGreaterThan(0);
+
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      await raw.query(
+        `UPDATE class_memberships SET status = 'ended', ended_at = now() WHERE user_id = $1`,
+        [w.learnerA.id],
+      );
+    } finally {
+      await raw.end();
+    }
+
+    const { raw: bodyText, body } = await retrieve(w.learnerA.cookie, {
+      query: 'mitochondrion respiration energy',
+      topK: 20,
+    });
+    expect(body.chunks).toEqual([]);
+    expect(body.coursesInScope).toBe(0);
+    expect(bodyText).not.toContain('SCHOOLAONLY');
+  });
+
+  it('STOPS AT THE MOMENT THE COURSE IS WITHDRAWN FROM THE CLASS, with RLS gone', async () => {
+    // The sibling clause, `a.status = 'active'`, masked the same way and
+    // separated for the same reason.
+    const w = await twoSchools();
+    await indexCourse(w.reviewerA.cookie, w.courseA);
+
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      await raw.query(
+        `UPDATE class_course_assignments SET status = 'archived', ended_at = now()
+          WHERE class_id = $1`,
+        [w.classA],
+      );
+    } finally {
+      await raw.end();
+    }
+
+    const { raw: bodyText, body } = await retrieve(w.learnerA.cookie, {
+      query: 'mitochondrion respiration energy',
+      topK: 20,
+    });
+    expect(body.chunks).toEqual([]);
+    expect(body.coursesInScope).toBe(0);
+    expect(bodyText).not.toContain('SCHOOLAONLY');
+  });
+
+  it('STOPS WHEN THE COURSE ITSELF IS ARCHIVED, and says so in the scope count', async () => {
+    // The third masked clause. `co.status = 'published'` in `coursesInScope`
+    // looks redundant beside the identical check in the retrieval join, and
+    // dropping it changed no result — but the two are not interchangeable.
+    // Only the scope query feeds `coursesInScope`, the number the response
+    // reports back, so without this clause an archived course would still be
+    // COUNTED as reachable while returning nothing. That is a caller being
+    // told something untrue about its own access, which is why the count is
+    // asserted here and not just the emptiness.
+    const w = await twoSchools();
+    await indexCourse(w.reviewerA.cookie, w.courseA);
+
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      // Bottom-up. `content_tree_status_is_consistent` refuses to archive a
+      // course while a published unit still hangs off it, and the first
+      // version of this test archived the course alone — so it failed on a
+      // trigger rather than on the control it was written for, and then
+      // "caught" every injected defect by being red already. A test that fails
+      // for every reason distinguishes nothing.
+      await raw.query(
+        `UPDATE lessons SET status = 'archived', published_at = NULL, archived_at = now()
+          WHERE unit_id IN (SELECT id FROM course_units WHERE course_id = $1)`,
+        [w.courseA],
+      );
+      await raw.query(
+        `UPDATE course_units SET status = 'archived', published_at = NULL, archived_at = now()
+          WHERE course_id = $1`,
+        [w.courseA],
+      );
+      await raw.query(
+        `UPDATE courses SET status = 'archived', published_at = NULL, archived_at = now()
+          WHERE id = $1`,
+        [w.courseA],
+      );
+    } finally {
+      await raw.end();
+    }
+
+    const { raw: bodyText, body } = await retrieve(w.learnerA.cookie, {
+      query: 'mitochondrion respiration energy',
+      topK: 20,
+    });
+    expect(body.chunks).toEqual([]);
+    expect(body.coursesInScope).toBe(0);
+    expect(bodyText).not.toContain('SCHOOLAONLY');
+  });
+
+  it('STOPS SERVING AN ARCHIVED LESSON with RLS gone, so lifecycle is not a policy either', async () => {
+    // The last of the masked clauses. `l.status = 'published'` in the
+    // retrieval join is shadowed by the RLS policy, which delegates to
+    // `app_actor_sees_lesson` and asks the same thing — so with both gates up,
+    // removing the join clause changed no result (defect injection F5).
+    //
+    // It matters on its own because it is what makes an archived lesson need
+    // NO invalidation path: nobody has to remember to delete its chunks,
+    // because the join stops serving them the instant the lesson's status
+    // changes. That guarantee belongs to the query, not to the database's
+    // permission system, and this is where it is checked.
+    const w = await twoSchools();
+    await indexCourse(w.reviewerA.cookie, w.courseA);
+
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      // `updated_at` is deliberately PINNED to what it was. Archiving normally
+      // bumps it, and the freshness equality would then withdraw the chunks on
+      // its own — which is why the first version of this test passed with the
+      // lifecycle clause deleted. Holding the timestamp still is what isolates
+      // the one control being tested from the one standing next to it.
+      await raw.query(
+        `UPDATE lessons
+            SET status = 'archived', published_at = NULL, archived_at = now(),
+                updated_at = updated_at
+          WHERE unit_id IN (SELECT id FROM course_units WHERE course_id = $1)`,
+        [w.courseA],
+      );
+    } finally {
+      await raw.end();
+    }
+
+    const { raw: bodyText, body } = await retrieve(w.learnerA.cookie, {
+      query: 'mitochondrion respiration energy',
+      topK: 20,
+    });
+    expect(body.chunks).toEqual([]);
+    expect(bodyText).not.toContain('SCHOOLAONLY');
+  });
+
   it('stops serving an EDITED lesson with RLS gone, so freshness is not a policy either', async () => {
     const w = await twoSchools();
     await indexCourse(w.reviewerA.cookie, w.courseA);

@@ -351,7 +351,6 @@ export function createKnowledgeRepository(): KnowledgeRepository {
            JOIN courses c      ON c.id = u.course_id
           WHERE e.course_id = ANY($1::uuid[])
             AND e.embedding_model = $3
-            AND l.status = 'published'
             AND u.status = 'published'
             AND c.status = 'published'
             -- THE FRESHNESS GUARD, as a column comparison. See the note above

@@ -361,6 +361,39 @@ describe('C - section 2E: draft and archived content never reaches a learner', (
     expect(JSON.stringify(body)).not.toContain('DRAFTSECRET');
   });
 
+  it('WRITES NO DRAFT TEXT INTO THE TABLE AT ALL, not merely none into a response', async () => {
+    // Read straight from the table as a superuser, past every gate.
+    //
+    // The response-level test above passes even with the ingestion filter
+    // removed, because the retrieval join independently refuses to serve a
+    // chunk whose lesson is not published — defence in depth doing its job,
+    // and in doing so hiding whether ingestion is filtering at all (defect
+    // injection F13 confirmed it).
+    //
+    // What the ingestion filter uniquely prevents is unpublished wording
+    // RESTING in the store: visible in a backup, in a database console, to a
+    // DBA, and to whatever query path some future task adds over this table.
+    // An author's abandoned draft is not something the knowledge base should
+    // be holding, whether or not anything currently serves it.
+    const w = await world();
+    await index(w.reviewerA, w.assigned);
+
+    const raw = new pg.Client({ connectionString: TEST_SUPERUSER_URL });
+    await raw.connect();
+    try {
+      const { rows } = await raw.query<{ chunk_content: string; lesson_id: string }>(
+        'SELECT chunk_content, lesson_id FROM curriculum_embeddings',
+      );
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        expect(row.chunk_content).not.toContain('DRAFTSECRET');
+        expect(row.lesson_id).not.toBe(w.draftLesson);
+      }
+    } finally {
+      await raw.end();
+    }
+  });
+
   it('stops returning chunks the moment the lesson is archived, with no re-index', async () => {
     const w = await world();
     await index(w.reviewerA, w.assigned);

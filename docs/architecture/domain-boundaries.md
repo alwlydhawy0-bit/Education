@@ -211,11 +211,35 @@ Consumes a `RelationshipSnapshot`. It never queries `guardian_relationships` or
 Infrastructure: config, database access, HTTP wiring, error handling, audit,
 password hashing, token generation. Owns `audit_log` (append-only).
 
+### `knowledge` — **[BUILT]** (Task 011)
+
+Owns `curriculum_embeddings`. A **derived** store: it holds nothing that is not
+already in `lessons`, and dropping it loses no fact.
+
+It READS the curriculum tables — `lessons`, `course_units`, `courses`,
+`learning_objectives` — which is a cross-domain read and needs saying out loud
+under rule 2 below. The justification is that this module's entire job is to be
+a projection of that domain's published content: it is not asking the curriculum
+a question it could ask through a contract, it is maintaining a searchable copy
+of it, and the mandatory join to the live rows on every retrieval is what keeps
+the copy honest. An arm's-length contract call per lesson would turn one
+statement into hundreds and would not make the coupling smaller.
+
+It reads `class_memberships` and `class_course_assignments` to compute the
+retrieval scope, and nothing else. In particular it reads **no student-owned
+table**: `notes`, `student_notebooks` and `student_artifacts` appear in no query
+in the module, `curriculum_embeddings` has no column that could point at one,
+and `tests/architecture/knowledge-boundaries.test.ts` enforces both with an
+allow-list — so a private table added by a future task is covered on the day it
+is created.
+
+It writes to no other domain's tables at all.
+
 ## Planned domains — **[DESIGNED]**, boundaries only
 
 `learning-paths` · `activities` ·
 `assessments` · `mastery` · `experiments` · `projects` · `portfolio` · `files` ·
-`knowledge-base` · `ai-gateway` · `ai-tutor` · `ai-assistant` ·
+`ai-gateway` · `ai-tutor` · `ai-assistant` ·
 `recommendations` · `community` · `moderation` · `notifications` · `analytics` ·
 `administration`.
 

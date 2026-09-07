@@ -931,6 +931,45 @@ describe('URL validation', () => {
     expect(internal.statusCode).toBe(400);
   });
 
+  it('DROPS an artifact:// location the contract could never have created', async () => {
+    /**
+     * THE GAP DEFECT INJECTION F3 EXPOSED, CLOSED PROPERLY.
+     *
+     * `attachProjectArtifactRequestSchema` accepts `https://` only, so no
+     * request can create this row and the first attempt at closing this gap —
+     * asserting in the RLS suite that such a row is admitted — proved the state
+     * exists without ever putting it in front of the sanitizer. Removing the
+     * filter still passed every suite above the unit tests.
+     *
+     * So the row is written HERE, directly, as a migration or a future import
+     * would write it, and then fetched through the real public route. That is
+     * what makes the drop a control rather than dead code.
+     */
+    const w = await world();
+    const { project, portfolio } = await publishedPortfolio(w);
+
+    const raw = new pg.Client({ connectionString: TEST_SUPERUSER_URL });
+    await raw.connect();
+    try {
+      await raw.query(
+        `INSERT INTO project_artifacts (project_id, owner_id, artifact_type, file_path_or_url, byte_size)
+         VALUES ($1, $2, 'report_pdf', 'artifact://11111111-1111-4111-8111-111111111111', 10)`,
+        [project.id, w.learner.id],
+      );
+    } finally {
+      await raw.end();
+    }
+
+    const response = await get(`/api/v1/portfolios/share/${portfolio.shareToken}`);
+    expect(response.statusCode, response.body).toBe(200);
+    // A stranger has no session, so an internal reference would be a broken
+    // link at best and a hint about storage layout at worst.
+    expect(response.body).not.toContain('artifact://');
+    expect(
+      response.json<{ projects: { artifacts: unknown[] }[] }>().projects[0]?.artifacts,
+    ).toEqual([]);
+  });
+
   it('an https artifact reaches the public page; a dropped one does not', async () => {
     const w = await world();
     const { project, portfolio } = await publishedPortfolio(w);

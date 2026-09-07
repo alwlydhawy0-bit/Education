@@ -706,6 +706,36 @@ describe('the public share link', () => {
     expect(view.projects.map((p) => p.position)).toEqual([1]);
   });
 
+  it('renumbers position from 1 when a HIDDEN item sorts first', async () => {
+    /**
+     * THE CASE DEFECT INJECTION F2 EXPOSED AS UNCOVERED.
+     *
+     * The suite already asserted `position === [1]` for a page with one visible
+     * project — but that project was added first, so its stored `display_order`
+     * was 1 too, and copying the stored value instead of renumbering passed.
+     * Only the unit suite caught it.
+     *
+     * Here the hidden project is added FIRST, so the visible one has
+     * `display_order` 2. A page showing "2" would tell a stranger that
+     * something sits above it that they are not being shown.
+     */
+    const w = await world();
+    const hidden = await makeProject(w, w.learner, { visibility: 'private', title: 'First' });
+    const shown = await makeProject(w, w.learner, { visibility: 'public', title: 'Second' });
+
+    await post('/api/v1/me/portfolio', w.learner.cookie, { title: 'My work' });
+    await post('/api/v1/me/portfolio/items', w.learner.cookie, { projectId: hidden.id });
+    await post('/api/v1/me/portfolio/items', w.learner.cookie, { projectId: shown.id });
+    const published = await post('/api/v1/me/portfolio/publish', w.learner.cookie);
+    expect(published.statusCode, published.body).toBe(200);
+    const token = published.json<PortfolioBody>().shareToken;
+
+    const view = (await get(`/api/v1/portfolios/share/${token}`)).json<{
+      projects: { position: number; title: string }[];
+    }>();
+    expect(view.projects.map((p) => [p.position, p.title])).toEqual([[1, 'Second']]);
+  });
+
   it('resolves by public slug as well as by token', async () => {
     const w = await world();
     const { portfolio } = await publishedPortfolio(w);
@@ -735,6 +765,34 @@ describe('the public share link', () => {
     await post('/api/v1/me/portfolio/publish', w.learner.cookie);
     expect((await get(`/api/v1/portfolios/share/${portfolio.shareToken}`)).statusCode).toBe(404);
     expect(await auditTypes()).toContain('portfolio.unpublished');
+  });
+
+  it('REVOCATION: a learner who privates everything can still take the page down', async () => {
+    /**
+     * THE CASE DEFECT INJECTION F8 EXPOSED AS UNCOVERED.
+     *
+     * Every existing revocation test unpublishes a portfolio that still holds a
+     * public project, so a defect refusing to unpublish an EMPTY one passed
+     * them all. The sequence here is the one a worried child actually performs:
+     * make the work private first, then ask for the page to come down.
+     *
+     * `publish` is refused for an empty portfolio and `unpublish` must never
+     * be. Getting that asymmetry backwards would trap a learner on a live URL
+     * with a 403 telling them there is nothing to show.
+     */
+    const w = await world();
+    const { project, portfolio } = await publishedPortfolio(w);
+    await put(`/api/v1/projects/${project.id}`, w.learner.cookie, { visibility: 'private' });
+
+    const withdrawn = await del('/api/v1/me/portfolio/publish', w.learner.cookie);
+    expect(withdrawn.statusCode, withdrawn.body).toBe(200);
+    expect(withdrawn.json<PortfolioBody>().isPublished).toBe(false);
+    expect((await get(`/api/v1/portfolios/share/${portfolio.shareToken}`)).statusCode).toBe(404);
+
+    // And publishing again IS refused, because there is genuinely nothing to
+    // show. The asymmetry is the point.
+    const republish = await post('/api/v1/me/portfolio/publish', w.learner.cookie);
+    expect(republish.statusCode).toBe(403);
   });
 
   it('REVOCATION: making a project private removes it from the live page at once', async () => {

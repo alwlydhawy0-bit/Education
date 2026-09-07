@@ -63,7 +63,12 @@ describe('the public sanitizer is a constructor, not a filter', () => {
     // deny-list: the column added next year arrives on the public page by
     // default. `[...projects]` is permitted and present — it copies the array
     // so the sort does not mutate the caller's.
-    expect(source).not.toMatch(/\.\.\.\s*(portfolio|project|artifact|row|source)\b/);
+    // THE PARENTHESIS MATTERS, and defect injection F1 is why. The first
+    // version of this assertion required the identifier immediately after the
+    // dots, so `...(portfolio as Record<string, never>)` — a perfectly ordinary
+    // way to write the defect — walked straight past it. A fitness function
+    // that only catches the tidy spelling of a mistake is not a control.
+    expect(source).not.toMatch(/\.\.\.\s*\(?\s*(portfolio|project|artifact|row|source)\b/);
     expect(source).not.toMatch(/\bdelete\s+\w+\[/);
     expect(source).not.toMatch(/\bOmit</);
   });

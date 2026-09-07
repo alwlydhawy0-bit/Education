@@ -493,6 +493,39 @@ describe('the public path, with no actor', () => {
     expect(titles.map((r) => r.title)).toEqual(['Shown']);
   });
 
+  it('serves an artifact:// row to the public path — which is why the sanitizer drops it', async () => {
+    /**
+     * THE STATE THE CONTRACT CANNOT PRODUCE, WHICH IS THE POINT.
+     *
+     * `attachProjectArtifactRequestSchema` accepts `https://` only, so no HTTP
+     * request can create an `artifact://` row and no HTTP test can reach the
+     * sanitizer's drop. The database CHECK permits the form — for a file the
+     * platform will one day store itself — so a migration, a fixture or a
+     * future import can produce one.
+     *
+     * This asserts the row IS admitted here, which is what makes
+     * `toPublicPortfolio` dropping it a real control rather than dead code.
+     * Defect injection F3 removed that drop and only the unit suite noticed;
+     * this is the layer that establishes the state it defends against.
+     */
+    const w = await world();
+    const { token, project } = await publish(w);
+    await rows(
+      w.learner.id,
+      `INSERT INTO project_artifacts (project_id, owner_id, artifact_type, file_path_or_url, byte_size)
+       VALUES ($1, $2, 'report_pdf', 'artifact://11111111-1111-4111-8111-111111111111', 10)`,
+      [project, w.learner.id],
+    );
+
+    const seen = await publicRows<{ file_path_or_url: string }>(
+      token,
+      'SELECT file_path_or_url FROM project_artifacts',
+    );
+    expect(seen.map((r) => r.file_path_or_url)).toEqual([
+      'artifact://11111111-1111-4111-8111-111111111111',
+    ]);
+  });
+
   it('hides a draft even when the project says public', async () => {
     const w = await world();
     const { token, portfolioId } = await publish(w);

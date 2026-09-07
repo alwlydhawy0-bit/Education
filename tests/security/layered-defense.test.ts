@@ -2456,20 +2456,22 @@ describe('projects and portfolios, with RLS disabled', () => {
     const klass = await createClass(org, 'L1');
     const owner = await registerAndLogin('pf-owner@test.local');
     const peer = await registerAndLogin('pf-peer@test.local');
+    const teacher = await registerAndLogin('pf-teacher@test.local');
 
     const raw = new pg.Client({ connectionString: NO_RLS_URL });
     await raw.connect();
     try {
       await raw.query('UPDATE users SET organization_id = $1 WHERE id = ANY($2::uuid[])', [
         org,
-        [owner.id, peer.id],
+        [owner.id, peer.id, teacher.id],
       ]);
     } finally {
       await raw.end();
     }
     await addClassMember(klass, owner.id);
     await addClassMember(klass, peer.id);
-    return { org, klass, owner, peer };
+    await assignTeacher(teacher.id, klass);
+    return { org, klass, owner, peer, teacher };
   }
 
   it('REFUSES A PEER READING ANOTHER LEARNER’S PRIVATE PROJECT, with every row visible', async () => {
@@ -2582,6 +2584,47 @@ describe('projects and portfolios, with RLS disabled', () => {
     expect(page.statusCode).toBe(200);
     expect(page.body).not.toContain('HIDDENWORK');
     expect(page.json<{ projects: unknown[] }>().projects).toHaveLength(1);
+  });
+
+  it('KEEPS A DRAFT AWAY FROM THE CLASS TEACHER, with every row visible', async () => {
+    /**
+     * THE CASE DEFECT INJECTION F7 EXPOSED AS UNCOVERED.
+     *
+     * Removing `!isDraft` from the reviewer branch lets a teacher read a
+     * child's unfinished work. Every HTTP test still passed, because
+     * `student_projects_select` also requires `status <> 'draft'` and was
+     * quietly carrying the rule alone. Only the unit suite noticed.
+     *
+     * A draft is not "visible but not editable" — it is absent. Submitting is
+     * the act that consents to an adult reading it, and that consent must be
+     * enforced by the layer that can explain itself, not only by the database.
+     */
+    const w = await classWorld();
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/v1/projects',
+      headers: { ...writeHeaders, cookie: w.owner.cookie },
+      payload: { title: 'UNFINISHEDWORK', classId: w.klass, visibility: 'class' },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const draft = created.json<{ id: string; status: string }>();
+    expect(draft.status).toBe('draft');
+
+    const asTeacher = await app.inject({
+      method: 'GET',
+      url: `/api/v1/projects/${draft.id}`,
+      headers: { cookie: w.teacher.cookie },
+    });
+    expect(asTeacher.statusCode).toBe(404);
+    expect(asTeacher.body).not.toContain('UNFINISHEDWORK');
+
+    // And the showcase, which is the listing a teacher actually opens.
+    const showcase = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${w.klass}/projects`,
+      headers: { cookie: w.teacher.cookie },
+    });
+    expect(showcase.body).not.toContain('UNFINISHEDWORK');
   });
 
   it('NEVER PUTS AN IDENTIFIER ON THE PUBLIC PAGE, whatever the database returns', async () => {

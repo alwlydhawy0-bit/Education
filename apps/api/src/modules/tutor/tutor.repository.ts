@@ -142,6 +142,25 @@ const RELATIONSHIP_FACTS = `
   app_actor_moderates_conversation(c.student_id, c.organization_id, c.lesson_id) AS moderatable,
   app_actor_may_study_lesson(c.lesson_id) AS anchor_still_assigned`;
 
+/**
+ * THE LESSON JOIN IS FOR DISPLAY, NOT FOR AUTHORIZATION — hence LEFT.
+ *
+ * It was an inner join first, and that quietly overrode the whole moderation
+ * design. `lessons` is RLS-narrowed to the classes an actor is in, so a safety
+ * moderator — who teaches nobody and studies nothing — could not see the lesson
+ * row, the join dropped the conversation, and the transcript came back 404
+ * despite a policy that plainly admitted them. The same accident hid a
+ * learner's OWN history the moment they left the class, contradicting the
+ * property the migration and the RLS suite both assert: revocation takes away
+ * the ability to keep talking, not the record of having talked.
+ *
+ * Who may see a conversation is decided by `ai_conversations_select` and by
+ * `aiConversationPolicy`. A join added to fetch a title must not get a vote,
+ * and `coalesce` to the conversation's own title keeps the response shape
+ * without disclosing anything the reader did not already hold.
+ */
+const LESSON_TITLE = `coalesce(l.title, c.title) AS lesson_title`;
+
 const COUNT_SUBQUERY = `(SELECT count(*) FROM ai_messages m WHERE m.conversation_id = c.id)`;
 
 export function createTutorRepository(): TutorRepository {
@@ -149,12 +168,12 @@ export function createTutorRepository(): TutorRepository {
     async findConversation(tx, id) {
       const { rows } = await tx.query<RawConversation>(
         `SELECT c.id, c.student_id, c.organization_id, c.lesson_id, c.course_id,
-                l.title AS lesson_title, c.title, c.status,
+                ${LESSON_TITLE}, c.title, c.status,
                 ${COUNT_SUBQUERY} AS message_count,
                 c.created_at, c.updated_at,
                 ${RELATIONSHIP_FACTS}
            FROM ai_conversations c
-           JOIN lessons l ON l.id = c.lesson_id
+           LEFT JOIN lessons l ON l.id = c.lesson_id
           WHERE c.id = $1`,
         [id],
       );
@@ -169,12 +188,12 @@ export function createTutorRepository(): TutorRepository {
       // VULN-017 was a listing that RLS was quietly carrying alone.
       const { rows } = await tx.query<RawConversation>(
         `SELECT c.id, c.student_id, c.organization_id, c.lesson_id, c.course_id,
-                l.title AS lesson_title, c.title, c.status,
+                ${LESSON_TITLE}, c.title, c.status,
                 ${COUNT_SUBQUERY} AS message_count,
                 c.created_at, c.updated_at,
                 ${RELATIONSHIP_FACTS}
            FROM ai_conversations c
-           JOIN lessons l ON l.id = c.lesson_id
+           LEFT JOIN lessons l ON l.id = c.lesson_id
           WHERE c.student_id = $1
           ORDER BY c.updated_at DESC
           LIMIT 200`,

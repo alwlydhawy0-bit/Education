@@ -244,6 +244,99 @@ const ENGLISH = [
   'question',
   'answer',
   'system',
+
+  /**
+   * ── THE CLOSED-CLASS WORDS, ADDED IN TASK 012 ─────────────────────────────
+   *
+   * RISK-AI-09 recorded that the `simple` FTS configuration has no stop-word
+   * list, and that without one every Arabic question matched every lesson on
+   * `ما` and `هي` alone. The fix landed for Arabic and for the long English
+   * function words — and stopped there. The short ones were never added, which
+   * left the same hole open in the other language.
+   *
+   * Found by the Task 012 out-of-scope test: "who won the football world cup in
+   * 1998", asked of a lesson about cells, came back GROUNDED as course
+   * material. `who` and `the` were filtered; `in` was not, and the lesson says
+   * "respiration IN the mitochondrion". One preposition was enough to make an
+   * unrelated question look like coursework.
+   *
+   * That is not a relevance nuisance. Section 2B of Task 012 requires the tutor
+   * to REFUSE questions outside the retrieved scope, and the refusal is decided
+   * by whether retrieval returned anything — so a stop word that leaks turns
+   * the honesty guarantee off. Every entry below is a closed-class word:
+   * prepositions, copulas, conjunctions, determiners and pronouns. None of them
+   * is a term any curriculum is about.
+   */
+  'in',
+  'on',
+  'at',
+  'to',
+  'of',
+  'is',
+  'as',
+  'be',
+  'by',
+  'or',
+  'an',
+  'if',
+  'so',
+  'no',
+  'up',
+  'we',
+  'me',
+  'my',
+  'us',
+  'do',
+  'am',
+  'he',
+  'she',
+  'him',
+  'hers',
+  'ours',
+  'yours',
+  'theirs',
+  'also',
+  'such',
+  'each',
+  'very',
+  'more',
+  'most',
+  'much',
+  'many',
+  'both',
+  'only',
+  'just',
+  'other',
+  'another',
+  'same',
+  'because',
+  'while',
+  'through',
+  'against',
+  'without',
+  'within',
+  'out',
+  'off',
+  'down',
+  'again',
+  'once',
+  'ever',
+  'never',
+  'always',
+  'often',
+  'now',
+  'get',
+  'got',
+  'make',
+  'made',
+  'use',
+  'used',
+  'need',
+  'want',
+  'know',
+  'think',
+  'mean',
+  'means',
 ];
 
 /**

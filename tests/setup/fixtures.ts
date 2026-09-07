@@ -40,7 +40,8 @@ export async function truncateAll(): Promise<void> {
   // created by migration 0007 — truncating them would leave registration unable
   // to grant the default role.
   await db.query(
-    `TRUNCATE curriculum_embeddings,
+    `TRUNCATE ai_messages, ai_conversations,
+              curriculum_embeddings,
               student_artifacts, notes, student_notebooks,
               objective_evidence, learning_objectives,
               assessment_attempt_answers, assessment_attempts,

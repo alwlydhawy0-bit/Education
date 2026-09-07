@@ -257,10 +257,44 @@ policy. It reads NO student-owned table and no answer key —
 
 It writes to no other domain's tables.
 
+### `portfolio` — **[BUILT]** (Task 013)
+
+Owns `student_projects`, `project_artifacts`, `student_portfolios` and
+`portfolio_items`. **The only domain with an unauthenticated read path**, which
+is the fact that shapes everything else about it.
+
+Its boundary is unusual in one respect worth stating plainly: the public path is
+not decided by the policy engine at all. A stranger has no actor, so there is no
+`AuthorizationContext` to evaluate, and a public branch in `portfolioPolicy`
+would be a second place deciding publication with no way to be exercised by the
+gate that normally decides. The public boundary is instead held by two things
+that CAN run without an actor — the RLS policies keyed on a transaction-local
+GUC, and `public-view.ts`, a pure constructor that builds the response out of
+named pieces and therefore cannot leak a column nobody has thought about yet.
+
+It reads `users` — no longer. The public resolver joined `users` for a display
+name and, on a path with no actor, that inner join to an RLS-protected table
+matched nothing and killed every public page (VULN-055). Both the join and the
+field were removed: an account display name is registration data a child gave
+their school, and this page is served to anybody with a link.
+
+It reads `class_memberships`, `classes` and `teacher_assignments` only through
+the platform's own SQL helpers — `app_actor_shares_project_class` and
+`app_actor_reviews_project` — which are the same functions the RLS policies
+call, so the policy engine and the database answer from one definition rather
+than from two implementations of one idea.
+
+It writes to no other domain's tables.
+
+`tests/architecture/portfolio-boundaries.test.ts` enforces the shape of the
+sanitizer (no spread, no `delete`, no field whose name looks like an
+identifier), that the public resolver never runs `withActor`, and that the
+public queries carry their own key check as well as relying on RLS.
+
 ## Planned domains — **[DESIGNED]**, boundaries only
 
 `learning-paths` · `activities` ·
-`assessments` · `mastery` · `experiments` · `projects` · `portfolio` · `files` ·
+`assessments` · `mastery` · `experiments` · `files` ·
 `ai-gateway` · `ai-assistant` ·
 `recommendations` · `community` · `moderation` · `notifications` · `analytics` ·
 `administration`.

@@ -306,6 +306,79 @@ the current state.
   new exposure — but it does DUPLICATE the exposure, and a backup of this table
   is a readable copy of a school's curriculum.
 
+## Added in Task 013 — projects and verifiable portfolios
+
+**This task introduced the first unauthenticated content route on the platform.**
+Every risk below is more consequential than its equivalent elsewhere for that
+reason alone.
+
+- **A `public_slug` is a guessable name on an anonymous route, and that is the
+  design rather than a defect.** Anyone can try `/portfolios/share/ahmed`,
+  `/omar`, `/sara`; publishing under a slug makes a portfolio discoverable by
+  name to somebody who never received a link. Mitigating it would mean building
+  something that is not a portfolio. What exists is a rate limit — 60 requests
+  per 15 minutes per IP, the tightest read on the platform — and an audit event
+  on every miss. Neither stops a patient attacker with several addresses, and a
+  learner is not warned at publish time that a memorable slug is a discoverable
+  one (RISK-PF-01).
+- **The rate limit is keyed by IP, so a classroom shares one budget with an
+  attacker.** Every learner in a school behind one NAT counts against the same
+  60. There is no actor to key by — that is what "unauthenticated" means — so
+  the choice is between a limit that inconveniences a class and no limit at all
+  (RISK-PF-02).
+- **`X-Robots-Tag: noindex` is a statement of intent, not a control.** This is a
+  JSON API; nothing here can stop a frontend from rendering the same content
+  into an indexable HTML page without the header. The judgement behind it — that
+  a child clicking "publish" is choosing to hand a link to people they name, not
+  to be indexed and kept after they graduate — has no enforcement point until
+  something serves HTML (RISK-PF-03).
+- **Nothing moderates what a learner publishes.** Title, bio, description and
+  the linked URLs are free text a minor writes and the world reads. There is no
+  review step, no reporting path, and no way for anybody to take a page down
+  except its owner. Community moderation was explicitly out of scope for this
+  task; until it exists, a child can publish anything to an anonymous audience
+  and only that child can retract it (RISK-PF-04).
+- **A `live_demo_url` and a `repository_url` point somewhere this platform does
+  not control.** They are validated as `https://` with no whitespace and nothing
+  else — no allow-list of hosts, no check that the destination is what it claims
+  to be. A learner's public page can link to anything, and a reader following
+  the link has left this platform's protections behind (RISK-PF-05).
+- **There is no retention policy and no deletion path beyond the owner's.** A
+  project outlives the class it was made in — `class_id` is set to null rather
+  than cascading, deliberately, so the work is not destroyed by an
+  administrative change. That means a learner's projects persist indefinitely
+  with no scheduled review. This is the platform-wide retention gap
+  (RISK-TUTOR-02, RISK-WS-02) arriving in a domain where the data is
+  publishable (RISK-PF-06).
+- **`:create` is not policy-gated, here or anywhere on this platform.** There is
+  no object yet to decide about, so what binds a creation is the RLS `WITH
+  CHECK` plus the `student_project_guard` trigger — one gate in the database and
+  none in the application. It is the established pattern across five modules and
+  was not changed here, but it is a genuine single-gate spot and is recorded as
+  one, with the assertion that skips it commented in
+  `tests/architecture/portfolio-boundaries.test.ts` (RISK-PF-07).
+- **A featured project cannot be un-featured.** `student_project:feature` moves
+  `status` one way and there is no verb for the reverse. A teacher who features
+  the wrong project, or who later needs to withdraw a distinction, has no route
+  — the owner can move it back to `submitted` only by editing their own status,
+  which the contract permits. Nobody has decided whether un-featuring should be
+  a reviewer's power (RISK-PF-08).
+- **Byte sizes are declared, not measured.** `project_artifacts.byte_size` is
+  whatever the client said, capped at 25 MiB. Nothing on this platform stores
+  bytes yet — `docs/security/file-security.md` makes "never serve unscanned
+  content" non-negotiable and there is no scanner — so an artifact is a claim
+  about a file at an external `https://` URL. The cap bounds what a caller may
+  assert, not what a reader will download (RISK-PF-09).
+- **A public page is served fresh on every request, with no cache and no CDN.**
+  That is what makes revocation immediate, and it also means every view is a
+  database round trip running RLS over four tables. The rate limit is the only
+  thing bounding that cost, and it is set for enumeration rather than for load
+  (RISK-PF-10).
+- **The two-row guard is a detector without an alarm.** If a share key ever
+  matched two portfolios the resolver serves nothing, which is the safe answer —
+  but nothing records that it happened, so a uniqueness failure would present as
+  one learner's page mysteriously not loading (RISK-PF-11).
+
 ## Added in Task 012 — the AI tutor
 
 - **No guardian may read a child's tutor conversations, and that is an OPEN
@@ -1005,9 +1078,15 @@ in `ai-security.md`. Interactive experiments and a student workspace exist
 (Task 011), and **an AI conversational tutor with retrieval-augmented answers
 exists** (Task 012). All four should be struck from the list above.
 
-What still does not exist is any USER INTERFACE over the tutor, and the
-streaming API section 2D of that task asked for. Portfolios, research artifacts
-and community analytics remain unbuilt and were explicitly out of scope.
+**Student projects, research artifacts and verifiable portfolios now exist
+too** (Task 013), including the platform's first unauthenticated route.
+
+What still does not exist is any USER INTERFACE over the tutor or over
+portfolios, and the streaming API section 2D of Task 012 asked for. Community
+moderation, school analytics and production hardening remain unbuilt and were
+explicitly out of scope for Task 013 — which matters more now than it did
+before, because there is a public surface with nothing moderating it
+(RISK-PF-04).
 
 ## Compliance
 

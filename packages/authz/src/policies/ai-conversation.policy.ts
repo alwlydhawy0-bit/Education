@@ -95,11 +95,27 @@ export function aiConversationPolicy(
 
     if (verb === 'create' || verb === 'speak') {
       if (!conversation.anchorStillAssigned) {
-        // `reveal`, because the owner already knows this conversation exists —
-        // they are holding it. Concealing the reason would leave a learner
-        // staring at a silent failure with no way to understand that their
-        // class changed.
-        return deny(action, conversation.id, 'ai_conversation.no_longer_studying', 'reveal');
+        // THE DISCLOSURE DIFFERS BETWEEN THE TWO VERBS, and the layered-defence
+        // suite is what forced the distinction.
+        //
+        // For `speak` it is `reveal`: the learner is HOLDING this conversation,
+        // so they already know it exists, and concealing the reason would leave
+        // them staring at a silent failure with no way to understand that their
+        // class had changed.
+        //
+        // For `create` it must be `hide`. There the id names a LESSON the actor
+        // has not been granted anything about, and "you are not studying this"
+        // says something a bare 404 would not: that the lesson is real. Run with
+        // RLS switched off, that difference was measurable — creating against
+        // another school's lesson answered 403 while a made-up id answered 404,
+        // which is a cross-tenant existence oracle that only the database was
+        // closing. Two gates, and one of them was carrying this alone.
+        return deny(
+          action,
+          conversation.id,
+          'ai_conversation.no_longer_studying',
+          verb === 'speak' ? 'reveal' : 'hide',
+        );
       }
       if (conversation.status === 'archived' && verb === 'speak') {
         return deny(action, conversation.id, 'ai_conversation.archived', 'reveal');

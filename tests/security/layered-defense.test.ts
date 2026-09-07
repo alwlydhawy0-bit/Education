@@ -2113,3 +2113,276 @@ describe('the curriculum knowledge base, with RLS disabled', () => {
     expect(bodyText).not.toContain('SCHOOLAONLY');
   });
 });
+
+describe('the AI tutor, with RLS disabled', () => {
+  /**
+   * THE BLOCK THAT ANSWERS "WHICH GATE DID THE WORK?" FOR CONVERSATIONS.
+   *
+   * This domain needs it more than most, because its read set and its write set
+   * are deliberately different shapes: a teacher and a moderator may READ a
+   * child's transcript, and nobody but the child may write to it. A suite run
+   * with both gates up cannot tell whether the moderator's read was admitted by
+   * the policy or merely not refused by RLS, nor whether the moderator's WRITE
+   * was refused by the policy or only by a row-security check.
+   *
+   * With BYPASSRLS every conversation and every message is visible to the
+   * database client, so anything refused below was refused by the application.
+   */
+  async function seedAndLogin(
+    email: string,
+    roles: readonly string[] | undefined,
+    organizationId: string | null,
+  ): Promise<{ id: string; cookie: string }> {
+    const user = await createUser({
+      email,
+      ...(roles ? { roles } : {}),
+      organizationId,
+      passwordHash: await hashPassword(PASSWORD),
+    });
+    const loggedIn = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: writeHeaders,
+      payload: { email, password: PASSWORD },
+    });
+    expect(loggedIn.statusCode).toBe(204);
+    return {
+      id: user.id,
+      cookie: `edu_session=${sessionCookieFrom(loggedIn.headers['set-cookie'])}`,
+    };
+  }
+
+  const CELLS = [
+    'The mitochondrion is the organelle where respiration releases energy.',
+    'Respiration combines glucose and oxygen to release usable energy as ATP.',
+  ]
+    .join('\n\n')
+    .repeat(4);
+
+  /** Two schools, one enrolled learner each, plus the adults. */
+  async function twoSchools() {
+    const orgA = await createOrganization('Tutor NoRLS A');
+    const orgB = await createOrganization('Tutor NoRLS B');
+    const levelId = await createEducationLevel();
+
+    const learnerA = await seedAndLogin('nrls-tut-a@test.local', undefined, orgA);
+    const learnerA2 = await seedAndLogin('nrls-tut-a2@test.local', undefined, orgA);
+    const learnerB = await seedAndLogin('nrls-tut-b@test.local', undefined, orgB);
+    const teacherA = await seedAndLogin('nrls-tut-teacher@test.local', ['teacher'], orgA);
+    const teacherOther = await seedAndLogin('nrls-tut-teacher2@test.local', ['teacher'], orgA);
+    const moderatorA = await seedAndLogin('nrls-tut-mod@test.local', ['moderator'], orgA);
+    const moderatorB = await seedAndLogin('nrls-tut-mod-b@test.local', ['moderator'], orgB);
+
+    const build = async (organizationId: string, code: string, marker: string) => {
+      const curriculumId = await createCurriculum({
+        organizationId,
+        code,
+        status: 'published',
+      });
+      const courseId = await createCourse({
+        organizationId,
+        curriculumId,
+        levelId,
+        title: `${code} science`,
+        status: 'published',
+      });
+      const unitId = await createUnit({ courseId, status: 'published' });
+      const lessonId = await createLesson({
+        unitId,
+        title: `${code} cells`,
+        status: 'published',
+        contentBody: `${marker} ${CELLS}`,
+      });
+      return { courseId, lessonId };
+    };
+
+    const a = await build(orgA, 'nta', 'SCHOOLAONLY');
+    const b = await build(orgB, 'ntb', 'SCHOOLBONLY');
+
+    const classA = await createClass(orgA, 'NoRLS Tutor A');
+    await addClassMember(classA, learnerA.id);
+    await addClassMember(classA, learnerA2.id);
+    await assignCourseToClass({ classId: classA, courseId: a.courseId });
+    await assignTeacher(teacherA.id, classA);
+
+    const classB = await createClass(orgB, 'NoRLS Tutor B');
+    await addClassMember(classB, learnerB.id);
+    await assignCourseToClass({ classId: classB, courseId: b.courseId });
+
+    return {
+      learnerA, learnerA2, learnerB, teacherA, teacherOther, moderatorA, moderatorB,
+      lessonA: a.lessonId, lessonB: b.lessonId, classA,
+    };
+  }
+
+  const start = async (cookie: string, lessonId: string): Promise<string> => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ai/conversations',
+      headers: { ...writeHeaders, cookie },
+      payload: { lessonId },
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    return response.json<{ id: string }>().id;
+  };
+
+  const say = (cookie: string, id: string, content: string) =>
+    app.inject({
+      method: 'POST',
+      url: `/api/v1/ai/conversations/${id}/messages`,
+      headers: { ...writeHeaders, cookie },
+      payload: { content },
+    });
+
+  const read = (cookie: string, id: string) =>
+    app.inject({ method: 'GET', url: `/api/v1/ai/conversations/${id}/messages`, headers: { cookie } });
+
+  it('CONFIRMS EVERY CONVERSATION IS VISIBLE TO THE CLIENT, so the rest means something', async () => {
+    const w = await twoSchools();
+    const a = await start(w.learnerA.cookie, w.lessonA);
+    await say(w.learnerA.cookie, a, 'what does a mitochondrion do');
+    await start(w.learnerB.cookie, w.lessonB);
+
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      // No `app.actor_id` is set. Under RLS this is zero rows; here it must
+      // show both schools' conversations and the transcript, which is what
+      // makes every refusal below an application property.
+      const conversations = await raw.query('SELECT id FROM ai_conversations');
+      expect(conversations.rows.length).toBe(2);
+      const messages = await raw.query('SELECT id FROM ai_messages');
+      expect(messages.rows.length).toBeGreaterThan(0);
+    } finally {
+      await raw.end();
+    }
+  });
+
+  it('refuses a peer reading another learner’s transcript by exact id', async () => {
+    const w = await twoSchools();
+    const id = await start(w.learnerA.cookie, w.lessonA);
+    await say(w.learnerA.cookie, id, 'my private question about respiration');
+
+    const response = await read(w.learnerA2.cookie, id);
+    expect(response.statusCode).toBe(404);
+    expect(response.body).not.toContain('my private question');
+  });
+
+  it('refuses a peer speaking into it', async () => {
+    const w = await twoSchools();
+    const id = await start(w.learnerA.cookie, w.lessonA);
+    expect((await say(w.learnerA2.cookie, id, 'hello')).statusCode).toBe(404);
+  });
+
+  it('refuses a learner in another school', async () => {
+    const w = await twoSchools();
+    const id = await start(w.learnerA.cookie, w.lessonA);
+    expect((await read(w.learnerB.cookie, id)).statusCode).toBe(404);
+  });
+
+  it('LISTS ONLY THE CALLER’S OWN, with every row visible to the client', async () => {
+    // The listing case, where a single gate is most expensive to be wrong about
+    // (VULN-017). The repository scopes by the session's own id, so this
+    // returns one row even though the connection can see both.
+    const w = await twoSchools();
+    await start(w.learnerA.cookie, w.lessonA);
+    await start(w.learnerA2.cookie, w.lessonA);
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/ai/conversations',
+      headers: { cookie: w.learnerA.cookie },
+    });
+    expect(response.json<{ conversations: unknown[] }>().conversations).toHaveLength(1);
+  });
+
+  it('ADMITS THE TEACHER WHO TEACHES THEM, and refuses the one who does not', async () => {
+    // Both halves in one test on purpose: with RLS gone, an admit that came
+    // from nothing and a refusal that came from nothing look identical unless
+    // the pair is checked together.
+    const w = await twoSchools();
+    const id = await start(w.learnerA.cookie, w.lessonA);
+    await say(w.learnerA.cookie, id, 'what is respiration');
+
+    expect((await read(w.teacherA.cookie, id)).statusCode).toBe(200);
+    expect((await read(w.teacherOther.cookie, id)).statusCode).toBe(404);
+  });
+
+  it('admits a moderator in the same school and refuses one from another', async () => {
+    const w = await twoSchools();
+    const id = await start(w.learnerA.cookie, w.lessonA);
+    expect((await read(w.moderatorA.cookie, id)).statusCode).toBe(200);
+    expect((await read(w.moderatorB.cookie, id)).statusCode).toBe(404);
+  });
+
+  it('REFUSES EVERY ADULT WRITE, which no row policy is doing here', async () => {
+    // The read set is wider than the write set in this domain, and this is the
+    // gap. Reading a transcript is oversight; editing one is tampering, and a
+    // moderator who could archive a conversation could hide it from the next
+    // moderator. With RLS off, only `aiConversationPolicy` is saying no.
+    const w = await twoSchools();
+    const id = await start(w.learnerA.cookie, w.lessonA);
+
+    for (const who of [w.teacherA, w.moderatorA]) {
+      expect((await say(who.cookie, id, 'adult speaking')).statusCode).toBe(404);
+
+      const archived = await app.inject({
+        method: 'POST',
+        url: `/api/v1/ai/conversations/${id}/archive`,
+        headers: { ...bodylessWriteHeaders, cookie: who.cookie },
+      });
+      expect(archived.statusCode).toBe(404);
+
+      const renamed = await app.inject({
+        method: 'PATCH',
+        url: `/api/v1/ai/conversations/${id}`,
+        headers: { ...writeHeaders, cookie: who.cookie },
+        payload: { title: 'Edited by an adult' },
+      });
+      expect(renamed.statusCode).toBe(404);
+    }
+  });
+
+  it('refuses starting a conversation about another school’s lesson', async () => {
+    const w = await twoSchools();
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/v1/ai/conversations',
+      headers: { ...writeHeaders, cookie: w.learnerA.cookie },
+      payload: { lessonId: w.lessonB },
+    });
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('STOPS A REVOKED LEARNER TALKING, with RLS gone', async () => {
+    // The trigger in migration 0027 re-asks `app_actor_may_study_lesson` on
+    // every turn, and so does the policy. This asserts the POLICY does it
+    // alone — the database's own copy of the rule is switched off here.
+    const w = await twoSchools();
+    const id = await start(w.learnerA.cookie, w.lessonA);
+    expect((await say(w.learnerA.cookie, id, 'what is respiration')).statusCode).toBe(200);
+
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      await raw.query(
+        `UPDATE class_memberships SET status = 'ended', ended_at = now() WHERE user_id = $1`,
+        [w.learnerA.id],
+      );
+    } finally {
+      await raw.end();
+    }
+
+    expect((await say(w.learnerA.cookie, id, 'and ATP?')).statusCode).toBe(403);
+    // Their own history survives, which is the half a blunt revocation would
+    // have taken with it.
+    expect((await read(w.learnerA.cookie, id)).statusCode).toBe(200);
+  });
+
+  it('NEVER SURFACES ANOTHER SCHOOL’S LESSON TEXT, with every chunk readable', async () => {
+    const w = await twoSchools();
+    const id = await start(w.learnerA.cookie, w.lessonA);
+    const response = await say(w.learnerA.cookie, id, 'mitochondrion respiration energy');
+    expect(response.body).not.toContain('SCHOOLBONLY');
+  });
+});

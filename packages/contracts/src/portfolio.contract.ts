@@ -304,7 +304,9 @@ export const publicPortfolioResponseSchema = z
   .object({
     title: z.string(),
     bio: z.string(),
-    authorDisplayName: z.string(),
+    // No author name. See `PublicPortfolioView` for why the field was removed
+    // rather than repaired: the title and bio are what the learner wrote FOR
+    // this page, and an account display name is not.
     projects: z.array(
       z
         .object({

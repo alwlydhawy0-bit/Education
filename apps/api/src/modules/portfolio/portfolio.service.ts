@@ -94,6 +94,8 @@ export interface PortfolioService {
 const UNIQUE_VIOLATION = '23505';
 const FK_VIOLATION = '23503';
 const INTEGRITY_VIOLATION = '23514';
+const INSUFFICIENT_PRIVILEGE = '42501';
+const NOT_NULL_VIOLATION = '23502';
 const RAISED_INTEGRITY = '23000';
 
 function pgCode(error: unknown): string | null {
@@ -248,8 +250,17 @@ export function createPortfolioService(deps: PortfolioServiceDeps): PortfolioSer
     if (code === FK_VIOLATION) {
       throw validationFailed('That reference does not name anything you can attach to');
     }
-    if ((code === INTEGRITY_VIOLATION || code === RAISED_INTEGRITY) && /class/i.test(message)) {
-      throw validationFailed('You cannot post a project to a class you are not in');
+    if (code === NOT_NULL_VIOLATION && /must be created in a class/i.test(message)) {
+      throw validationFailed('A project belongs to a class you are in');
+    }
+    if (code === INSUFFICIENT_PRIVILEGE && /class you are in/i.test(message)) {
+      // `student_project_guard` refusing a writer who is not a MEMBER of the
+      // class. A teacher hits this too, and correctly: a project is a learner's
+      // work, and teaching a class is not being in it.
+      throw forbidden('A project belongs to a class you are a learner in');
+    }
+    if (code === INSUFFICIENT_PRIVILEGE) {
+      throw forbidden('That is not something you may do to this project');
     }
     if (code === RAISED_INTEGRITY) {
       // The review guard refusing a reviewer who tried to change more than

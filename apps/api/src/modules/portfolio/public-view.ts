@@ -61,11 +61,32 @@ export interface PublicArtifactView {
   readonly byteSize: number;
 }
 
+/**
+ * THERE IS NO AUTHOR NAME HERE, and its absence is the most deliberate thing in
+ * this file.
+ *
+ * The first version carried `authorDisplayName`, read from `users.display_name`
+ * — the name a child's school registered them under. Two things killed it.
+ *
+ * The mechanical one: `users` has RLS, the public path runs with no actor, and
+ * `users_select` admits nothing to a caller who is not somebody's teacher,
+ * guardian or self. The JOIN silently returned zero rows and took down every
+ * public page on the platform. That was a bug and could have been fixed.
+ *
+ * The real one is that fixing it would have been the wrong thing to do. An
+ * account display name is registration data a child gave their school, not
+ * something they composed for the internet, and this page is served to anybody
+ * holding a link. A portfolio already carries a `title` and a `bio` the learner
+ * WROTE, knowing they were writing them for this page — so if they want their
+ * name on it, they can put it there, and if they want to be "Y10 Physics" they
+ * can be that instead. The platform does not decide for them.
+ *
+ * The task specification never asked for an author name. It was invented here,
+ * and removing it is the correction.
+ */
 export interface PublicPortfolioView {
   readonly title: string;
   readonly bio: string;
-  /** The learner's display name. NEVER their email, id or organization. */
-  readonly authorDisplayName: string;
   readonly projects: readonly PublicProjectView[];
 }
 
@@ -73,7 +94,6 @@ export interface PublicPortfolioView {
 export interface PortfolioSourceRow {
   readonly title: string;
   readonly bio: string;
-  readonly authorDisplayName: string;
 }
 
 export interface ProjectSourceRow {
@@ -108,7 +128,6 @@ export function toPublicPortfolio(
   return {
     title: portfolio.title,
     bio: portfolio.bio,
-    authorDisplayName: portfolio.authorDisplayName,
     projects: [...projects]
       .sort((a, b) => a.displayOrder - b.displayOrder)
       .map((project, index) => ({

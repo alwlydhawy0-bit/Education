@@ -42,7 +42,6 @@ const SECRETS = {
 const portfolio: PortfolioSourceRow = {
   title: 'Noor Al-Waleed — Physics',
   bio: 'Year 10. I build things that fall over.',
-  authorDisplayName: 'Noor Al-Waleed',
 };
 
 const project = (overrides: Partial<ProjectSourceRow> = {}): ProjectSourceRow => ({
@@ -74,6 +73,7 @@ describe('toPublicPortfolio — no identifier leaves the boundary', () => {
       shareToken: SECRETS.shareToken,
       share_token: SECRETS.shareToken,
       authorEmail: SECRETS.email,
+      authorDisplayName: 'Noor Al-Waleed',
       isPublished: true,
     } as PortfolioSourceRow;
 
@@ -111,6 +111,14 @@ describe('toPublicPortfolio — no identifier leaves the boundary', () => {
     }
   });
 
+  it('never carries an author display name, even when handed one', () => {
+    const view = toPublicPortfolio(
+      { ...portfolio, authorDisplayName: 'Registered Legal Name' } as PortfolioSourceRow,
+      [],
+    );
+    expect(JSON.stringify(view)).not.toContain('Registered Legal Name');
+  });
+
   it('carries exactly the named fields and no others', () => {
     /**
      * The complement of the leak test. That one proves nothing SECRET escapes;
@@ -121,7 +129,11 @@ describe('toPublicPortfolio — no identifier leaves the boundary', () => {
       project({ artifacts: [{ artifactType: 'code_file', filePathOrUrl: 'https://x.test/a.zip', byteSize: 12 }] }),
     ]);
 
-    expect(Object.keys(view).sort()).toEqual(['authorDisplayName', 'bio', 'projects', 'title']);
+    // No author name. See `PublicPortfolioView`: an account display name is
+    // registration data a child gave their school, not something they composed
+    // for a page served to anybody with a link. This assertion is what keeps it
+    // from drifting back in.
+    expect(Object.keys(view).sort()).toEqual(['bio', 'projects', 'title']);
     expect(Object.keys(view.projects[0]!).sort()).toEqual([
       'artifacts',
       'description',
@@ -208,7 +220,7 @@ describe('toPublicPortfolio — no identifier leaves the boundary', () => {
     expect(view.projects).toEqual([]);
     // An empty portfolio and a portfolio whose items are all private are the
     // same page. The resolver must not be able to tell a stranger apart.
-    expect(Object.keys(view).sort()).toEqual(['authorDisplayName', 'bio', 'projects', 'title']);
+    expect(Object.keys(view).sort()).toEqual(['bio', 'projects', 'title']);
   });
 });
 

@@ -639,16 +639,20 @@ export const portfolioRepository: PortfolioRepository = {
    * the same object as the thing being serialized.
    */
   async publicPortfolio(tx) {
+    // NO JOIN TO `users`. The first version had one, to fetch the owner's
+    // display name, and it took down every public page: `users` has RLS, this
+    // path has no actor, and `users_select` admits nothing to a caller who is
+    // not somebody's self, teacher or guardian — so the inner join returned
+    // zero rows for every portfolio on the platform. The same shape as
+    // VULN-054, where an inner join to `lessons` silently vetoed a policy.
+    //
+    // It is not repaired with a definer function, because the field should not
+    // have existed: see `PublicPortfolioView`. The title and the bio are what
+    // the learner wrote for this page.
     const { rows: portfolioRows } = await tx.query<{
       title: string;
       bio: string;
-      author_display_name: string;
-    }>(
-      `SELECT f.title, f.bio, u.display_name AS author_display_name
-         FROM student_portfolios f
-         JOIN users u ON u.id = f.student_id
-        LIMIT 2`,
-    );
+    }>(`SELECT f.title, f.bio FROM student_portfolios f LIMIT 2`);
 
     // TWO ROWS IS IMPOSSIBLE AND THEREFORE WORTH REFUSING. `share_token` and
     // `public_slug` are both UNIQUE, so a key can match at most one portfolio;
@@ -676,11 +680,7 @@ export const portfolioRepository: PortfolioRepository = {
     );
 
     return {
-      portfolio: {
-        title: portfolioRow.title,
-        bio: portfolioRow.bio,
-        authorDisplayName: portfolioRow.author_display_name,
-      },
+      portfolio: { title: portfolioRow.title, bio: portfolioRow.bio },
       projects: projectRows.map((row) => ({
         displayOrder: Number(row.display_order),
         title: row.title,

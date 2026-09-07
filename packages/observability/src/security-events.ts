@@ -439,6 +439,43 @@ export const SecurityEventType = {
    */
   PORTFOLIO_PUBLIC_RESOLVE_FAILED: 'portfolio.public_resolve_failed',
 
+  /**
+   * The automated filter flagged a post on the way in.
+   *
+   * Recorded so a school can ask the question that decides whether the filter
+   * is worth having: how often does it fire, and how often does a teacher
+   * dismiss what it caught? A filter nobody measures is a filter nobody can
+   * tell is broken. The post's TEXT is never recorded — only that it was
+   * flagged, and on which entity.
+   */
+  MODERATION_AUTO_FLAGGED: 'moderation.auto_flagged',
+
+  /**
+   * A person reported a post.
+   *
+   * THE REASON TEXT IS NEVER IN THE DETAIL. A child's account of why a post
+   * frightened them belongs in the moderation queue a named teacher opens, not
+   * in an audit log read by operators and shipped to whatever collects logs.
+   * What is recorded is that a report happened, on what, and whether it
+   * duplicated one the same person had already filed.
+   */
+  MODERATION_CONTENT_REPORTED: 'moderation.content_reported',
+
+  /**
+   * A moderator acted on a post: approved, hid, pinned, locked, or the reverse.
+   *
+   * DECLARED IN 2024 AS RESERVED AND NEVER EMITTED, because there was no
+   * community to moderate. This is the task it was reserved for, and it is
+   * moved out of `RESERVED_SECURITY_EVENT_TYPES` in the same change that adds
+   * its emitter — which is what that list's own comment asks for.
+   *
+   * An adult acting on a child's words in front of their classmates is exactly
+   * the thing a school needs a record of, and the ACTION is recorded rather
+   * than the column, so "who locked this conversation" is answerable without
+   * reading a diff.
+   */
+  MODERATION_ACTION: 'moderation.action',
+
   SECURITY_CONFIG_DEVIATION: 'security.config_deviation',
 } as const;
 
@@ -454,13 +491,16 @@ export const SecurityEventType = {
  *
  *   - `admin.action`           — no administrative endpoints exist.
  *   - `file.activity.unusual`  — no file storage exists.
- *   - `moderation.action`      — no moderation exists.
+ *
+ * `moderation.action` was on this list from Task 001 until Task 014, which
+ * built the community it was reserved for. It moved into `SecurityEventType`
+ * in the same change that added its emitter, which is what this comment asks
+ * for and is the first time anything has actually made the trip.
  *
  * Move one into `SecurityEventType` in the same change that adds its emitter.
  */
 export const RESERVED_SECURITY_EVENT_TYPES = [
   'file.activity.unusual',
-  'moderation.action',
 ] as const;
 
 export type SecurityEventType = (typeof SecurityEventType)[keyof typeof SecurityEventType];

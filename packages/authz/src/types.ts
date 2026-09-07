@@ -204,7 +204,10 @@ export type ResourceKind =
   | 'notebook'
   | 'student_artifact'
   | 'student_project'
-  | 'student_portfolio';
+  | 'student_portfolio'
+  | 'discussion_thread'
+  | 'discussion_reply'
+  | 'content_flag';
 
 export interface BaseResource {
   readonly kind: ResourceKind;
@@ -743,6 +746,81 @@ export interface StudentPortfolioResource extends BaseResource {
   readonly publicItemCount: number;
 }
 
+
+export type ModerationStatus = 'approved' | 'flagged' | 'hidden';
+
+/**
+ * A forum thread.
+ *
+ * `authoredByActor` IS NOT A FIELD, because `ownerId` already says it. What IS
+ * resolved in SQL and handed in are the two relationships this domain turns on:
+ * being in the room, and being responsible for it. They are separate fields
+ * rather than one `canModerate` because they admit different things — a
+ * classmate reads, a teacher hides — and an audit of a moderation action has to
+ * be able to say which authority was used.
+ *
+ * `moderationStatus` IS ON THE RESOURCE, unusually. Everywhere else on this
+ * platform a policy decides who may act and the state lives in the payload;
+ * here the state decides who may act, because a hidden post is one its own
+ * author may no longer edit. That is a genuine coupling and it is deliberate:
+ * moderation IS the lifecycle in this domain.
+ */
+export interface DiscussionThreadResource extends BaseResource {
+  readonly kind: 'discussion_thread';
+  readonly ownerId: string;
+  readonly organizationId: string | null;
+  readonly classId: string;
+  readonly moderationStatus: ModerationStatus;
+  readonly isLocked: boolean;
+  /** The actor is a member or teacher of this class. Resolved in SQL. */
+  readonly actorInForum: boolean;
+  /** The actor may pin, lock, hide and approve here. Resolved in SQL. */
+  readonly actorModerates: boolean;
+}
+
+/**
+ * A reply.
+ *
+ * `threadIsLocked` is carried SEPARATELY from the reply's own state because a
+ * locked thread freezes replies that are themselves perfectly fine — the
+ * constraint belongs to the room, not to the post, and collapsing them would
+ * lose the reason a refusal happened.
+ *
+ * `actorOwnsThread` is the relationship that has no equivalent anywhere else on
+ * this platform: the person who ASKED the question, who is neither the reply's
+ * author nor staff, and who is the only one who can say the question was
+ * answered.
+ */
+export interface DiscussionReplyResource extends BaseResource {
+  readonly kind: 'discussion_reply';
+  readonly ownerId: string;
+  readonly organizationId: string | null;
+  readonly classId: string;
+  readonly threadId: string;
+  readonly moderationStatus: ModerationStatus;
+  readonly threadIsLocked: boolean;
+  readonly actorInForum: boolean;
+  readonly actorModerates: boolean;
+  /** The actor opened the thread this reply is in. Resolved in SQL. */
+  readonly actorOwnsThread: boolean;
+}
+
+/**
+ * A report about a post.
+ *
+ * THE REPORTED AUTHOR IS ABSENT FROM THIS RESOURCE ENTIRELY — there is no
+ * `subjectAuthorId` — and that absence is the policy. A flag names who raised
+ * it and who may work it, and nothing here could be used to tell a child who
+ * reported them. See the policy for why that matters more than it looks.
+ */
+export interface ContentFlagResource extends BaseResource {
+  readonly kind: 'content_flag';
+  /** The reporter, or null when the automated filter raised it. */
+  readonly reporterId: string | null;
+  readonly organizationId: string | null;
+  readonly actorModerates: boolean;
+}
+
 export type Resource =
   | AiConversationResource
   | NoteResource
@@ -768,7 +846,10 @@ export type Resource =
   | NotebookResource
   | StudentArtifactResource
   | StudentProjectResource
-  | StudentPortfolioResource;
+  | StudentPortfolioResource
+  | DiscussionThreadResource
+  | DiscussionReplyResource
+  | ContentFlagResource;
 
 // --- Actions -------------------------------------------------------------
 // An action is `<resourceKind>:<verb>`. The engine enforces that the prefix
@@ -1088,6 +1169,63 @@ export const STUDENT_PORTFOLIO_ACTIONS = [
 
 export type StudentPortfolioAction = (typeof STUDENT_PORTFOLIO_ACTIONS)[number];
 
+
+/**
+ * What may be done with a thread.
+ *
+ * `pin`, `lock` AND `moderate` ARE THREE VERBS, not one `manage`. They are
+ * different powers with different meanings — pinning is curation, locking ends
+ * a conversation, hiding removes a child's words from their classmates — and an
+ * audit trail that could not tell them apart would be unable to answer the only
+ * question anybody asks of it. The database agrees: the moderation guard
+ * permits exactly the columns these three verbs move.
+ */
+export const DISCUSSION_THREAD_ACTIONS = [
+  'discussion_thread:create',
+  'discussion_thread:read',
+  'discussion_thread:list',
+  'discussion_thread:update',
+  'discussion_thread:delete',
+  'discussion_thread:pin',
+  'discussion_thread:lock',
+  'discussion_thread:moderate',
+] as const;
+export type DiscussionThreadAction = (typeof DISCUSSION_THREAD_ACTIONS)[number];
+
+/**
+ * What may be done with a reply.
+ *
+ * `accept` is its own verb because its holder is neither the author nor staff.
+ * There is no `pin` and no `lock`: those belong to a thread, and offering them
+ * here would be a vocabulary advertising something no policy implements.
+ */
+export const DISCUSSION_REPLY_ACTIONS = [
+  'discussion_reply:create',
+  'discussion_reply:read',
+  'discussion_reply:list',
+  'discussion_reply:update',
+  'discussion_reply:delete',
+  'discussion_reply:accept',
+  'discussion_reply:moderate',
+] as const;
+export type DiscussionReplyAction = (typeof DISCUSSION_REPLY_ACTIONS)[number];
+
+/**
+ * What may be done with a flag.
+ *
+ * THERE IS NO `content_flag:delete` AND NO `content_flag:withdraw`. A
+ * moderation record that can be removed is not a record, and a report that can
+ * be retracted can be retracted under pressure — which on a forum for children
+ * is exactly the pressure the reporting system exists to survive.
+ */
+export const CONTENT_FLAG_ACTIONS = [
+  'content_flag:create',
+  'content_flag:read',
+  'content_flag:list',
+  'content_flag:review',
+] as const;
+export type ContentFlagAction = (typeof CONTENT_FLAG_ACTIONS)[number];
+
 export type NoteAction = (typeof NOTE_ACTIONS)[number];
 export type UserAction = (typeof USER_ACTIONS)[number];
 export type ProfileAction = (typeof PROFILE_ACTIONS)[number];
@@ -1120,7 +1258,10 @@ export type Action =
   | NotebookAction
   | StudentArtifactAction
   | StudentProjectAction
-  | StudentPortfolioAction;
+  | StudentPortfolioAction
+  | DiscussionThreadAction
+  | DiscussionReplyAction
+  | ContentFlagAction;
 
 /**
  * What may be done with a tutor conversation.
@@ -1174,6 +1315,9 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...AI_CONVERSATION_ACTIONS,
   ...STUDENT_PROJECT_ACTIONS,
   ...STUDENT_PORTFOLIO_ACTIONS,
+  ...DISCUSSION_THREAD_ACTIONS,
+  ...DISCUSSION_REPLY_ACTIONS,
+  ...CONTENT_FLAG_ACTIONS,
 ];
 
 /** The two permissions that split authoring from publishing. See ADR 0009. */

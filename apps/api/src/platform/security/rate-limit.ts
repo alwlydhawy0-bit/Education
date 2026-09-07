@@ -324,6 +324,47 @@ export const RATE_LIMIT_POLICIES = {
     rationale: 'Row-count abuse on a table with no byte quota to bound it.',
   },
 
+  /**
+   * Posting to a forum.
+   *
+   * Generous, because posting is what the forum is FOR and a learner who writes
+   * too much is a teacher's problem rather than a security one. What this bounds
+   * is a script, not a chatty child.
+   */
+  forumPost: {
+    name: 'forum.post',
+    max: 60,
+    timeWindow: '15 minutes',
+    rationale: 'Automated flooding of a class feed. Not aimed at ordinary use.',
+  },
+
+  /**
+   * REPORTING A POST — TIGHTER THAN POSTING, which looks backwards and is not.
+   *
+   * Reporting is the route that can be turned against a person. Filing enough
+   * reports buries a moderation queue so that real ones are not read, and that
+   * is an attack on every child in the school rather than on one. The
+   * one-report-per-person index in 0029 makes piling onto a single post
+   * structurally impossible; this bounds the broader flood.
+   *
+   * Set low enough to make burying a queue slow and high enough that a child
+   * having a genuinely bad afternoon can report everything that happened.
+   */
+  contentReport: {
+    name: 'moderation.report',
+    max: 20,
+    timeWindow: '15 minutes',
+    rationale: 'Burying a moderation queue so genuine reports go unread.',
+  },
+
+  /** Moderation actions. Staff-only, so this is a runaway-script bound. */
+  moderationAction: {
+    name: 'moderation.action',
+    max: 200,
+    timeWindow: '15 minutes',
+    rationale: 'A stuck client replaying moderation writes.',
+  },
+
   authVerifyEmail: {
     name: 'auth.verify_email',
     max: 20,

@@ -23,6 +23,11 @@ import {
   studentProjectPolicy,
 } from './policies/portfolio.policy.ts';
 import {
+  contentFlagPolicy,
+  discussionReplyPolicy,
+  discussionThreadPolicy,
+} from './policies/community.policy.ts';
+import {
   resourceKindForAction,
   type Action,
   type AuthorizationContext,
@@ -90,6 +95,9 @@ const DEFAULT_POLICIES: Readonly<Record<ResourceKind, PolicyFn>> = Object.freeze
   student_artifact: studentArtifactPolicy as unknown as PolicyFn,
   student_project: studentProjectPolicy as unknown as PolicyFn,
   student_portfolio: studentPortfolioPolicy as unknown as PolicyFn,
+  discussion_thread: discussionThreadPolicy as unknown as PolicyFn,
+  discussion_reply: discussionReplyPolicy as unknown as PolicyFn,
+  content_flag: contentFlagPolicy as unknown as PolicyFn,
 });
 
 export function createPolicyEngine(

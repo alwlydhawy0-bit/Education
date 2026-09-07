@@ -4,6 +4,7 @@ export * from './identity.contract.ts';
 export * from './notebook.contract.ts';
 export * from './workspace.contract.ts';
 export * from './portfolio.contract.ts';
+export * from './community.contract.ts';
 export * from './knowledge.contract.ts';
 export * from './tutor.contract.ts';
 export * from './relationships.contract.ts';

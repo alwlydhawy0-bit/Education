@@ -1,6 +1,16 @@
 /**
  * The markdown check that actually earns its place.
  *
+ * IT LIVED IN `modules/notebook/` UNTIL TASK 014, and moving it is the point of
+ * this note. It was always a platform safety primitive — a pure function about
+ * link destinations, with no notebook in it anywhere — but with one consumer
+ * there was nothing to make the misfiling visible. A second domain needing it
+ * made `tests/architecture/dependency-rules.test.ts` fail on rule 3, which is
+ * exactly what that rule is for: it did not object to the import because
+ * sharing was wrong, it objected because the shared thing was in the wrong
+ * place. Duplicating it into the forum instead would have been two copies of a
+ * security control, free to drift.
+ *
  * WHAT THIS IS NOT: an HTML sanitizer. Nothing on this platform converts a
  * note's markdown into HTML — there is no renderer, in the API or in the web
  * app — so there is no sink to sanitize for, and

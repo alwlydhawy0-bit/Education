@@ -18,7 +18,7 @@ import {
   registerArtifactRequestSchema,
   updateNoteRequestSchema,
 } from '@edu/contracts';
-import { checkMarkdown } from '../../apps/api/src/modules/notebook/markdown-safety.ts';
+import { checkMarkdown } from '../../apps/api/src/platform/security/markdown-safety.ts';
 
 /**
  * The student workspace: its decision tables, its markdown gate, and the parts

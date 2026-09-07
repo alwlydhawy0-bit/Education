@@ -12,7 +12,7 @@ import type { CreateNoteRequest, ListNotesQuery, UpdateNoteRequest } from '@edu/
 import type { Database } from '../../platform/db.ts';
 import type { SecurityEventRecorder } from '../../platform/security/security-events.ts';
 import type { NoteRecord, NotebookRepository } from './notebook.repository.ts';
-import { checkMarkdown } from './markdown-safety.ts';
+import { checkMarkdown } from '../../platform/security/markdown-safety.ts';
 
 export interface ActorContext {
   readonly actor: Actor;
@@ -73,7 +73,8 @@ export function createNotebookService(deps: NotebookServiceDeps): NotebookServic
    *
    * Refuses a body carrying an executable scheme in a LINK DESTINATION — the
    * one XSS vector that survives HTML-escaping, because `[x](javascript:…)` is
-   * markdown's own syntax rather than embedded HTML. See `markdown-safety.ts`
+   * markdown's own syntax rather than embedded HTML. See
+   * `platform/security/markdown-safety.ts`
    * for why this rejects instead of stripping, and why prose and code fences
    * mentioning such a scheme are left alone.
    */

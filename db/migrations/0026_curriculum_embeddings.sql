@@ -17,11 +17,12 @@
 --   "A copy of a lesson's text is a second answer to 'what does this lesson
 --    say', and the two drift."
 --
--- ANSWERED BY `source_hash`. Every chunk records a digest of the lesson body it
--- was cut from. Retrieval joins the LIVE lesson and returns a chunk only when
--- that digest still matches. An edited lesson does not serve stale text — its
--- chunks simply stop being retrievable until the course is re-indexed. The copy
--- cannot drift from the original because a drifted copy is invisible.
+-- ANSWERED BY `source_updated_at`. Every chunk records the lesson's
+-- `updated_at` as it stood when the chunk was cut. Retrieval joins the LIVE
+-- lesson and returns a chunk only when the two still match. An edited lesson
+-- does not serve stale text — its chunks simply stop being retrievable until
+-- the course is re-indexed. The copy cannot drift from the original because a
+-- drifted copy is invisible.
 --
 -- ── 0023's OBJECTION 2: STALENESS IS A SECURITY BUG ─────────────────────────
 --
@@ -107,10 +108,30 @@ CREATE TABLE curriculum_embeddings (
   embedding extensions.vector(768) NOT NULL,
   embedding_model text NOT NULL,
 
-  -- THE FRESHNESS GUARD. A digest of the lesson text this chunk was cut from.
-  -- Retrieval compares it against the live lesson and skips a chunk whose
-  -- source has moved on. See objection 1 above.
-  source_hash text NOT NULL,
+  -- THE FRESHNESS GUARD: the lesson's `updated_at` as it stood when this chunk
+  -- was cut. Retrieval compares it against the live lesson and skips a chunk
+  -- whose source has moved on since. See objection 1 above.
+  --
+  -- A TIMESTAMP RATHER THAN A CONTENT DIGEST, and the first draft of this
+  -- migration used a digest. The comparison has to happen inside the retrieval
+  -- query — that is what makes it un-forgettable — so a digest would have to be
+  -- recomputed in SQL, while the indexer computes it in TypeScript. Two
+  -- implementations of one normalization (whitespace, field order, whether
+  -- objectives are included) is a drift bug with a guaranteed arrival date, and
+  -- the drift would present as "retrieval silently returns nothing".
+  --
+  -- `lessons.updated_at` is already this platform's answer to "has this
+  -- changed": Task 011 made it the optimistic-concurrency precondition for
+  -- every lesson write. Reusing it means ONE definition of change, compared as
+  -- equality, with nothing to keep in sync.
+  --
+  -- THE RESIDUAL RISK, stated rather than hidden: an edit that changes
+  -- `content_body` WITHOUT bumping `updated_at` — a hand-run UPDATE, or a
+  -- future migration — would leave stale chunks looking fresh. Every
+  -- application write path sets it (`notebook`, `curriculum` and the authoring
+  -- routes all do), so this is an out-of-band-edit risk, recorded in
+  -- docs/security/limitations.md as RISK-RAG-01.
+  source_updated_at timestamptz NOT NULL,
 
   metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
   created_at timestamptz NOT NULL DEFAULT now(),
@@ -120,8 +141,6 @@ CREATE TABLE curriculum_embeddings (
     CHECK (length(chunk_content) BETWEEN 1 AND 8000),
   CONSTRAINT curriculum_embeddings_model_len_ck
     CHECK (length(embedding_model) BETWEEN 1 AND 100),
-  CONSTRAINT curriculum_embeddings_hash_ck
-    CHECK (source_hash ~ '^[0-9a-f]{64}$'),
   CONSTRAINT curriculum_embeddings_metadata_kind_ck CHECK (jsonb_typeof(metadata) = 'object'),
   CONSTRAINT curriculum_embeddings_metadata_size_ck CHECK (pg_column_size(metadata) <= 8192),
 

@@ -185,6 +185,30 @@ export function contentPolicy(
     return allow(action, content.id, 'content.author_in_own_organization');
   }
 
+  /**
+   * INDEXING: the same authority as publishing, over the opposite state.
+   *
+   * Rebuilding a course's knowledge-base entry decides what the assistant may
+   * retrieve and quote to a child, so it takes publish standing rather than
+   * author standing — writing content and deciding what learners may be told
+   * are different authorities, and this is the second one.
+   *
+   * It requires a PUBLISHED course, which is where it parts company with
+   * `publish` itself. Indexing a draft would put unpublished wording into a
+   * store whose whole purpose is to be searched, and the state axis is the
+   * right place to refuse it: `reveal`, because an actor who got this far can
+   * already see the course.
+   */
+  if (verb === 'index') {
+    if (!mayPublish) {
+      return deny(action, content.id, 'content.requires_publish_permission', 'reveal');
+    }
+    if (content.status !== 'published') {
+      return deny(action, content.id, 'content.only_published_content_is_indexed', 'reveal');
+    }
+    return allow(action, content.id, 'content.publisher_in_own_organization');
+  }
+
   if (verb === 'publish' || verb === 'archive') {
     if (!mayPublish) {
       // The separation of duties, stated once: writing content and deciding

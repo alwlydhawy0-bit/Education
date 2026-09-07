@@ -50,6 +50,10 @@ import { registerExperimentRoutes } from './modules/experiment/experiment.routes
 import { workspaceRepository } from './modules/workspace/workspace.repository.ts';
 import { createWorkspaceService } from './modules/workspace/workspace.service.ts';
 import { registerWorkspaceRoutes } from './modules/workspace/workspace.routes.ts';
+import { createKnowledgeRepository } from './modules/knowledge/knowledge.repository.ts';
+import { createKnowledgeService } from './modules/knowledge/knowledge.service.ts';
+import { registerKnowledgeRoutes } from './modules/knowledge/knowledge.routes.ts';
+import { createDeterministicEmbeddingProvider } from './platform/ai/embeddings.ts';
 import { classCoursesRepository } from './modules/class-courses/class-courses.repository.ts';
 import { createClassCoursesService } from './modules/class-courses/class-courses.service.ts';
 import { registerClassCourseRoutes } from './modules/class-courses/class-courses.routes.ts';
@@ -377,6 +381,25 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     progress: { noteEngagement: progressRepository.noteEngagement },
   });
 
+  /**
+   * THE EMBEDDING PROVIDER IS ALWAYS THE DETERMINISTIC ONE, today.
+   *
+   * `AI_PROVIDER=anthropic` selects the completion adapter and says nothing
+   * about embeddings, because Anthropic publishes no embeddings endpoint. When
+   * a vendor is added it gets its own configuration key and is selected here,
+   * beside this comment — and every existing row will need re-indexing, which
+   * is what `embedding_model` on each row makes visible rather than silent.
+   */
+  const embeddings = createDeterministicEmbeddingProvider();
+
+  const knowledge = createKnowledgeService({
+    db,
+    repository: createKnowledgeRepository(),
+    engine,
+    securityEvents,
+    embeddings,
+  });
+
   const workspace = createWorkspaceService({
     db,
     repository: workspaceRepository,
@@ -415,6 +438,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   });
   registerNotebookRoutes(app, notebook);
   registerWorkspaceRoutes(app, workspace);
+  registerKnowledgeRoutes(app, knowledge);
   registerUsersRoutes(app, users);
   registerOrganizationRoutes(app, organizations);
   registerRelationshipRoutes(app, classes, guardians);

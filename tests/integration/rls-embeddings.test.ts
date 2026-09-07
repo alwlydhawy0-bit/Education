@@ -16,7 +16,6 @@ import {
   createUnit,
   createUser,
   seedDb,
-  testSourceHash,
   testVector,
   truncateAll,
 } from '../setup/fixtures.ts';
@@ -206,15 +205,10 @@ describe('an author writes embeddings through the application role', () => {
       w.authorA.id,
       `INSERT INTO curriculum_embeddings
          (lesson_id, course_id, unit_id, chunk_index, chunk_content,
-          embedding, embedding_model, source_hash)
-       VALUES ($1, $2, $2, 0, 'a chunk', $3::vector, 'test-model', $4)
+          embedding, embedding_model, source_updated_at)
+       VALUES ($1, $2, $2, 0, 'a chunk', $3::vector, 'test-model', now())
        RETURNING id, course_id, organization_id`,
-      [
-        w.lessonA,
-        '00000000-0000-4000-8000-000000000000',
-        asVectorLiteral(testVector(1)),
-        testSourceHash('a chunk'),
-      ],
+      [w.lessonA, '00000000-0000-4000-8000-000000000000', asVectorLiteral(testVector(1))],
     );
     expect(inserted).toHaveLength(1);
     // ANCESTRY IS DERIVED. The forged course and unit ids above were discarded
@@ -230,14 +224,9 @@ describe('an author writes embeddings through the application role', () => {
         w.authorB.id,
         `INSERT INTO curriculum_embeddings
            (lesson_id, course_id, unit_id, chunk_index, chunk_content,
-            embedding, embedding_model, source_hash)
-         VALUES ($1, $2, $2, 0, 'x', $3::vector, 'm', $4)`,
-        [
-          w.lessonA,
-          '00000000-0000-4000-8000-000000000000',
-          asVectorLiteral(testVector(1)),
-          testSourceHash('x'),
-        ],
+            embedding, embedding_model, source_updated_at)
+         VALUES ($1, $2, $2, 0, 'x', $3::vector, 'm', now())`,
+        [w.lessonA, '00000000-0000-4000-8000-000000000000', asVectorLiteral(testVector(1))],
       ),
     ).toBe(false);
   });
@@ -249,14 +238,9 @@ describe('an author writes embeddings through the application role', () => {
         w.learnerA.id,
         `INSERT INTO curriculum_embeddings
            (lesson_id, course_id, unit_id, chunk_index, chunk_content,
-            embedding, embedding_model, source_hash)
-         VALUES ($1, $2, $2, 0, 'x', $3::vector, 'm', $4)`,
-        [
-          w.lessonA,
-          '00000000-0000-4000-8000-000000000000',
-          asVectorLiteral(testVector(1)),
-          testSourceHash('x'),
-        ],
+            embedding, embedding_model, source_updated_at)
+         VALUES ($1, $2, $2, 0, 'x', $3::vector, 'm', now())`,
+        [w.lessonA, '00000000-0000-4000-8000-000000000000', asVectorLiteral(testVector(1))],
       ),
     ).toBe(false);
   });
@@ -444,11 +428,34 @@ describe('the schema keeps a chunk honest', () => {
     ).resolves.toBeTruthy();
   });
 
-  it('refuses a source hash that is not a sha-256 digest', async () => {
+  it('records the lesson’s own updated_at, so freshness is an equality', async () => {
     const w = await world();
-    await expect(
-      createEmbedding({ lessonId: w.lessonA, sourceHash: 'not-a-digest' }),
-    ).rejects.toThrow(/curriculum_embeddings_hash_ck/);
+    await createEmbedding({ lessonId: w.lessonA });
+    const seed = await seedDb();
+    const { rows: pair } = await seed.query<{ same: boolean }>(
+      `SELECT (e.source_updated_at = l.updated_at) AS same
+         FROM curriculum_embeddings e JOIN lessons l ON l.id = e.lesson_id`,
+    );
+    expect(pair[0]?.same).toBe(true);
+  });
+
+  it('leaves a chunk stale — not deleted — when its lesson is edited', async () => {
+    // The freshness guard's whole point: an edit does not corrupt the index, it
+    // makes it invisible until re-indexed. The row survives; the retrieval
+    // query is what skips it, asserted end to end in the security suite.
+    const w = await world();
+    await createEmbedding({ lessonId: w.lessonA });
+    const seed = await seedDb();
+    await seed.query(
+      `UPDATE lessons SET content_body = 'edited', updated_at = now() + interval '1 second'
+        WHERE id = $1`,
+      [w.lessonA],
+    );
+    const { rows: pair } = await seed.query<{ same: boolean }>(
+      `SELECT (e.source_updated_at = l.updated_at) AS same
+         FROM curriculum_embeddings e JOIN lessons l ON l.id = e.lesson_id`,
+    );
+    expect(pair[0]?.same).toBe(false);
   });
 
   it('refuses a vector of the wrong dimension', async () => {
@@ -458,9 +465,9 @@ describe('the schema keeps a chunk honest', () => {
       seed.query(
         `INSERT INTO curriculum_embeddings
            (lesson_id, course_id, unit_id, chunk_index, chunk_content,
-            embedding, embedding_model, source_hash)
-         VALUES ($1, $1, $1, 0, 'x', $2::vector, 'm', $3)`,
-        [w.lessonA, asVectorLiteral(testVector(1, 12)), testSourceHash('x')],
+            embedding, embedding_model, source_updated_at)
+         VALUES ($1, $1, $1, 0, 'x', $2::vector, 'm', now())`,
+        [w.lessonA, asVectorLiteral(testVector(1, 12))],
       ),
     ).rejects.toThrow(/expected 768 dimensions/i);
   });

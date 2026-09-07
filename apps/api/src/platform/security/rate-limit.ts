@@ -212,6 +212,40 @@ export const RATE_LIMIT_POLICIES = {
     rationale: 'Row-count abuse, which a byte quota does not bound.',
   },
 
+  /**
+   * Rebuilding a course's knowledge-base index (Task 011).
+   *
+   * THE MOST EXPENSIVE REQUEST ON THE PLATFORM: it reads every published lesson
+   * of a course, chunks all of them and embeds every chunk. With a vendor
+   * embedding provider that is also the only route that spends money per
+   * paragraph rather than per request.
+   *
+   * Tight, and it can afford to be — re-indexing is an editorial action taken
+   * by a handful of staff after a course changes, not something a classroom
+   * does. A limit that would obstruct thirty children does not apply here.
+   */
+  knowledgeIndex: {
+    name: 'knowledge.index',
+    max: 20,
+    timeWindow: '1 hour',
+    rationale: 'Whole-course read, chunk and embed. Editorial frequency, provider cost.',
+  },
+
+  /**
+   * Asking the knowledge base a question.
+   *
+   * Bounds embedding cost and the vector scan, both of which are per-request
+   * rather than per-actor. Keyed by IP like every policy but `ai.request`, so
+   * the number has to leave a classroom working room — a lesson where thirty
+   * children each ask a few questions must not exhaust it.
+   */
+  knowledgeRetrieve: {
+    name: 'knowledge.retrieve',
+    max: 300,
+    timeWindow: '15 minutes',
+    rationale: 'One embedding call and one vector scan per question.',
+  },
+
   /** Guessing a verification token is the attack this bounds. */
   authVerifyEmail: {
     name: 'auth.verify_email',

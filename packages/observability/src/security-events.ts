@@ -251,6 +251,35 @@ export const SecurityEventType = {
   WORKSPACE_MARKDOWN_REFUSED: 'workspace.markdown_refused',
 
   /**
+   * A course's knowledge-base index was rebuilt (Task 011).
+   *
+   * Recorded because indexing decides what the assistant may retrieve and quote
+   * to a child — the same class of decision as publishing, and answerable from
+   * the audit trail alone: who rebuilt this course's index, when, and with
+   * which embedding model. The model matters especially: a change of provider
+   * changes what every subsequent search returns.
+   *
+   * Carries counts and ids. NEVER a chunk of curriculum text — the trail would
+   * otherwise slowly accumulate a copy of the corpus.
+   */
+  KNOWLEDGE_INDEX_REBUILT: 'knowledge.index_rebuilt',
+
+  /**
+   * A retrieval request resolved to NO courses at all.
+   *
+   * Ordinary on its own: a learner between terms, or one asking about a course
+   * they have just been unenrolled from. A burst from one actor across many
+   * distinct course ids is something else — it is somebody walking the catalog
+   * to find out which ids are real, and the response cannot show the difference
+   * because it is deliberately identical either way.
+   *
+   * Carries the requested course id and a count. NEVER the query string: a
+   * learner's question is a record of what they did not understand, and the
+   * audit trail is read by more people than the lesson is.
+   */
+  KNOWLEDGE_RETRIEVAL_EMPTY_SCOPE: 'knowledge.retrieval_empty_scope',
+
+  /**
    * Emitted on every authorization denial. A burst of these from one actor
    * across many resource ids is the primary IDOR/BOLA probing signal.
    */

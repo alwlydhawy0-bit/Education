@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import pg from 'pg';
 import { TEST_SUPERUSER_URL } from './env.ts';
 
@@ -925,11 +924,6 @@ export function testVector(seed: number, dimensions = TEST_EMBEDDING_DIMENSIONS)
 
 export const asVectorLiteral = (values: readonly number[]): string => `[${values.join(',')}]`;
 
-/** The digest the freshness guard compares against. Mirrors the API's. */
-export function testSourceHash(text: string): string {
-  return createHash('sha256').update(text, 'utf8').digest('hex');
-}
-
 /**
  * Seeds one embedding row directly.
  *
@@ -948,7 +942,7 @@ export async function createEmbedding(options: {
   chunkContent?: string;
   seed?: number;
   embeddingModel?: string;
-  sourceHash?: string;
+  sourceUpdatedAt?: Date | string | null;
   metadata?: Record<string, unknown>;
 }): Promise<string> {
   const db = await seedDb();
@@ -956,11 +950,15 @@ export async function createEmbedding(options: {
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO curriculum_embeddings
        (lesson_id, course_id, unit_id, chunk_index, chunk_content,
-        embedding, embedding_model, source_hash, metadata)
+        embedding, embedding_model, source_updated_at, metadata)
      VALUES ($1,
              '00000000-0000-4000-8000-000000000000',
              '00000000-0000-4000-8000-000000000000',
-             $2, $3, $4::vector, $5, $6, $7)
+             $2, $3, $4::vector, $5,
+             -- Defaults to the LIVE lesson's timestamp, so a seeded chunk is
+             -- fresh unless a test deliberately makes it stale.
+             COALESCE($6::timestamptz, (SELECT l.updated_at FROM lessons l WHERE l.id = $1)),
+             $7)
      RETURNING id`,
     [
       options.lessonId,
@@ -968,7 +966,7 @@ export async function createEmbedding(options: {
       content,
       asVectorLiteral(testVector(options.seed ?? 1)),
       options.embeddingModel ?? 'test-deterministic-768',
-      options.sourceHash ?? testSourceHash(content),
+      options.sourceUpdatedAt ?? null,
       JSON.stringify(options.metadata ?? {}),
     ],
   );

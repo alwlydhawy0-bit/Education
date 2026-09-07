@@ -743,12 +743,34 @@ const CONTENT_VERBS = ['create', 'read', 'list', 'update', 'publish', 'archive',
 type ContentVerb = (typeof CONTENT_VERBS)[number];
 
 export const CURRICULUM_ACTIONS = CONTENT_VERBS.map((v) => `curriculum:${v}` as const);
-export const COURSE_ACTIONS = CONTENT_VERBS.map((v) => `course:${v}` as const);
+
+/**
+ * `course:index` — rebuilding a course's entry in the knowledge base.
+ *
+ * A verb on COURSES ONLY, which is why it is appended here rather than added to
+ * `CONTENT_VERBS`: there is no such thing as indexing a curriculum or a unit,
+ * and a vocabulary that offered one would advertise a capability no route
+ * implements.
+ *
+ * It is NOT `course:publish` re-used. Publishing requires a DRAFT — you publish
+ * something not yet visible — and indexing requires the opposite: you index
+ * what learners can already see. Reaching for the nearest existing verb would
+ * have produced an endpoint that could only ever index courses no learner could
+ * search.
+ *
+ * It carries the same AUTHORITY as publishing, though, and `contentPolicy`
+ * enforces that: indexing decides what the assistant can retrieve and quote to a
+ * child, which is a publication decision wearing an operational hat.
+ */
+export const COURSE_ACTIONS = [
+  ...CONTENT_VERBS.map((v) => `course:${v}` as const),
+  'course:index' as const,
+];
 export const COURSE_UNIT_ACTIONS = CONTENT_VERBS.map((v) => `course_unit:${v}` as const);
 export const LESSON_ACTIONS = CONTENT_VERBS.map((v) => `lesson:${v}` as const);
 
 export type CurriculumAction = `curriculum:${ContentVerb}`;
-export type CourseAction = `course:${ContentVerb}`;
+export type CourseAction = `course:${ContentVerb}` | 'course:index';
 export type CourseUnitAction = `course_unit:${ContentVerb}`;
 export type LessonAction = `lesson:${ContentVerb}`;
 export type EducationLevelAction = (typeof EDUCATION_LEVEL_ACTIONS)[number];

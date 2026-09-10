@@ -1,0 +1,39 @@
+<!doctype html>
+<!--
+  lang="ar" dir="rtl" is set HERE, on the document, not only in CSS.
+
+  The browser applies it before any stylesheet has loaded, so the very first
+  paint is already right-to-left. Setting direction only in index.css means the
+  first frame renders left-to-right and visibly snaps once the CSS arrives —
+  a flash every visitor sees on every cold load.
+
+  `lang="ar"` is not decoration either: it selects Arabic shaping and line-
+  breaking rules, and it is what a screen reader uses to choose its voice.
+-->
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#FBF9F5" />
+    <meta
+      name="description"
+      content="إدنكست — منصة تعليمية ذكية تساعدك على تتبّع دوراتك، تطوير مهاراتك، وتحقيق أهدافك بخطوات واضحة ومنتظمة."
+    />
+
+    <!--
+      Preconnect before the stylesheet request goes out. The font files live on
+      a second origin (gstatic), so without this the browser discovers that
+      origin only after parsing the CSS — one extra round trip on the critical
+      path, on every first visit.
+    -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+
+    <title>إدنكست | تعلّم … اصنع مستقبلك</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>

@@ -1,0 +1,113 @@
+/*
+ * EduNext — global styles.
+ *
+ * The @import must come before the @tailwind directives: PostCSS hoists nothing
+ * for you, and a CSS @import that appears after a rule is invalid and silently
+ * dropped by the browser — which would leave the whole app on the fallback font
+ * with no error anywhere.
+ *
+ * `display=swap` is deliberate. Arabic glyphs in a fallback face are noticeably
+ * wider than Readex Pro's, so a blocking load would show a blank page and a
+ * `display=block` would show a flash of nothing; swap shows readable text
+ * immediately and reflows once.
+ */
+@import url('https://fonts.googleapis.com/css2?family=Readex+Pro:wght@300;400;500;600;700&family=Cairo:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /*
+   * RTL IS SET IN TWO PLACES ON PURPOSE.
+   *
+   * `index.html` carries `lang="ar" dir="rtl"` so the direction is correct
+   * before a single byte of CSS has loaded — otherwise the first paint is
+   * left-to-right and visibly snaps. This rule is the belt to that braces, and
+   * it is what makes Tailwind's logical utilities (ms-, ps-, start-) and the
+   * `rtl:` variant resolve the way every component below assumes.
+   */
+  html {
+    direction: rtl;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    direction: rtl;
+    @apply bg-canvas text-text-main font-sans antialiased;
+    /* Readex Pro's Arabic is dense; a little extra leading is what makes a
+       paragraph readable rather than merely legible. */
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /*
+   * Arabic-Indic digits are NOT used. The reference design shows Western
+   * digits (12, 5, 28) alongside Arabic text, which is the norm for dashboards
+   * in most Arabic-speaking markets — and mixing the two numeral systems in one
+   * product is the kind of inconsistency users notice immediately.
+   *
+   * `font-feature-settings` keeps the tabular figures aligned in stat cards so
+   * a column of numbers does not shimmy as values change.
+   */
+  .tabular-nums,
+  [data-numeric] {
+    font-feature-settings: 'tnum' 1;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Headings inherit the family; only the weight and colour change. */
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-semibold text-text-main;
+    line-height: 1.4;
+  }
+
+  /*
+   * Focus is visible, always. Removing the outline is the single most common
+   * accessibility regression in a design-led project, so the token is defined
+   * here once rather than left to each component.
+   */
+  :focus-visible {
+    @apply outline-none ring-2 ring-primary/40 ring-offset-2 ring-offset-canvas;
+  }
+}
+
+@layer components {
+  /*
+   * The card shape from the reference, as one class.
+   *
+   * It exists because it appears a dozen times in the design and would
+   * otherwise be a copied string of five utilities — which drifts. Task 002
+   * onwards should reach for this rather than re-typing it.
+   */
+  .card-surface {
+    @apply rounded-card border border-accent-subtle bg-surface shadow-soft;
+  }
+}
+
+/*
+ * A quieter scrollbar, so the warm canvas is not framed by a grey system bar.
+ * Progressive enhancement: browsers that do not support these simply keep
+ * their default, which is fine.
+ */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background-color: #e8e1d5;
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background-color: #ddd6fe;
+}

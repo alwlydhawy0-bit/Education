@@ -81,6 +81,18 @@ const NEUTRALIZER = "'";
  * is invisible in a diff and, in this repository's history, has broken Node's
  * TypeScript parser while passing `tsc`.
  */
+/*
+ * The `no-control-regex` disable below is deliberate and narrow. Matching
+ * control characters is the entire purpose of this expression — they are what
+ * gets removed. The rule exists to catch them arriving by ACCIDENT, which is
+ * the opposite case and worth keeping switched on everywhere else.
+ *
+ * The directive is ONE line because ESLint applies `disable-next-line` to the
+ * line immediately following it, and a `//` comment spanning four lines puts
+ * three comment lines in between — which reported an unused directive AND the
+ * original error, both at once.
+ */
+// eslint-disable-next-line no-control-regex -- see above
 const CONTROL_CHARACTERS = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g;
 
 /**

@@ -358,6 +358,37 @@ export const RATE_LIMIT_POLICIES = {
   },
 
   /** Moderation actions. Staff-only, so this is a runaway-script bound. */
+  /**
+   * Reading an institutional report.
+   *
+   * TIGHTER THAN AN ORDINARY READ, because each call aggregates over a whole
+   * school and because the population that can make it is a handful of adults.
+   * A dashboard polling every few seconds is a bug; a person opening one is
+   * nowhere near 120 in a quarter of an hour.
+   */
+  analyticsRead: {
+    name: 'analytics.read',
+    max: 120,
+    timeWindow: '15 minutes',
+    rationale: 'A polling dashboard, or an enumeration sweep across report grains.',
+  },
+
+  /**
+   * Exporting one.
+   *
+   * THE TIGHTEST LIMIT ON THE PLATFORM, and deliberately so. An export is a
+   * whole school's data assembled into a file; there is no legitimate workflow
+   * that needs ten of them in an hour, and the illegitimate one — a
+   * compromised administrator session pulling every dataset before anybody
+   * notices — is exactly what a low ceiling makes slow and loud.
+   */
+  analyticsExport: {
+    name: 'analytics.export',
+    max: 10,
+    timeWindow: '1 hour',
+    rationale: 'Bulk extraction of a school\'s data through a compromised staff session.',
+  },
+
   moderationAction: {
     name: 'moderation.action',
     max: 200,

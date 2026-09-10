@@ -63,6 +63,9 @@ import { registerPortfolioRoutes } from './modules/portfolio/portfolio.routes.ts
 import { communityRepository } from './modules/community/community.repository.ts';
 import { createCommunityService } from './modules/community/community.service.ts';
 import { registerCommunityRoutes } from './modules/community/community.routes.ts';
+import { analyticsRepository } from './modules/analytics/analytics.repository.ts';
+import { createAnalyticsService } from './modules/analytics/analytics.service.ts';
+import { registerAnalyticsRoutes } from './modules/analytics/analytics.routes.ts';
 import { createDeterministicEmbeddingProvider } from './platform/ai/embeddings.ts';
 import { classCoursesRepository } from './modules/class-courses/class-courses.repository.ts';
 import { createClassCoursesService } from './modules/class-courses/class-courses.service.ts';
@@ -507,6 +510,13 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     securityEvents,
   });
 
+  const analytics = createAnalyticsService({
+    db,
+    repository: analyticsRepository,
+    engine,
+    securityEvents,
+  });
+
   const notebook = createNotebookService({
     db,
     repository: notebookRepository,
@@ -542,6 +552,7 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   registerTutorRoutes(app, tutor);
   registerPortfolioRoutes(app, portfolio);
   registerCommunityRoutes(app, community);
+  registerAnalyticsRoutes(app, analytics);
   registerUsersRoutes(app, users);
   registerOrganizationRoutes(app, organizations);
   registerRelationshipRoutes(app, classes, guardians);

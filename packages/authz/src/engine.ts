@@ -27,6 +27,7 @@ import {
   discussionReplyPolicy,
   discussionThreadPolicy,
 } from './policies/community.policy.ts';
+import { analyticsPolicy } from './policies/analytics.policy.ts';
 import {
   resourceKindForAction,
   type Action,
@@ -98,6 +99,7 @@ const DEFAULT_POLICIES: Readonly<Record<ResourceKind, PolicyFn>> = Object.freeze
   discussion_thread: discussionThreadPolicy as unknown as PolicyFn,
   discussion_reply: discussionReplyPolicy as unknown as PolicyFn,
   content_flag: contentFlagPolicy as unknown as PolicyFn,
+  analytics_report: analyticsPolicy as unknown as PolicyFn,
 });
 
 export function createPolicyEngine(

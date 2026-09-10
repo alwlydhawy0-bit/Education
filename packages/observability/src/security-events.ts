@@ -476,6 +476,40 @@ export const SecurityEventType = {
    */
   MODERATION_ACTION: 'moderation.action',
 
+  /**
+   * A school's aggregate metrics were read.
+   *
+   * NOT NOISE, AND WORTH SAYING WHY IT IS HERE WHEN NO OTHER READ ON THIS
+   * PLATFORM IS LOGGED. Every other read event was rejected as noise during
+   * Task 003 and that judgement still holds: logging that a learner opened a
+   * lesson tells nobody anything.
+   *
+   * An institutional report is different in one specific way. It is the only
+   * read whose SUBJECT is other people — hundreds of them — and the only one
+   * where "who has been looking at this, and how often" is a question a school
+   * may genuinely have to answer, to a regulator or to a parent. The volume is
+   * bounded by the number of adults with the role, which is small.
+   *
+   * The DETAIL carries the grain and the row count, never a metric value. An
+   * audit trail that contains the numbers is a second copy of the dashboard in
+   * a place with different access rules.
+   */
+  ANALYTICS_REPORT_READ: 'analytics.report_read',
+
+  /**
+   * A school's data left the platform as a file.
+   *
+   * A SEPARATE EVENT FROM READING IT, and the separation is the point. The
+   * bytes may be identical; the acts are not. Reading a dashboard is bounded by
+   * a session — close the tab and it is gone. An export is a file on a laptop,
+   * forwarded by email, opened on a home machine, still readable after the
+   * person leaves the school.
+   *
+   * An investigation asking "how did this school's data get out" needs to
+   * distinguish those two, and it cannot if they share an event type.
+   */
+  ANALYTICS_EXPORTED: 'analytics.exported',
+
   SECURITY_CONFIG_DEVIATION: 'security.config_deviation',
 } as const;
 

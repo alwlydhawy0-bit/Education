@@ -27,3 +27,4 @@ export {
   discussionReplyPolicy,
   contentFlagPolicy,
 } from './policies/community.policy.ts';
+export { analyticsPolicy } from './policies/analytics.policy.ts';

@@ -207,7 +207,8 @@ export type ResourceKind =
   | 'student_portfolio'
   | 'discussion_thread'
   | 'discussion_reply'
-  | 'content_flag';
+  | 'content_flag'
+  | 'analytics_report';
 
 export interface BaseResource {
   readonly kind: ResourceKind;
@@ -821,6 +822,45 @@ export interface ContentFlagResource extends BaseResource {
   readonly actorModerates: boolean;
 }
 
+/**
+ * An institutional analytics report.
+ *
+ * THIS IS THE ONLY RESOURCE ON THE PLATFORM THAT IS NOT A ROW. Every other kind
+ * here names something a user made — a note, a project, a thread — and carries
+ * its owner. An analytics report is an aggregate over thousands of rows
+ * belonging to hundreds of people, and there is no owner to compare against.
+ *
+ * So the resource carries the two facts the policy actually needs, resolved in
+ * SQL by the same helpers the RLS policies call:
+ *
+ *   `actorIsOrgAdmin` — the actor administers `organizationId`. Note that BOTH
+ *   halves matter and the resource carries both: `app_actor_is_org_admin()`
+ *   asks only whether the actor holds the role anywhere, and the tenant
+ *   equality is what turns that into an answer about THIS school. The
+ *   repository resolves them together so the policy cannot be handed one
+ *   without the other.
+ *
+ *   `actorTeachesClass` — the actor actively teaches `classId`, when the report
+ *   has a class grain. Null at the school grain, because a school-wide report
+ *   has no class and a teacher has no claim on it.
+ *
+ * `id` IS A SYNTHETIC DESCRIPTOR, not a database key: "school:<uuid>" or
+ * "class:<uuid>:course:<uuid>". Decisions are logged with a resource id, and an
+ * aggregate has none to log; inventing one that reads as a row id would put a
+ * fake key in the audit trail. This one says what it is.
+ */
+export interface AnalyticsReportResource extends BaseResource {
+  readonly kind: 'analytics_report';
+  /** 'school' for the executive grain, 'class' for the course-performance grain. */
+  readonly grain: 'school' | 'class';
+  readonly organizationId: string | null;
+  readonly classId: string | null;
+  /** Administers THIS organization: the role AND the tenant, together. */
+  readonly actorIsOrgAdmin: boolean;
+  /** Actively teaches THIS class. Null when the report has no class grain. */
+  readonly actorTeachesClass: boolean | null;
+}
+
 export type Resource =
   | AiConversationResource
   | NoteResource
@@ -849,7 +889,8 @@ export type Resource =
   | StudentPortfolioResource
   | DiscussionThreadResource
   | DiscussionReplyResource
-  | ContentFlagResource;
+  | ContentFlagResource
+  | AnalyticsReportResource;
 
 // --- Actions -------------------------------------------------------------
 // An action is `<resourceKind>:<verb>`. The engine enforces that the prefix
@@ -1226,6 +1267,37 @@ export const CONTENT_FLAG_ACTIONS = [
 ] as const;
 export type ContentFlagAction = (typeof CONTENT_FLAG_ACTIONS)[number];
 
+/**
+ * What may be done with an analytics report.
+ *
+ * READ VERBS ONLY, AND THAT IS THE POINT. There is no `analytics_report:create`
+ * and no `:update`, because nobody creates or edits one: the numbers are facts
+ * about rows that live elsewhere, produced by a refresh function that runs as
+ * the table owner. A write verb here would advertise a power the database does
+ * not grant `edu_app` and could not be made to grant without a way to make the
+ * dashboard say something the school's data does not.
+ *
+ * `at_risk` IS ITS OWN VERB rather than a `read` of a narrower report, because
+ * its holder is different from every other verb here. Section 2B draws the
+ * FERPA line at named children: the executive verbs belong to an administrator,
+ * and this one belongs ONLY to the teacher who will sit down with the child. A
+ * shared verb would have made that difference a parameter, and a parameter is
+ * something a future caller can get wrong.
+ *
+ * `export` is separate for the same reason in the opposite direction: it is the
+ * same data as `read` leaving through a different door, onto a laptop, into a
+ * spreadsheet, forwarded by email. An audit trail that cannot distinguish
+ * "looked at the dashboard" from "took a copy of the school's data" is missing
+ * the event anybody investigating would actually want.
+ */
+export const ANALYTICS_REPORT_ACTIONS = [
+  'analytics_report:read_school',
+  'analytics_report:read_courses',
+  'analytics_report:at_risk',
+  'analytics_report:export',
+] as const;
+export type AnalyticsReportAction = (typeof ANALYTICS_REPORT_ACTIONS)[number];
+
 export type NoteAction = (typeof NOTE_ACTIONS)[number];
 export type UserAction = (typeof USER_ACTIONS)[number];
 export type ProfileAction = (typeof PROFILE_ACTIONS)[number];
@@ -1261,7 +1333,8 @@ export type Action =
   | StudentPortfolioAction
   | DiscussionThreadAction
   | DiscussionReplyAction
-  | ContentFlagAction;
+  | ContentFlagAction
+  | AnalyticsReportAction;
 
 /**
  * What may be done with a tutor conversation.
@@ -1318,6 +1391,7 @@ export const ALL_ACTIONS: readonly Action[] = [
   ...DISCUSSION_THREAD_ACTIONS,
   ...DISCUSSION_REPLY_ACTIONS,
   ...CONTENT_FLAG_ACTIONS,
+  ...ANALYTICS_REPORT_ACTIONS,
 ];
 
 /** The two permissions that split authoring from publishing. See ADR 0009. */

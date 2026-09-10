@@ -38,6 +38,27 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/*.d.ts',
       'apps/web/dist/**',
+
+      /**
+       * `edunext/` is a SEPARATE, STANDALONE PROJECT, and this config does not
+       * govern it.
+       *
+       * It is not in `pnpm-workspace.yaml`, it installs with npm, it targets
+       * the browser, and it ships its own linter. This config is written for
+       * the platform: Node globals, TypeScript, and the architectural rules
+       * below about which packages may import infrastructure. Pointed at
+       * browser source it reports `fetch`, `setTimeout` and `AbortController`
+       * as undefined — which is what it did the moment edunext landed, because
+       * `eslint .` walks every directory under the root.
+       *
+       * The alternative — teaching this config browser globals for one
+       * directory it otherwise has no opinion about — couples two toolchains
+       * that were deliberately kept apart.
+       *
+       * IT IS NOT LEFT UNLINTED. `edunext` has its own `lint` script (oxlint,
+       * from the Vite template) run from inside that directory.
+       */
+      'edunext/**',
     ],
   },
 

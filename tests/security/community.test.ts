@@ -699,6 +699,30 @@ describe('the automated filter', () => {
     expect(edited.json<ThreadBody>().moderationStatus).toBe('flagged');
   });
 
+  it('re-screens an edited REPLY, not only an edited thread', async () => {
+    /**
+     * DEFECT INJECTION ROUND 13, F14, FOUND THIS FILE'S BLIND SPOT.
+     *
+     * Removing the re-screen from `updateReply` was caught only by the
+     * architecture suite's source-text assertion — every behavioural test still
+     * passed, because the test above exercises the THREAD edit path and there
+     * was nothing exercising the reply one. A learner posts an innocuous reply,
+     * edits it a second later, and the filter never runs.
+     *
+     * Two paths do the same job, and testing one of them is testing one of them.
+     */
+    const w = await world();
+    const thread = await makeThread(w, w.learner);
+    const reply = await makeReply(w.classmate, thread.id);
+    expect(reply.moderationStatus).toBe('approved');
+
+    const edited = await put(`/api/v1/replies/${reply.id}`, w.classmate.cookie, {
+      contentMarkdown: 'actually you are an idiot',
+    });
+    expect(edited.statusCode, edited.body).toBe(200);
+    expect(edited.json<ReplyBody>().moderationStatus).toBe('flagged');
+  });
+
   it('leaves homework alone', async () => {
     const w = await world();
     const thread = await makeThread(w, w.learner, {

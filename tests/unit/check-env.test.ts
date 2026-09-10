@@ -18,7 +18,7 @@ function goodEnv(): Record<string, string> {
     HOST: '0.0.0.0',
     PORT: '3000',
     LOG_LEVEL: 'info',
-    DATABASE_URL: 'postgres://edu_app:a-real-looking-password@db.internal:5432/edu',
+    DATABASE_URL: 'postgres://edu_app:a-real-looking-password@db.internal:5432/edu', // secret-scan-allow: an obviously fake value, present so the leakage test has something to look for
     REDIS_URL: 'rediss://default:another-password@cache.internal:6379',
     ALLOWED_ORIGINS: 'https://app.example.edu',
     SESSION_COOKIE_SECURE: 'true',
@@ -168,7 +168,7 @@ describe('the .env parser', () => {
           'QUOTED="has spaces"',
           "SINGLE='also quoted'",
           'EMPTY=',
-          'URL=postgres://u:p@h:5432/d?x=1',
+          'URL=postgres://u:p@h:5432/d?x=1', // secret-scan-allow: a parser fixture, not a credential
         ].join('\n'),
       ),
     ).toEqual({
@@ -177,7 +177,7 @@ describe('the .env parser', () => {
       QUOTED: 'has spaces',
       SINGLE: 'also quoted',
       EMPTY: '',
-      URL: 'postgres://u:p@h:5432/d?x=1',
+      URL: 'postgres://u:p@h:5432/d?x=1', // secret-scan-allow: a parser fixture, not a credential
     });
   });
 

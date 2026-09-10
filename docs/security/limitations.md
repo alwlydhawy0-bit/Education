@@ -322,8 +322,7 @@ reason alone.
   learner is not warned at publish time that a memorable slug is a discoverable
   one (RISK-PF-01).
 - **The rate limit is keyed by IP, so a classroom shares one budget with an
-  attacker.** Every learner in a school behind one NAT counts against the same
-  60. There is no actor to key by — that is what "unauthenticated" means — so
+  attacker.** Every learner in a school behind one NAT counts against the same 60. There is no actor to key by — that is what "unauthenticated" means — so
   the choice is between a limit that inconveniences a class and no limit at all
   (RISK-PF-02).
 - **`X-Robots-Tag: noindex` is a statement of intent, not a control.** This is a
@@ -352,7 +351,7 @@ reason alone.
   publishable (RISK-PF-06).
 - **`:create` is not policy-gated, here or anywhere on this platform.** There is
   no object yet to decide about, so what binds a creation is the RLS `WITH
-  CHECK` plus the `student_project_guard` trigger — one gate in the database and
+CHECK` plus the `student_project_guard` trigger — one gate in the database and
   none in the application. It is the established pattern across five modules and
   was not changed here, but it is a genuine single-gate spot and is recorded as
   one, with the assertion that skips it commented in
@@ -378,6 +377,80 @@ reason alone.
   matched two portfolios the resolver serves nothing, which is the safe answer —
   but nothing records that it happened, so a uniqueness failure would present as
   one learner's page mysteriously not loading (RISK-PF-11).
+
+## Added in Task 016 — production hardening and deployment
+
+**RISK-RATE-01 is CLOSED.** Rate limits were counted in process memory from
+Task 008 to Task 016. With N replicas the enforced ceiling was N times the
+configured value and every deploy refilled each attacker's budget. A shared
+Redis store now makes the configured number the enforced number, and
+`loadConfig` refuses to start a production or staging environment without
+`REDIS_URL` — a limit that is merely configured is not a limit.
+
+- **RISK-RATE-02 — limits are per-instance while the shared store is
+  unreachable.** The store degrades to per-process counting rather than failing
+  open (which would let an attacker disable rate limiting by disturbing a cache)
+  or failing closed (which would take the login page down whenever Redis
+  restarts). Requests stay bounded and `ratelimit.store_degraded` records the
+  window, so the weakening is in the audit trail rather than in nobody's memory.
+  It is a real weakening and it is deliberate.
+
+- **RISK-PROXY-01 — `TRUST_PROXY` is the operator's to get right, and nothing
+  here can check the topology.** The parser refuses the two forms whose failure
+  would be SILENT — blanket `true` (believes a client-supplied header, so every
+  request gets its own bucket) and a hop count (Fastify 5 compiles a number to
+  "trust no peer", so the server reports proxy trust and keys everything to the
+  load balancer). What it cannot verify is whether the address list names the
+  proxy that is actually in front of this server. A list naming the wrong subnet
+  passes every check and collapses per-IP limiting into one bucket.
+
+- **RISK-VEC-01 — exact vector retrieval costs O(authorized set).** VULN-061
+  replaced an approximate, silently-truncating plan with an exact one. The cost
+  is bounded by enrolment rather than by corpus size, which is the right shape,
+  and it is not free: measured on a 20,000-vector corpus, a full exact top-8
+  takes 20ms for four authorized courses, 183ms for forty, and 959ms for two
+  hundred. A learner is in a handful of courses, so the operating point is the
+  fast end. The upgrade path is pgvector ≥ 0.8, whose iterative index scans make
+  a filtered HNSW scan return a full result set; the index remains in the schema
+  for it. **If a future deployment gives one actor access to thousands of
+  courses — an administrator-facing search, say — this becomes a latency
+  problem before it becomes anything else.**
+
+- **RISK-DEPLOY-01 — the container image has never been built or run.** The
+  environment this was developed in denies CONNECT to every container registry,
+  so no base image could be pulled. Everything the Dockerfile does was
+  reproduced natively (the exact install, the exact file set, a boot under the
+  production posture, the HEALTHCHECK command, a SIGTERM drain) and one real
+  defect was found that way, but the base image and Docker's own mechanics are
+  unverified. The first CI run that builds this image should be treated as a
+  test, not as a formality.
+
+- **RISK-LOAD-01 — no load testing has been performed.** Nothing in this task
+  says how the platform behaves under concurrency. The query-plan assertions are
+  about plan SHAPE; the vector measurements are single-query timings on
+  synthetic data. Connection-pool sizing, lock contention under concurrent
+  writes, and the readiness probe's behaviour during a real incident are all
+  unmeasured.
+
+- **The health probes are unauthenticated, by necessity.** An orchestrator has
+  no session. Both return a single status word and nothing else — no version, no
+  hostname, no dependency name, no timing — and the readiness check is memoised
+  for a second so that a flood cannot turn an unauthenticated endpoint into a
+  connection-pool exhaustion. What an attacker can still learn is that the
+  service exists and whether it is currently serving, which is the irreducible
+  cost of having a probe at all.
+
+- **The RLS and index audits are STRUCTURAL, not semantic.** They read policy
+  expressions as text and check that an actor-derived predicate is PRESENT. A
+  policy reading `organization_id <> app_actor_organization()` passes the audit
+  and is catastrophic. The behavioural RLS suites are what catch that; the
+  audits catch the table nobody wrote a scenario for.
+
+- **Secrets arrive as environment variables.** There is no secret manager, no
+  rotation, and no audit of who read what. `tools/deploy/check-env.ts` validates
+  a candidate file without printing any value, which reduces the chance of a
+  secret reaching a ticket or a terminal history, and does nothing about the
+  larger problem.
 
 ## Added in Task 015 — institutional analytics
 

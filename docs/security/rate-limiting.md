@@ -2,39 +2,96 @@
 
 ## What exists — stated plainly
 
-A **per-process, in-memory** limiter (`@fastify/rate-limit`), keyed by socket
-address, with named policies in `apps/api/src/platform/security/rate-limit.ts`.
+`@fastify/rate-limit` with named policies in
+`apps/api/src/platform/security/rate-limit.ts`, keyed by `request.ip`, counting
+in **a shared Redis store when `REDIS_URL` is set** and **in this process when
+it is not**.
 
-**This is not production-grade for a multi-instance deployment.** Specifically:
+Which of those is in force decides whether the numbers in the table below are
+the limits the platform ENFORCES or merely the limits it INTENDS.
 
-- Counters are **not shared between instances**. With N instances behind a load
-  balancer the effective limit is N times the configured value.
-- Counters **reset on restart**, so every deploy clears an attacker's budget.
-- Keying is `request.ip` with `trustProxy: false`. Correct for direct exposure;
-  **wrong behind a proxy**, where every request appears to come from the proxy
-  and the per-IP limit collapses into one global limit.
+### Shared (production and staging — required)
 
-The production requirement is a shared store (Redis or equivalent) via the
-plugin's `store` option. It is **not implemented**. In a hardened environment the
-server logs a warning naming this limitation on every boot — a quiet limitation
-is one that gets forgotten. Tracked as RISK-RATE-01.
+`loadConfig` refuses to start a hardened environment without `REDIS_URL`. With
+it, the configured number is the enforced number across every replica, and it
+survives a deploy.
+
+The counter is a Lua script rather than `INCR` followed by `PEXPIRE`. Those two
+commands are two round trips with a gap: a process dying in the gap — or the two
+landing on either side of a failover — leaves a key with NO EXPIRY, and that
+bucket never refills. Every later request from that address is rate limited
+forever: a permanent denial of service against one user, caused by the control
+meant to protect them.
+
+### Per-process (development, tests, a single instance)
+
+With N instances the effective limit is N times the configured value, and every
+deploy refills each attacker's budget. This was the ONLY mode until Task 016 and
+was tracked as RISK-RATE-01 for eight tasks. The server logs a warning naming
+the limitation on every boot without a shared store.
+
+### When Redis is unreachable: DEGRADE
+
+Three options, one defensible.
+
+- **Fail open** — the plugin's own default (`skipOnError: true`). Rejected: it
+  hands an attacker who can disturb a cache a switch that turns rate limiting
+  off, and turns a cache outage into a credential-stuffing window. The
+  application sets `skipOnError: false` so a future store cannot quietly
+  reintroduce it.
+- **Fail closed** — 429 everything while the store is down. Rejected: a Redis
+  restart takes the platform offline, including the login page the operator
+  needs to fix it. A control whose failure mode is a full outage gets disabled
+  by the first person on call, and then protects nothing.
+- **Degrade** — count in this process and say so. **Implemented.** Requests stay
+  bounded, the site stays up, and `ratelimit.store_degraded` records the window
+  during which the numbers were per-instance. The event fires on the TRANSITION
+  only: an outage produces two events, not ten thousand. Tracked as
+  RISK-RATE-02.
+
+Degradation is not failing open. The fallback still enforces a limit — a weaker
+one — and the weakening is in the audit trail rather than in nobody's memory.
+
+## What `request.ip` means: `TRUST_PROXY`
+
+This value is the key of every limit here AND the `ip` field of every security
+event. There are two ways to get it wrong and they fail in opposite directions.
+
+- **Too little trust.** Behind a proxy with `trustProxy` off, every request
+  appears to come from the proxy. Per-IP limiting collapses into ONE GLOBAL
+  BUCKET: the first thirty learners exhaust the login limit for everybody, and
+  an attacker is indistinguishable from a classroom.
+- **Too much trust.** `trustProxy: true` believes a client-supplied
+  `X-Forwarded-For`. An attacker sends a new address per request, no two
+  requests share a key, and rate limiting stops existing while continuing to
+  report success.
+
+`platform/security/trusted-proxy.ts` accepts an **address or CIDR list** and
+refuses everything else, at boot, with a message.
+
+**It also refuses a hop count**, which is the non-obvious one. Fastify 5's type
+accepts a number and `getTrustProxyFn` in `lib/request.js` compiles it to
+`function () { return false }` — a numeric setting trusts NOTHING. A deployment
+setting `TRUST_PROXY=2` would boot cleanly, log its hop count, and key every
+request to the load balancer: the first failure mode above, arrived at by
+configuring the thing meant to prevent it.
 
 ## Enforced policies
 
-| Policy                 | Limit         | Keyed by | Why                                                                                                                   |
-| ---------------------- | ------------- | -------- | --------------------------------------------------------------------------------------------------------------------- |
-| `global`               | 300 / min     | IP       | Blunt ceiling. High enough not to affect a classroom sharing an IP.                                                   |
-| `auth.login`           | 10 / 15 min   | IP       | Credential stuffing and password brute force.                                                                         |
-| `auth.register`        | 5 / 15 min    | IP       | Bulk account creation, Argon2 CPU exhaustion, and the compensating control for the enumeration weakness RISK-ENUM-01. |
-| `auth.refresh`         | 60 / 15 min   | IP       | Refresh-token grinding and rotation abuse.                                                                             |
-| `auth.password_reset`  | 5 / hour      | IP       | Reset-token flooding, inbox harassment, and account enumeration.                                                       |
-| `auth.verify_email`    | 20 / hour     | IP       | Brute-forcing a verification token.                                                                                    |
-| `assessment.attempt`   | 200 / 15 min  | IP       | Answer-key probing through repeated attempts. **Secondary** to the per-learner `max_attempts` limit.                  |
-| `assessment.submit`    | 200 / 15 min  | IP       | Repeated scoring is the expensive half of answer-key probing.                                                          |
-| `lab.session_start`    | 200 / 15 min  | IP       | **The only bound on session creation** — a lab has no attempt limit, by design. See below.                            |
-| `lab.submit`           | 200 / 15 min  | IP       | Marking runs one rule check per rule inside a trigger, so a submission is the expensive request in that domain.        |
-| `ai.request`           | 60 / hour     | **actor** | Provider cost is real money. The only per-actor policy: a class sharing a NAT must not share a quota.                 |
-| `workspace.artifact`   | 120 / 15 min  | IP       | **Row-count abuse, which the byte quota does not bound** — a million one-byte registrations fit inside 256 MiB.       |
+| Policy                | Limit        | Keyed by  | Why                                                                                                                   |
+| --------------------- | ------------ | --------- | --------------------------------------------------------------------------------------------------------------------- |
+| `global`              | 300 / min    | IP        | Blunt ceiling. High enough not to affect a classroom sharing an IP.                                                   |
+| `auth.login`          | 10 / 15 min  | IP        | Credential stuffing and password brute force.                                                                         |
+| `auth.register`       | 5 / 15 min   | IP        | Bulk account creation, Argon2 CPU exhaustion, and the compensating control for the enumeration weakness RISK-ENUM-01. |
+| `auth.refresh`        | 60 / 15 min  | IP        | Refresh-token grinding and rotation abuse.                                                                            |
+| `auth.password_reset` | 5 / hour     | IP        | Reset-token flooding, inbox harassment, and account enumeration.                                                      |
+| `auth.verify_email`   | 20 / hour    | IP        | Brute-forcing a verification token.                                                                                   |
+| `assessment.attempt`  | 200 / 15 min | IP        | Answer-key probing through repeated attempts. **Secondary** to the per-learner `max_attempts` limit.                  |
+| `assessment.submit`   | 200 / 15 min | IP        | Repeated scoring is the expensive half of answer-key probing.                                                         |
+| `lab.session_start`   | 200 / 15 min | IP        | **The only bound on session creation** — a lab has no attempt limit, by design. See below.                            |
+| `lab.submit`          | 200 / 15 min | IP        | Marking runs one rule check per rule inside a trigger, so a submission is the expensive request in that domain.       |
+| `ai.request`          | 60 / hour    | **actor** | Provider cost is real money. The only per-actor policy: a class sharing a NAT must not share a quota.                 |
+| `workspace.artifact`  | 120 / 15 min | IP        | **Row-count abuse, which the byte quota does not bound** — a million one-byte registrations fit inside 256 MiB.       |
 
 Limits live in one catalogue rather than as numbers scattered across route
 definitions, so the whole throttling posture is reviewable on one screen.

@@ -142,7 +142,7 @@ describe('the origin guard still governs everything else', () => {
       method: 'POST',
       url: '/api/v1/auth/login',
       headers: { 'content-type': 'application/json', origin: 'https://evil.example' },
-      payload: { email: 'a@b.test', password: 'irrelevant' },
+      payload: { email: 'a@b.test', password: 'irrelevant' }, // secret-scan-allow: a deliberately wrong password in a login-failure fixture
     });
     expect(response.statusCode).toBe(403);
   });
@@ -152,7 +152,7 @@ describe('the origin guard still governs everything else', () => {
       method: 'POST',
       url: '/api/v1/auth/login',
       headers: { 'content-type': 'application/json', origin: TEST_ORIGIN },
-      payload: { email: 'nobody@test.local', password: 'wrong-but-well-formed-password' },
+      payload: { email: 'nobody@test.local', password: 'wrong-but-well-formed-password' }, // secret-scan-allow: a deliberately wrong password in a login-failure fixture
     });
     // Reaches the handler and fails on credentials, not on the origin.
     expect(response.statusCode).not.toBe(403);

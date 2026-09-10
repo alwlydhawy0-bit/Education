@@ -91,7 +91,7 @@ services:
     image: edu-api:local
     command: ['node', '--experimental-strip-types', 'db/migrate.ts']
     environment:
-      DATABASE_URL: postgres://edu_migrator:migrator_local_pw@db:5432/edu_dev
+      DATABASE_URL: postgres://edu_migrator:migrator_local_pw@db:5432/edu_dev # secret-scan-allow: local development credential for a container that publishes no port
     depends_on:
       db:
         condition: service_healthy
@@ -118,7 +118,7 @@ services:
       PORT: '3000'
       LOG_LEVEL: info
       # The APPLICATION role. Never the migrator above.
-      DATABASE_URL: postgres://edu_app:app_local_pw@db:5432/edu_dev
+      DATABASE_URL: postgres://edu_app:app_local_pw@db:5432/edu_dev # secret-scan-allow: local development credential for a container that publishes no port
       DATABASE_POOL_MAX: '10'
       REDIS_URL: redis://cache:6379
       ALLOWED_ORIGINS: http://localhost:5173

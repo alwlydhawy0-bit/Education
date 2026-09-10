@@ -5,22 +5,31 @@ this document is what a deployment needs to get right.
 
 Everything in §1–§4 was measured against commit `21f1034`, not inferred.
 
+> **Task 016 update.** There is now a `Dockerfile` and a `docker-compose.yml` at
+> the repository root, a shared rate-limit store, a separate readiness probe, and
+> a pre-deploy environment validator. The rows below are amended in place where
+> Task 016 changed them, and `docs/production-readiness.md` is the checklist that
+> says what has and has not been verified — including the fact that **the image
+> has never been built**, because this environment's egress policy blocks every
+> container registry (RISK-DEPLOY-01).
+
 ---
 
 ## 1. The deployment contract
 
-| Property        | Value                                                  | How it was established                                                                                                                          |
-| --------------- | ------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| Build step      | **none**                                               | Every workspace package exports `./src/index.ts`; Node runs the TypeScript under `--experimental-strip-types`. No package has a `build` script. |
-| Start command   | `node --experimental-strip-types apps/api/src/main.ts` | `apps/api/package.json#scripts.start`                                                                                                           |
-| Node            | `>=22.12.0`                                            | root `package.json#engines`                                                                                                                     |
-| Package manager | pnpm 10.33.0                                           | `package.json#packageManager`                                                                                                                   |
-| Install scope   | **repository root**                                    | `apps/api` depends on four `workspace:*` packages; the lockfile is at the root                                                                  |
-| Process model   | **long-lived, stateful**                               | holds a `pg.Pool`. Not serverless, not edge.                                                                                                    |
-| `HOST`          | **must be `0.0.0.0`**                                  | the application default is `127.0.0.1` — correct on a laptop, unreachable inside a container                                                    |
-| `PORT`          | from the provider                                      | `config.PORT`, default 3000                                                                                                                     |
-| Shutdown        | SIGTERM/SIGINT → `app.close()` then `db.close()`       | `main.ts`; verified by sending SIGTERM to a running process — port released, exit 0                                                             |
-| Health check    | `GET /api/v1/health` → `200 {"status":"ok"}`           | Touches no database and discloses no configuration, so it is safe unauthenticated                                                               |
+| Property        | Value                                                  | How it was established                                                                                                                                        |
+| --------------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Build step      | **none**                                               | Every workspace package exports `./src/index.ts`; Node runs the TypeScript under `--experimental-strip-types`. No package has a `build` script.               |
+| Start command   | `node --experimental-strip-types apps/api/src/main.ts` | `apps/api/package.json#scripts.start`                                                                                                                         |
+| Node            | `>=22.12.0`                                            | root `package.json#engines`                                                                                                                                   |
+| Package manager | pnpm 10.33.0                                           | `package.json#packageManager`                                                                                                                                 |
+| Install scope   | **repository root**                                    | `apps/api` depends on four `workspace:*` packages; the lockfile is at the root                                                                                |
+| Process model   | **long-lived, stateful**                               | holds a `pg.Pool`. Not serverless, not edge.                                                                                                                  |
+| `HOST`          | **must be `0.0.0.0`**                                  | the application default is `127.0.0.1` — correct on a laptop, unreachable inside a container                                                                  |
+| `PORT`          | from the provider                                      | `config.PORT`, default 3000                                                                                                                                   |
+| Shutdown        | SIGTERM/SIGINT → `app.close()` then `db.close()`       | `main.ts`; verified by sending SIGTERM to a running process — port released, exit 0                                                                           |
+| Health check    | `GET /api/v1/health` → `200 {"status":"ok"}`           | LIVENESS. Touches no database and discloses no configuration. A liveness probe that checked a dependency would restart the whole fleet during a database blip |
+| Readiness check | `GET /api/v1/health/ready` → `200` / `503`             | READINESS (Task 016). Probes the database; memoised for 1s so an unauthenticated endpoint cannot exhaust the pool. This is the one a load balancer should use |
 
 **`HOST=0.0.0.0` is the one non-obvious requirement.** Miss it and the process
 starts, logs "API listening on 127.0.0.1", fails every health check, and looks
@@ -28,7 +37,13 @@ like a networking fault rather than a configuration one.
 
 ## 2. Provider
 
-**Recommended: Railway, running the Dockerfile.**
+**Recommended: Railway, running the Dockerfile** — which now exists at the
+repository root. It is multi-stage, runs as the unprivileged `node` user,
+installs production dependencies only (`--prod --filter @edu/api...`, 88
+packages), ships source rather than a build artifact, and health-checks the
+READINESS endpoint. Migrations run from the SAME image as a gated one-off
+command, so the schema applied is the one the code about to serve traffic was
+written against.
 
 The decisive requirements, in order:
 
@@ -38,11 +53,17 @@ The decisive requirements, in order:
    connections on every call.
 2. **Postgres must not have a public port** (§14 of the security review).
    Railway's private networking keeps the database off the internet.
-3. **Explicit replica count.** The boot log warns:
-   `rate limiting uses an in-process store; limits are per-instance and are NOT
-shared across replicas` (RISK-RATE-01). Until a shared store exists, running
-   more than one replica silently multiplies every rate limit. Railway defaults
-   to one instance and makes the count explicit.
+3. **Redis, for the shared rate-limit store.** As of Task 016 the server
+   REFUSES to start in production or staging without `REDIS_URL`: limits counted
+   per process mean the enforced ceiling is the replica count times the number
+   written down, and nothing anywhere says so. RISK-RATE-01 is closed by the
+   store; the requirement it leaves behind is that the provider can run a Redis
+   on a private network.
+
+   Replica count no longer silently multiplies the limits. It still deserves to
+   be explicit, and while the store is unreachable the limiter degrades to
+   per-process counting and records `ratelimit.store_degraded` (RISK-RATE-02).
+
 4. **A one-off command runner**, so migrations are a gated step and never part
    of application start (§3).
 
@@ -212,3 +233,43 @@ out. Set `ALLOWED_ORIGINS` to the Vercel origin — with a rewrite the browser's
   changed here.
 - **There is no authentication UI.** Even with the API reachable, no session can
   be obtained through the browser.
+
+---
+
+## Added in Task 016 — the proxy setting, and the deploy-time check
+
+### `TRUST_PROXY` must be set the moment anything sits in front of this server
+
+Railway, and every other platform, terminates TLS in front of the process. That
+makes `request.ip` the proxy's address unless the server is told otherwise — and
+`request.ip` is the key of every per-IP rate limit and the `ip` of every security
+event. Left unset behind a proxy, per-IP limiting collapses into ONE GLOBAL
+BUCKET and the audit trail names the load balancer as the source of every
+attack.
+
+Set it to the proxy's address or subnet:
+
+```
+TRUST_PROXY=10.0.0.0/8
+```
+
+Two forms are REFUSED at boot, both because their failure would be silent:
+
+- `true` — believes a client-supplied `X-Forwarded-For`, so an attacker picks a
+  fresh bucket per request and no limit is ever reached.
+- a hop count (`2`) — Fastify 5 compiles a numeric setting to a function that
+  trusts no peer at all (VULN-063), so the server would report proxy trust and
+  key everything to the load balancer.
+
+### Validate the environment before building anything
+
+```bash
+pnpm deploy:check-env .env.production
+```
+
+It runs the server's own schema — the real `loadConfig`, not a copy — against a
+candidate file, reports every problem at once rather than whichever one Zod hit
+first, flags placeholders left in a copied template, flags variables the
+application does not read (`REDIS_HOST` where the code reads `REDIS_URL`), and
+never prints a value. `.env.production.example` is the template; it deliberately
+fails its own check until the placeholders are replaced.

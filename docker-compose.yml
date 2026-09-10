@@ -1,0 +1,148 @@
+# =============================================================================
+# Local and single-host deployment of the whole stack.
+# =============================================================================
+#
+# WHAT THIS IS FOR: bringing up the API against a real Postgres and a real Redis
+# in one command, so that "it works on my machine" means the same three
+# processes production runs rather than a different two.
+#
+# WHAT THIS IS NOT: a production orchestration. It has no rolling deploy, no
+# replica count, no secret manager, no TLS termination. `NODE_ENV` below is
+# `development` deliberately — a compose file that claimed to be production
+# while serving over plaintext with a password in a file would be a lie that
+# eventually gets deployed. For production, the same image runs under an
+# orchestrator with its own secret handling; see docs/deployment-api.md.
+#
+# -----------------------------------------------------------------------------
+# SECRETS. Nothing here holds a real credential. The values below are local
+# development passwords for containers that publish no port to the host beyond
+# the API's. A real deployment supplies them through `--env-file` or the
+# orchestrator's secret mechanism, never through a committed file.
+# -----------------------------------------------------------------------------
+
+services:
+  # ---------------------------------------------------------------------------
+  # Postgres, with pgvector. The extension is REQUIRED, not optional: migration
+  # 0026 creates the embedding table and its HNSW index, and a stock postgres
+  # image fails the migration rather than degrading.
+  # ---------------------------------------------------------------------------
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_PASSWORD: postgres_local_pw
+      POSTGRES_DB: edu_dev
+    volumes:
+      - db-data:/var/lib/postgresql/data
+      # Runs once, on an empty data directory: creates the migrator and
+      # application roles the migrations and the server connect as. The
+      # application role is NOBYPASSRLS and non-owner, which is the property the
+      # entire second security gate rests on.
+      - ./db/docker/init-roles.sh:/docker-entrypoint-initdb.d/00-roles.sh:ro
+      # Mounted outside initdb.d so the entrypoint does not also execute it
+      # directly: it needs psql variables the entrypoint would not supply.
+      - ./db/bootstrap.sql:/bootstrap/bootstrap.sql:ro
+    healthcheck:
+      # `pg_isready` reports the postmaster is accepting connections, which is
+      # what the migrate job and the API actually need. Everything below waits
+      # on this rather than on a sleep.
+      test: ['CMD-SHELL', 'pg_isready -U postgres -d edu_dev']
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    # Not published to the host by default. A database port on 0.0.0.0 is the
+    # most commonly exposed service in a developer's docker-compose, and this
+    # one holds children's coursework even in development.
+    expose:
+      - '5432'
+
+  # ---------------------------------------------------------------------------
+  # Redis: the SHARED rate-limit store. Without it the API counts per process,
+  # which is fine for one instance and is exactly the gap RISK-RATE-01 recorded
+  # for eight tasks. Present here so local behaviour matches production.
+  # ---------------------------------------------------------------------------
+  cache:
+    image: redis:7-alpine
+    # No persistence. Rate-limit counters are ephemeral by definition: losing
+    # them costs one window's worth of enforcement, while an AOF file costs
+    # disk and a startup delay for data nobody will ever read.
+    command: ['redis-server', '--save', '', '--appendonly', 'no']
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    expose:
+      - '6379'
+
+  # ---------------------------------------------------------------------------
+  # Migrations, as a one-shot job that must SUCCEED before the API starts.
+  #
+  # It runs from the SAME IMAGE as the API, so the schema applied is the schema
+  # the code about to serve traffic was written against — not whatever a
+  # separate runner happened to have checked out.
+  #
+  # It connects as the MIGRATOR, and it is the only thing here that does. The
+  # API never gets that URL: running the server as the owner would silently
+  # disable Row-Level Security across the whole schema.
+  # ---------------------------------------------------------------------------
+  migrate:
+    build:
+      context: .
+    image: edu-api:local
+    command: ['node', '--experimental-strip-types', 'db/migrate.ts']
+    environment:
+      DATABASE_URL: postgres://edu_migrator:migrator_local_pw@db:5432/edu_dev
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: 'no'
+
+  # ---------------------------------------------------------------------------
+  # The API.
+  # ---------------------------------------------------------------------------
+  api:
+    build:
+      context: .
+    image: edu-api:local
+    # PID 1 reaps zombies. The graceful SIGTERM handling is in main.ts, which
+    # drains the HTTP server before the connection pool so in-flight requests
+    # are not cut off mid-response.
+    init: true
+    environment:
+      # `development`, honestly. See the header: this file does not meet the
+      # bar its own configuration loader sets for production — plaintext origin,
+      # insecure cookie — and marking it `production` would make the server
+      # refuse to start, which is the loader working correctly.
+      NODE_ENV: development
+      HOST: 0.0.0.0
+      PORT: '3000'
+      LOG_LEVEL: info
+      # The APPLICATION role. Never the migrator above.
+      DATABASE_URL: postgres://edu_app:app_local_pw@db:5432/edu_dev
+      DATABASE_POOL_MAX: '10'
+      REDIS_URL: redis://cache:6379
+      ALLOWED_ORIGINS: http://localhost:5173
+      SESSION_COOKIE_SECURE: 'false'
+      RATE_LIMIT_ENABLED: 'true'
+      # Unset, so request.ip is the socket address. Setting it here would be
+      # wrong in both directions: there is no proxy in front of this, and a
+      # value that trusts a forwarding header would let any caller on the
+      # compose network choose their own rate-limit bucket.
+      # TRUST_PROXY:
+      AI_PROVIDER: none
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    ports:
+      - '127.0.0.1:3000:3000'
+    # The image's own HEALTHCHECK probes /api/v1/health/ready, which is the
+    # readiness question — see apps/api/src/platform/http/health.ts for why the
+    # liveness endpoint would be the wrong one here.
+    restart: unless-stopped
+
+volumes:
+  db-data:

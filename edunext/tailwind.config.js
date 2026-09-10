@@ -25,6 +25,18 @@
  */
 export default {
   content: ['./index.html', './src/**/*.{js,jsx,ts,tsx}'],
+
+  /**
+   * Class-based, not media-based: the header's theme toggle sets `dark` on
+   * <html>, so a deliberate choice beats the operating system's. The toggle
+   * reads `prefers-color-scheme` only for the first visit, before a choice
+   * exists.
+   *
+   * The dark PALETTE is not defined yet — that is a token task, not a layout
+   * one — so today no `dark:` variant is used anywhere. This is the seam that
+   * lets the palette land later without touching a component.
+   */
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {

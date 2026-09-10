@@ -3,6 +3,10 @@ import type { FastifyInstance, FastifyRequest, preHandlerAsyncHookHandler } from
 import { rateLimited } from '@edu/kernel';
 import { SecurityEventType, type Logger } from '@edu/observability';
 import type { SecurityEventRecorder } from './security-events.ts';
+import type { FastifyRateLimitStore, FastifyStoreOptions } from './rate-limit-store.ts';
+
+/** The shape `@fastify/rate-limit` instantiates for itself. */
+export type FastifyRateLimitStoreCtor = new (options: FastifyStoreOptions) => FastifyRateLimitStore;
 
 /**
  * Rate limiting policy catalogue.
@@ -14,21 +18,33 @@ import type { SecurityEventRecorder } from './security-events.ts';
  * ---------------------------------------------------------------------------
  * HONEST STATEMENT OF WHAT THIS IS
  *
- * This is a PER-PROCESS, IN-MEMORY limiter. It is NOT production-grade for a
- * multi-instance deployment:
+ * The counters live in a SHARED STORE when one is configured, and in this
+ * process when one is not. Which of those is in force decides whether the
+ * numbers below are the limits the platform enforces or merely the limits it
+ * intends:
  *
- *   - Counters are not shared between instances. With N instances behind a load
- *     balancer, the effective limit is N times the configured value.
- *   - Counters reset on restart, so a deploy clears every attacker's budget.
- *   - Keying is by socket address (`request.ip`) with `trustProxy: false`. That
- *     is correct for direct exposure and NOT correct behind a proxy, where
- *     every request would appear to come from the proxy. Introducing a proxy
- *     REQUIRES configuring `trustProxy` at the same time, or per-IP limiting
- *     silently becomes a single global limit.
+ *   SHARED (Redis, `REDIS_URL` set — REQUIRED in production and staging).
+ *   The configured number is the enforced number across every replica, and it
+ *   survives a deploy. `platform/security/rate-limit-store.ts` implements it,
+ *   including what happens when Redis goes away: the limiter DEGRADES to
+ *   per-process counting and records `ratelimit.store_degraded`, rather than
+ *   failing open (an attacker could then switch limiting off by disturbing a
+ *   cache) or failing closed (a cache restart would take the login page down).
  *
- * The production requirement is a shared store (Redis or equivalent) via the
- * plugin's `store` option. It is not implemented; see
- * docs/security/rate-limiting.md and RISK-RATE-01 in the threat model.
+ *   PER-PROCESS (no `REDIS_URL` — development, tests, and a single instance).
+ *   With N instances the effective limit is N times the configured value, and
+ *   every deploy refills every attacker's budget. This was the ONLY mode until
+ *   Task 016, and RISK-RATE-01 recorded it as the platform's largest known
+ *   production gap for eight tasks.
+ *
+ * KEYING IS BY `request.ip`, AND WHAT THAT MEANS IS CONFIGURED. Behind a load
+ * balancer, `trustProxy: false` makes every request appear to come from the
+ * proxy and collapses per-IP limiting into one global bucket; blanket
+ * `trustProxy: true` believes a client-supplied header and makes every request
+ * a fresh bucket, which is worse. `platform/security/trusted-proxy.ts` holds
+ * the rule, refuses the blanket form outright, and explains why.
+ *
+ * See docs/security/rate-limiting.md.
  * ---------------------------------------------------------------------------
  */
 
@@ -518,6 +534,12 @@ export interface RateLimitDeps {
   readonly hardenedEnvironment: boolean;
   readonly securityEvents: SecurityEventRecorder;
   readonly logger: Logger;
+  /**
+   * The shared counter, when one is configured. Absent means per-process
+   * counting — correct for development and tests, and refused by the
+   * configuration loader in production and staging.
+   */
+  readonly store?: FastifyRateLimitStoreCtor;
 }
 
 export async function registerRateLimiting(
@@ -533,13 +555,16 @@ export async function registerRateLimiting(
     return;
   }
 
-  if (hardenedEnvironment) {
-    // Loud, every boot, until a shared store exists. A quiet limitation is one
-    // that gets forgotten.
+  if (!deps.store) {
+    // Loud, every boot without a shared store. The configuration loader refuses
+    // this combination in production and staging, so reaching here means
+    // development, a test, or a single instance that has accepted the trade.
     logger.warn(
       'rate limiting uses an in-process store; limits are per-instance and are NOT shared across replicas',
-      { requirement: 'shared store (Redis or equivalent)', risk: 'RISK-RATE-01' },
+      { requirement: 'shared store (Redis or equivalent)', risk: 'RISK-RATE-01', hardenedEnvironment },
     );
+  } else {
+    logger.info('rate limiting uses a shared store; configured limits are fleet-wide');
   }
 
   await app.register(rateLimit, {
@@ -547,6 +572,19 @@ export async function registerRateLimiting(
     max: RATE_LIMIT_POLICIES.global.max,
     timeWindow: RATE_LIMIT_POLICIES.global.timeWindow,
     keyGenerator: (request) => request.ip,
+    ...(deps.store ? { store: deps.store } : {}),
+
+    /**
+     * NEVER skip on a store error.
+     *
+     * The plugin's default is `true`, which means "if the store throws, let the
+     * request through". For an in-memory store that is nearly unreachable; for
+     * a network store it is a switch an attacker can flip by disturbing Redis.
+     * The store here does not throw — it degrades to local counting and records
+     * the degradation — so this flag exists to make sure a FUTURE store cannot
+     * quietly reintroduce fail-open behaviour.
+     */
+    skipOnError: false,
 
     /**
      * Exceeding a limit is a security event, not just a 429.

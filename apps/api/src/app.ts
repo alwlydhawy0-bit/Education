@@ -12,6 +12,12 @@ import { registerErrorHandler } from './platform/http/errors.ts';
 import { registerOriginGuard } from './platform/http/origin-guard.ts';
 import { registerAuthentication } from './platform/http/authentication.ts';
 import { registerRateLimiting } from './platform/security/rate-limit.ts';
+import {
+  connectRateLimitRedis,
+  createRateLimitRedis,
+  createRedisStoreCtor,
+} from './platform/security/rate-limit-store.ts';
+import { describeTrustProxy, parseTrustProxy } from './platform/security/trusted-proxy.ts';
 import { createSecurityEventRecorder } from './platform/security/security-events.ts';
 import { createIdentityRepository } from './modules/identity/identity.repository.ts';
 import { createIdentityService } from './modules/identity/identity.service.ts';
@@ -136,14 +142,26 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
 
   const isHardenedEnvironment = config.NODE_ENV === 'production' || config.NODE_ENV === 'staging';
 
+  // Parsed BEFORE the server object exists, so a bad value refuses to boot
+  // rather than producing a server whose addresses cannot be trusted.
+  const trustProxySetting = parseTrustProxy(config.TRUST_PROXY);
+
   const app = Fastify({
     // Fastify's own logger is disabled: all logging goes through the redacting
     // logger in @edu/observability, so there is exactly one path to the log
     // stream and exactly one place redaction can be bypassed (nowhere).
     logger: false,
-    // Trust the proxy for `request.ip` only when configured to. Getting this
-    // wrong makes per-IP rate limiting trivially bypassable via X-Forwarded-For.
-    trustProxy: false,
+    /**
+     * What `request.ip` MEANS. Configured, validated, and never blanket.
+     *
+     * This value is the key of every IP-scoped rate limit and the `ip` field of
+     * every security event, so getting it wrong breaks two controls at once —
+     * in opposite directions depending on which way it is wrong.
+     * `parseTrustProxy` refuses the blanket `true` form outright and explains
+     * why; it throws rather than defaulting, because a broken security control
+     * costs nothing only at startup.
+     */
+    trustProxy: trustProxySetting as false | string[],
     // Bounds request size before any parsing happens.
     bodyLimit: 256 * 1024,
   });
@@ -199,11 +217,66 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   const audit = createAuditWriter(db, logger);
   const securityEvents = createSecurityEventRecorder({ audit, logger });
 
+  /**
+   * The shared rate-limit store, when one is configured.
+   *
+   * Built here rather than inside the limiter so that the connection is closed
+   * by the same `app.close()` that drains everything else — a client left open
+   * holds the process alive after a shutdown signal, which turns a rolling
+   * deploy into a hung one.
+   */
+  const rateLimitRedis = config.REDIS_URL ? createRateLimitRedis(config.REDIS_URL) : null;
+  if (rateLimitRedis) {
+    // ioredis reconnects on its own; an unhandled 'error' event would take the
+    // process down for something the store is designed to survive.
+    rateLimitRedis.on('error', () => undefined);
+    // Connected here so the FIRST request finds a live client. See
+    // `connectRateLimitRedis` for what happens without it.
+    const connected = await connectRateLimitRedis(rateLimitRedis);
+    if (!connected) {
+      logger.warn('the shared rate-limit store was unreachable at boot; counting locally until it returns');
+    }
+    app.addHook('onClose', async () => {
+      try {
+        await rateLimitRedis.quit();
+      } catch {
+        // Already gone. Nothing to close and nothing worth saying.
+      }
+    });
+  }
+
+  const sharedStore = rateLimitRedis
+    ? createRedisStoreCtor(rateLimitRedis, {
+        keyPrefix: 'edu:rl',
+        onDegraded: (degraded, detail) => {
+          // A WEAKENING of a control is itself security-relevant: while this
+          // is in effect the configured ceiling is per-instance rather than
+          // fleet-wide. Recorded on the transition only.
+          void securityEvents
+            .record({
+              type: SecurityEventType.RATE_LIMIT_STORE_DEGRADED,
+              actorId: null,
+              correlationId: 'rate-limit-store',
+              ip: null,
+              detail: { degraded, ...detail },
+              occurredAt: clock.now(),
+            })
+            .catch((error: unknown) => {
+              logger.error('failed to record a rate-limit store degradation', { error });
+            });
+        },
+      })
+    : null;
+
   await registerRateLimiting(app, {
     enabled: config.RATE_LIMIT_ENABLED,
     hardenedEnvironment: isHardenedEnvironment,
     securityEvents,
     logger,
+    // Spread rather than `store: undefined` — `exactOptionalPropertyTypes`
+    // distinguishes "absent" from "present and undefined", and the limiter's
+    // whole behaviour turns on that distinction.
+    ...(sharedStore ? { store: sharedStore } : {}),
   });
 
   registerOriginGuard(app, config.ALLOWED_ORIGINS);
@@ -218,6 +291,8 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   // staging, so in practice this fires only in development and tests. It exists
   // so that "which posture was this instance running?" is answerable from the
   // audit trail rather than from someone's memory of the deployment.
+  logger.info('proxy trust configured', { trustProxy: describeTrustProxy(trustProxySetting) });
+
   const deviations = describeSecurityPostureDeviations(config);
   if (deviations.length > 0) {
     await securityEvents.record({

@@ -51,6 +51,14 @@ const CONFIG_KEYS = [
   'LOG_LEVEL',
   'ALLOWED_ORIGINS',
   'RATE_LIMIT_ENABLED',
+  /**
+   * ── ADDED IN TASK 016 ──────────────────────────────────────────────────
+   * The shared rate-limit store and the proxy topology. Both decide what
+   * `request.ip` MEANS, and therefore what every IP-scoped limit actually
+   * enforces; see platform/security/trusted-proxy.ts.
+   */
+  'REDIS_URL',
+  'TRUST_PROXY',
   'SESSION_COOKIE_NAME',
   'REFRESH_COOKIE_NAME',
   'SESSION_TTL_HOURS',
@@ -91,7 +99,7 @@ const CONFIG_KEYS = [
  * Used by `assertNoPrivateLeakage` as a runtime backstop against a future edit
  * to `toPublicConfig` that adds a field without thinking about it.
  */
-const SECRET_BEARING_KEYS = ['DATABASE_URL', 'AI_API_KEY'] as const;
+const SECRET_BEARING_KEYS = ['DATABASE_URL', 'AI_API_KEY', 'REDIS_URL'] as const;
 
 const configSchema = z
   .object({
@@ -125,6 +133,41 @@ const configSchema = z
       .enum(['true', 'false'])
       .default('true')
       .transform((v) => v === 'true'),
+
+    /**
+     * The SHARED rate-limit store (Task 016), and the difference between a
+     * limit that is enforced and a limit that is merely configured.
+     *
+     * Unset means per-process counting, which is correct for development and a
+     * single instance and WRONG for a fleet: with N replicas the effective
+     * ceiling is N times the number written down. The refine below therefore
+     * requires it in production and staging. See RISK-RATE-01.
+     *
+     * PRIVATE, and treated as secret-bearing: a Redis URL routinely carries a
+     * password in its userinfo, which is why it is listed in
+     * `SECRET_BEARING_KEYS` alongside `DATABASE_URL`.
+     */
+    REDIS_URL: z
+      .string()
+      .optional()
+      .refine((v) => v === undefined || /^rediss?:\/\//.test(v), {
+        message: 'REDIS_URL must be a redis:// or rediss:// URL.',
+      }),
+
+    /**
+     * How `request.ip` is derived behind a load balancer.
+     *
+     * Parsed and validated by `parseTrustProxy`, which REFUSES the value
+     * `true`: blanket proxy trust believes a client-supplied X-Forwarded-For,
+     * which lets any caller choose their own rate-limit bucket and their own
+     * entry in the audit trail. A hop count or an address list is bounded by
+     * something the attacker does not control; `true` is not.
+     *
+     * Kept as a raw string here so that the one implementation of the rule
+     * lives in the security module rather than being half-expressed in a Zod
+     * schema. The parse runs at boot and refuses to start on a bad value.
+     */
+    TRUST_PROXY: z.string().optional(),
 
     /**
      * The AI provider, and the ONLY switch that turns the assistant on.
@@ -278,6 +321,20 @@ const configSchema = z
      */
     message: 'AI_API_KEY is required when AI_PROVIDER is not "none" — refusing to start.',
     path: ['AI_API_KEY'],
+  })
+  .refine((c) => !isHardened(c.NODE_ENV) || (c.REDIS_URL ?? '').trim() !== '', {
+    /**
+     * Without a shared store the configured limit is a per-instance limit, and
+     * nothing in the response, the logs or the dashboard says so. A production
+     * deployment that has decided to run one instance can still satisfy this by
+     * pointing at a Redis it runs alongside it; what it cannot do is enforce
+     * "10 logins per 15 minutes" across six replicas by accident.
+     */
+    message:
+      'REDIS_URL is required in production and staging: without a shared store, rate limits are ' +
+      'counted per process and the enforced ceiling is multiplied by the replica count ' +
+      '(RISK-RATE-01). Refusing to start.',
+    path: ['REDIS_URL'],
   })
   .refine((c) => !isHardened(c.NODE_ENV) || c.LOG_LEVEL !== 'debug', {
     // Debug logging in a hardened environment increases the volume of

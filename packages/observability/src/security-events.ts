@@ -293,6 +293,26 @@ export const SecurityEventType = {
   AUTHZ_REPEATED_DENIAL: 'authz.repeated_denial',
 
   RATE_LIMIT_EXCEEDED: 'ratelimit.exceeded',
+
+  /**
+   * The SHARED rate-limit store became unreachable, or came back (Task 016).
+   *
+   * This is the one event that records a WEAKENING OF A CONTROL rather than an
+   * attempt to defeat one. While it is in effect, limits are counted per
+   * process instead of across the fleet, so the enforced ceiling is N times the
+   * configured value on N instances — the exact posture RISK-RATE-01 described
+   * before a shared store existed.
+   *
+   * It exists because the alternative to recording the degradation is either
+   * failing open silently or taking the platform down when a cache restarts,
+   * and both of those are worse. `detail.degraded` distinguishes entering the
+   * state from leaving it, so an investigation can bound the window during
+   * which "10 logins per 15 minutes" did not mean what it says.
+   *
+   * Emitted on the TRANSITION only, never per request: an outage produces two
+   * events, not one per rejected connection.
+   */
+  RATE_LIMIT_STORE_DEGRADED: 'ratelimit.store_degraded',
   VALIDATION_REJECTED: 'validation.rejected',
   PAYLOAD_TOO_LARGE: 'payload.too_large',
 

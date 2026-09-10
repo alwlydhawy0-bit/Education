@@ -484,6 +484,30 @@ describe('the metrics are right, not merely present', () => {
     expect(row?.average_mastery_score).toBeNull();
   });
 
+  it('LEAVES IT NULL FOR A LEARNER WHO HAS STUDIED BUT NOT BEEN ASSESSED', async () => {
+    /**
+     * THE CASE THAT FORCED MIGRATION 0033.
+     *
+     * Completing a lesson emits `lesson_completed` evidence, so the learner's
+     * mastery state is `attempted` — evidence exists, none of it graded. Under
+     * the original scale that scored 0.00, so a class that had done the reading
+     * and not yet reached the quiz reported TOTAL FAILURE, and its index would
+     * have gone UP the moment they sat the quiz and failed it.
+     *
+     * `attempted` is now excluded alongside `no_evidence`: both mean "we do not
+     * know", and the honest rendering of that is absence rather than a zero.
+     */
+    const w = await world();
+    await recordProgress({ userId: w.learnerA, lessonId: w.lesson, status: 'completed' });
+    await refresh([w.orgA]);
+
+    const [row] = await rows<{ average_mastery_score: string | null }>(
+      w.adminA,
+      'SELECT average_mastery_score FROM analytics_daily_school_metrics',
+    );
+    expect(row?.average_mastery_score).toBeNull();
+  });
+
   it('scores mastery from real graded evidence, differently for each school', async () => {
     /**
      * THE TEST THE SHARED COURSE EXISTS FOR.
@@ -519,11 +543,14 @@ describe('the metrics are right, not merely present', () => {
       'SELECT average_mastery_score FROM analytics_daily_school_metrics',
     );
 
-    // `demonstrated` is 2 of 3 on the documented ordinal scale; `developing` is
-    // 1 of 3. The exact numbers are asserted because a scale nobody checks is a
-    // scale that can be quietly rescaled.
-    expect(Number(a?.average_mastery_score)).toBeCloseTo(66.67, 1);
-    expect(Number(b?.average_mastery_score)).toBeCloseTo(33.33, 1);
+    // THE CORRECTED SCALE (migration 0033). `demonstrated` — graded, one
+    // assessment passed — is 50; `developing` — graded, nothing passed — is 0.
+    // The exact numbers are asserted because a scale nobody checks is a scale
+    // that can be quietly rescaled, and this one already needed correcting
+    // once: 0032 scored an unassessed learner BELOW one who sat an assessment
+    // and failed.
+    expect(Number(a?.average_mastery_score)).toBeCloseTo(50, 1);
+    expect(Number(b?.average_mastery_score)).toBeCloseTo(0, 1);
   });
 
   it('flags a struggling learner in the right school only', async () => {

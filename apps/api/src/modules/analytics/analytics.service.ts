@@ -169,6 +169,29 @@ export function createAnalyticsService(deps: AnalyticsServiceDeps): AnalyticsSer
     value === null ? null : Number(value);
 
   /**
+   * Does this actor teach anything at all?
+   *
+   * The fact that separates a teacher from an administrator when no class has
+   * been named — used by the unnamed course list and by `at_risk`, which is
+   * also a "my own scope" question rather than a "this object" one.
+   *
+   * It asks the same tables `app_actor_teaches_class` asks, unbounded by class,
+   * so the two cannot disagree about what teaching means.
+   */
+  async function teachesAnyClass(
+    tx: Parameters<AnalyticsRepository['dailyMetrics']>[0],
+  ): Promise<boolean> {
+    const { rows } = await tx.query<{ any_class: boolean }>(
+      `SELECT EXISTS (
+         SELECT 1 FROM teacher_assignments ta
+          JOIN classes c ON c.id = ta.class_id
+         WHERE ta.teacher_id = app_current_actor()
+           AND ta.status = 'active' AND c.status = 'active') AS any_class`,
+    );
+    return rows[0]?.any_class === true;
+  }
+
+  /**
    * The second gate over the course-performance list.
    *
    * RLS AND THE TENANT PREDICATE HAVE ALREADY FILTERED THESE ROWS, and running
@@ -260,13 +283,39 @@ export function createAnalyticsService(deps: AnalyticsServiceDeps): AnalyticsSer
           ? await repository.classResource(tx, query.classId)
           : await repository.schoolResource(tx);
 
-        // NAMING A CLASS IS AUTHORIZED UP FRONT; asking for your own list is
-        // not, because there is nothing yet to be refused about. An unnamed
-        // request returns whatever both gates admit, which for a teacher is the
-        // classes they teach and for an administrator is their school — and
-        // refusing it outright would mean a teacher could never open the page.
+        /**
+         * BOTH SHAPES ARE AUTHORIZED, AND THE UNNAMED ONE NEEDS SAYING WHY.
+         *
+         * Naming a class is the easy case: the resource is that class, and a
+         * caller who does not hold it is refused before a row is read.
+         *
+         * An unnamed request asks for "my own authorized list", which for a
+         * teacher is the classes they teach and for an administrator is their
+         * school. The first version of this authorized only the named shape and
+         * let the unnamed one fall through to the two data gates — reasoning
+         * that an empty list is a safe answer, which it is.
+         *
+         * IT IS NOT THE ANSWER SECTION 2C ASKS FOR. Students and guardians must
+         * be BANNED from these endpoints with 403, not handed an empty list
+         * with 200. Those differ in what they tell the caller — an empty list
+         * says "you have no classes", a 403 says "this is not for you" — and
+         * more importantly in what they tell a reviewer reading the code: an
+         * endpoint that answers 200 to a learner is one whose safety rests
+         * entirely on the filter beneath it staying correct forever.
+         *
+         * So the unnamed shape is authorized too, against whether the caller
+         * holds ANY claim here at all. `tests/security/analytics.test.ts` found
+         * this; no unit test could have, because the question is about what the
+         * HTTP layer returns rather than what the policy decides.
+         */
         if (query.classId) {
           await decide(ctx, 'analytics_report:read_courses', resource);
+        } else {
+          await decide(ctx, 'analytics_report:read_courses', {
+            ...resource,
+            grain: 'class',
+            actorTeachesClass: await teachesAnyClass(tx),
+          });
         }
 
         const items = await admitCourseRows(ctx, tx, query);
@@ -294,17 +343,10 @@ export function createAnalyticsService(deps: AnalyticsServiceDeps): AnalyticsSer
          * the one that can explain itself.
          */
         const resource = await repository.schoolResource(tx);
-        const { rows: teaches } = await tx.query<{ any_class: boolean }>(
-          `SELECT EXISTS (
-             SELECT 1 FROM teacher_assignments ta
-              JOIN classes c ON c.id = ta.class_id
-             WHERE ta.teacher_id = app_current_actor()
-               AND ta.status = 'active' AND c.status = 'active') AS any_class`,
-        );
         await decide(ctx, 'analytics_report:at_risk', {
           ...resource,
           grain: 'class',
-          actorTeachesClass: teaches[0]?.any_class === true,
+          actorTeachesClass: await teachesAnyClass(tx),
         });
 
         const found = await repository.atRisk(tx, query);
@@ -327,10 +369,26 @@ export function createAnalyticsService(deps: AnalyticsServiceDeps): AnalyticsSer
 
     async exportReport(ctx, query) {
       return db.withActor(ctx.actor.id, async (tx) => {
+        /**
+         * THE EXPORT'S RESOURCE MIRRORS THE READ'S, GRAIN FOR GRAIN.
+         *
+         * The school dataset is an administrator's; the course dataset is an
+         * administrator's OR a teacher's, so the class-grained shape needs
+         * `actorTeachesClass` resolved exactly as the unnamed read does.
+         *
+         * The first version passed `schoolResource` through with
+         * `actorTeachesClass` left null and only the grain changed, which made
+         * every teacher's course export a 404 — the export refusing what the
+         * read allowed. Two doors onto the same data must be authorized by the
+         * same facts or one of them is wrong, and it is always the one nobody
+         * opens on screen.
+         */
+        const isSchoolGrain = query.dataset === 'school_overview';
         const resource = await repository.schoolResource(tx);
         await decide(ctx, 'analytics_report:export', {
           ...resource,
-          grain: query.dataset === 'school_overview' ? 'school' : 'class',
+          grain: isSchoolGrain ? 'school' : 'class',
+          actorTeachesClass: isSchoolGrain ? null : await teachesAnyClass(tx),
         });
 
         const { headers, rows, stem } = await gatherExport(ctx, tx, query);

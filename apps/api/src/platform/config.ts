@@ -41,8 +41,14 @@ function isHardened(environment: AppEnvironment): boolean {
 /**
  * Every environment variable the application reads. Anything not listed here is
  * ignored rather than silently becoming configuration.
+ *
+ * EXPORTED since Task 016 so `tools/deploy/check-env.ts` can report a variable
+ * a deployment sets that the application will silently ignore. That is the
+ * mirror image of VULN-037 below: there, the application declared a key it did
+ * not read; here, an operator sets `REDIS_HOST` where the application reads
+ * `REDIS_URL`, believes the cache is configured, and nothing anywhere disagrees.
  */
-const CONFIG_KEYS = [
+export const CONFIG_KEYS = [
   'NODE_ENV',
   'PORT',
   'HOST',

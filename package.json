@@ -24,6 +24,9 @@
     "security:audit": "pnpm audit --audit-level=high",
     "security:secrets": "node --experimental-strip-types tools/security/scan-secrets.ts",
     "security:deps": "node --experimental-strip-types tools/security/check-deps.ts",
+    "security:rls": "node --experimental-strip-types tools/security/audit-rls.ts",
+    "db:audit-indexes": "node --experimental-strip-types tools/db/audit-indexes.ts",
+    "deploy:check-env": "node --experimental-strip-types tools/deploy/check-env.ts",
     "verify": "pnpm run format && pnpm run lint && pnpm run typecheck && pnpm run test"
   },
   "devDependencies": {

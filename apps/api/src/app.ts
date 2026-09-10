@@ -9,6 +9,7 @@ import { createDatabase, type Database } from './platform/db.ts';
 import { createAuditWriter } from './platform/audit.ts';
 import { registerRequestContext } from './platform/http/context.ts';
 import { registerErrorHandler } from './platform/http/errors.ts';
+import { registerHealthRoutes } from './platform/http/health.ts';
 import { registerOriginGuard } from './platform/http/origin-guard.ts';
 import { registerAuthentication } from './platform/http/authentication.ts';
 import { registerRateLimiting } from './platform/security/rate-limit.ts';
@@ -608,12 +609,9 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
   });
 
   // --- Routes -------------------------------------------------------------
-  app.get('/api/v1/health', async () =>
-    // Deliberately says nothing about version, dependencies, or database state.
-    // A health endpoint is unauthenticated, so it must not become a
-    // reconnaissance surface.
-    ({ status: 'ok' }),
-  );
+  // Liveness and readiness, which are different questions with different
+  // consequences; see platform/http/health.ts.
+  registerHealthRoutes(app, { database: db });
 
   registerIdentityRoutes(app, {
     identity,

@@ -71,6 +71,19 @@ export const stdoutJsonSink: LogSink = (record) => {
   process.stdout.write(`${JSON.stringify(record)}\n`);
 };
 
+/**
+ * The same JSON, on stderr.
+ *
+ * Used for FATAL startup failure only (see apps/api/src/main.ts). Ordinary logs
+ * belong on stdout, where a log shipper reads them; a process that dies before
+ * it can serve anything is a different kind of message, and an operator running
+ * the binary by hand — or an orchestrator capturing a crash — looks at stderr
+ * for it. Same shape, same mandatory redaction, different stream.
+ */
+export const stderrJsonSink: LogSink = (record) => {
+  process.stderr.write(`${JSON.stringify(record)}\n`);
+};
+
 /** Collects records in memory. Used by tests to assert on what was logged. */
 export function createMemorySink(): { sink: LogSink; records: LogRecord[] } {
   const records: LogRecord[] = [];

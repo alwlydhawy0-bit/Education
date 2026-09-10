@@ -8,6 +8,11 @@ coverage/
 .env
 .env.*
 !.env.example
+# The production TEMPLATE is tracked deliberately. It holds no secret — it fails
+# its own validator until the placeholders are replaced — and being tracked is
+# what puts it in the secret scanner's scope, which is where a template that
+# grows a real password should be caught.
+!.env.production.example
 *.pem
 *.key
 !**/testdata/**/*.key

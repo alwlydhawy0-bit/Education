@@ -206,6 +206,15 @@ describe("a learner's private workspace is not in the knowledge base", () => {
     // future task is covered by this the day it is created, whereas a list of
     // things to avoid would have to be remembered and would not be.
     const froms = [...REPOSITORY.matchAll(/\b(?:FROM|JOIN)\s+([a-z_]+)/g)].map((m) => m[1]);
+    // A common table expression is not a table. `FROM scoped` reads the query's
+    // own materialized scope (Task 016, VULN-061), and treating a CTE name as a
+    // table to allow-list would mean every future CTE had to be added here by
+    // hand — which is how an allow-list stops being read.
+    const ctes = new Set(
+      [...REPOSITORY.matchAll(/\b(?:WITH|,)\s+([a-z_]+)\s+AS\s+(?:MATERIALIZED\s+)?\(/g)].map(
+        (m) => m[1],
+      ),
+    );
     const ALLOWED = new Set([
       'curriculum_embeddings',
       'lessons',
@@ -219,7 +228,10 @@ describe("a learner's private workspace is not in the knowledge base", () => {
       'unnest',
     ]);
     for (const table of froms) {
-      expect(ALLOWED.has(table!), `knowledge.repository.ts reads ${table}`).toBe(true);
+      expect(
+        ALLOWED.has(table!) || ctes.has(table!),
+        `knowledge.repository.ts reads ${table}`,
+      ).toBe(true);
     }
   });
 });

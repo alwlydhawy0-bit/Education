@@ -103,11 +103,37 @@ describe('hardened environments (production AND staging)', () => {
     );
   });
 
+  it.each(hardened)('%s refuses to start without a shared rate-limit store', (environment) => {
+    // Added in Task 016. Without one, limits are counted per process: with six
+    // replicas a "10 logins per 15 minutes" limit enforces sixty, and nothing
+    // in the response, the logs or the dashboard says so (RISK-RATE-01).
+    expect(() => loadConfig({ ...base, NODE_ENV: environment, LOG_LEVEL: 'info' })).toThrow(
+      /REDIS_URL is required/,
+    );
+  });
+
+  it.each(hardened)('%s refuses a REDIS_URL that is not a Redis URL', (environment) => {
+    expect(() =>
+      loadConfig({
+        ...base,
+        NODE_ENV: environment,
+        LOG_LEVEL: 'info',
+        REDIS_URL: 'http://cache.internal:6379',
+      }),
+    ).toThrow(/redis:\/\/ or rediss:\/\//);
+  });
+
   it.each(hardened)('%s starts when every rule is satisfied', (environment) => {
-    const config = loadConfig({ ...base, NODE_ENV: environment, LOG_LEVEL: 'info' });
+    const config = loadConfig({
+      ...base,
+      NODE_ENV: environment,
+      LOG_LEVEL: 'info',
+      REDIS_URL: 'rediss://cache.internal:6379',
+    });
     expect(config.NODE_ENV).toBe(environment);
     expect(config.SESSION_COOKIE_SECURE).toBe(true);
     expect(config.RATE_LIMIT_ENABLED).toBe(true);
+    expect(config.REDIS_URL).toBe('rediss://cache.internal:6379');
   });
 
   it('development remains permissive', () => {

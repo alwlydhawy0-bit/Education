@@ -15,6 +15,13 @@ import type { CurriculumChunk, LessonSource } from './chunking.ts';
  *    ranked first and filtered afterwards would read every tenant's vectors
  *    into memory to decide it was not allowed to.
  *
+ *    THE SQL TEXT IS NOT ENOUGH TO GUARANTEE THIS, which Task 016 established
+ *    by measurement rather than by reading. The scoped set is wrapped in a
+ *    `MATERIALIZED` CTE so the planner cannot reorder the filter behind the
+ *    approximate index; see the note on `similar` for what happens when it
+ *    does, and `tests/integration/query-plans.test.ts` for the plan assertion
+ *    that keeps it that way.
+ *
  * 2. EVERY RETRIEVAL JOINS THE LIVE LESSON. Not for the text — the chunk has
  *    that — but for the LIFECYCLE and the FRESHNESS. The join is what makes an
  *    archived lesson's chunks disappear with no invalidation path, and the
@@ -336,29 +343,65 @@ export function createKnowledgeRepository(): KnowledgeRepository {
         chunk_content: string;
         distance: string;
       }>(
-        `SELECT e.id,
-                coalesce(e.metadata ->> 'kind', 'lesson') AS kind,
-                e.course_id, c.title AS course_title,
-                e.unit_id, e.lesson_id, l.title AS lesson_title,
-                e.chunk_index, e.chunk_content,
-                (e.embedding <=> $2::vector) AS distance
-           FROM curriculum_embeddings e
-           -- THE MANDATORY JOIN. Lifecycle and Row Level Security are inherited
-           -- from these live rows on every query, which is why an archived
-           -- lesson needs no invalidation path.
-           JOIN lessons l      ON l.id = e.lesson_id
-           JOIN course_units u ON u.id = l.unit_id
-           JOIN courses c      ON c.id = u.course_id
-          WHERE e.course_id = ANY($1::uuid[])
-            AND e.embedding_model = $3
-            AND l.status = 'published'
-            AND u.status = 'published'
-            AND c.status = 'published'
-            -- THE FRESHNESS GUARD, as a column comparison. See the note above
-            -- this function for why it is an equality and not a recomputation.
-            AND e.source_updated_at = l.updated_at
-            AND ($4::uuid IS NULL OR e.lesson_id = $4)
-          ORDER BY e.embedding <=> $2::vector
+        /**
+         * THE SCOPE IS MATERIALIZED BEFORE ANYTHING IS RANKED, AND `MATERIALIZED`
+         * IS LOAD-BEARING (Task 016, VULN-061).
+         *
+         * Rule 1 at the top of this file has always said the scope filter comes
+         * before the vector scan. Until Task 016 that was true of the SQL TEXT
+         * and not necessarily of the PLAN. With the authorized courses arriving
+         * as a parameterized array the planner cannot estimate their
+         * selectivity, and once the table is large enough it chooses the HNSW
+         * index for the ORDER BY and applies the filter AFTERWARDS.
+         *
+         * Post-filtering an approximate index is not merely slower. pgvector
+         * 0.6 has no iterative index scan (that arrived in 0.8), so the scan
+         * walks a fixed candidate list, discards everything the filter rejects,
+         * and RETURNS FEWER ROWS THAN THE LIMIT — silently, with no error and no
+         * warning. Measured on a 20,000-vector table with the authorized set at
+         * one course in two hundred: `LIMIT 8` returned THREE rows, ten times
+         * out of ten, having discarded 362 candidates.
+         *
+         * For a tutor that cites its sources, that is a correctness failure
+         * wearing a performance failure's clothes. The learner gets an answer
+         * grounded in an arbitrary subset of the material they were entitled
+         * to, and nothing anywhere says the retrieval was truncated.
+         *
+         * `AS MATERIALIZED` forces the scoped set to be computed first and the
+         * ordering to be exact. The cost is honest and bounded by ENROLMENT
+         * rather than by corpus size — the same 20,000-vector table returns a
+         * full, exact top-8 in 20ms for four authorized courses and 183ms for
+         * forty. RISK-VEC-01 records the curve and the pgvector 0.8 upgrade that
+         * would let the index be used safely again.
+         */
+        `WITH scoped AS MATERIALIZED (
+           SELECT e.id,
+                  coalesce(e.metadata ->> 'kind', 'lesson') AS kind,
+                  e.course_id, c.title AS course_title,
+                  e.unit_id, e.lesson_id, l.title AS lesson_title,
+                  e.chunk_index, e.chunk_content, e.embedding
+             FROM curriculum_embeddings e
+             -- THE MANDATORY JOIN. Lifecycle and Row Level Security are
+             -- inherited from these live rows on every query, which is why an
+             -- archived lesson needs no invalidation path.
+             JOIN lessons l      ON l.id = e.lesson_id
+             JOIN course_units u ON u.id = l.unit_id
+             JOIN courses c      ON c.id = u.course_id
+            WHERE e.course_id = ANY($1::uuid[])
+              AND e.embedding_model = $3
+              AND l.status = 'published'
+              AND u.status = 'published'
+              AND c.status = 'published'
+              -- THE FRESHNESS GUARD, as a column comparison. See the note above
+              -- this function for why it is an equality and not a recomputation.
+              AND e.source_updated_at = l.updated_at
+              AND ($4::uuid IS NULL OR e.lesson_id = $4)
+         )
+         SELECT id, kind, course_id, course_title, unit_id, lesson_id,
+                lesson_title, chunk_index, chunk_content,
+                (embedding <=> $2::vector) AS distance
+           FROM scoped
+          ORDER BY embedding <=> $2::vector
           LIMIT $5`,
         [
           options.courseIds,

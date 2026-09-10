@@ -2640,3 +2640,401 @@ describe('projects and portfolios, with RLS disabled', () => {
     }
   });
 });
+
+describe('class discussion forums, with RLS disabled', () => {
+  /**
+   * THE BLOCK THAT ANSWERS "WHICH GATE DID THE WORK?" FOR THE FORUM.
+   *
+   * Section 3 asks for two database-level guarantees by name — "when
+   * `is_locked = true`, database-level policies must reject any NEW reply
+   * inserts regardless of API routes", and "flagged or hidden posts must be
+   * excluded from student queries by default via RLS". Migration 0029 provides
+   * both, and this suite is the one that finds out whether they are ALL the
+   * platform has.
+   *
+   * They are not, and that is the point. With `edu_app_norls` the locked-thread
+   * WITH CHECK is bypassed and every hidden row is visible to the client; what
+   * refuses below is `community.policy.ts` and the per-row `admit` in the
+   * service. Two gates, each sufficient. The mirror image — the same boundaries
+   * with the application deleted — is tests/integration/rls-community.test.ts.
+   */
+  async function seedAndLogin(
+    email: string,
+    roles: readonly string[] | undefined,
+    organizationId: string | null,
+  ): Promise<{ id: string; cookie: string }> {
+    const user = await createUser({
+      email,
+      ...(roles ? { roles } : {}),
+      organizationId,
+      passwordHash: await hashPassword(PASSWORD),
+    });
+    const loggedIn = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: writeHeaders,
+      payload: { email, password: PASSWORD },
+    });
+    expect(loggedIn.statusCode).toBe(204);
+    return {
+      id: user.id,
+      cookie: `edu_session=${sessionCookieFrom(loggedIn.headers['set-cookie'])}`,
+    };
+  }
+
+  /** Two schools; two classes in the first; a teacher over each. */
+  async function forums() {
+    const orgA = await createOrganization('Forum NoRLS A');
+    const orgB = await createOrganization('Forum NoRLS B');
+
+    const learner = await seedAndLogin('nrls-fm-learner@test.local', undefined, orgA);
+    const classmate = await seedAndLogin('nrls-fm-mate@test.local', undefined, orgA);
+    const otherClassLearner = await seedAndLogin('nrls-fm-other@test.local', undefined, orgA);
+    const stranger = await seedAndLogin('nrls-fm-stranger@test.local', undefined, orgB);
+    const teacher = await seedAndLogin('nrls-fm-teacher@test.local', ['teacher'], orgA);
+    const otherTeacher = await seedAndLogin('nrls-fm-teacher2@test.local', ['teacher'], orgA);
+
+    const klass = await createClass(orgA, 'F1');
+    const otherClass = await createClass(orgA, 'F2');
+    const farClass = await createClass(orgB, 'F3');
+    await addClassMember(klass, learner.id);
+    await addClassMember(klass, classmate.id);
+    await addClassMember(otherClass, otherClassLearner.id);
+    await addClassMember(farClass, stranger.id);
+    await assignTeacher(teacher.id, klass);
+    await assignTeacher(otherTeacher.id, otherClass);
+
+    return {
+      orgA,
+      orgB,
+      klass,
+      otherClass,
+      farClass,
+      learner,
+      classmate,
+      otherClassLearner,
+      stranger,
+      teacher,
+      otherTeacher,
+    };
+  }
+
+  async function makeThread(
+    cookie: string,
+    classId: string,
+    title = 'A question about respiration',
+  ): Promise<string> {
+    const created = await app.inject({
+      method: 'POST',
+      url: `/api/v1/classes/${classId}/threads`,
+      headers: { ...writeHeaders, cookie },
+      payload: { title, contentMarkdown: 'I do not follow the last step of the cycle.' },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    return created.json<{ id: string }>().id;
+  }
+
+  async function makeReply(cookie: string, threadId: string, body = 'Try it this way.') {
+    const created = await app.inject({
+      method: 'POST',
+      url: `/api/v1/threads/${threadId}/replies`,
+      headers: { ...writeHeaders, cookie },
+      payload: { contentMarkdown: body },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    return created.json<{ id: string }>().id;
+  }
+
+  async function moderate(cookie: string, entityId: string, action: string, entityType = 'thread') {
+    return app.inject({
+      method: 'PATCH',
+      url: '/api/v1/moderation/action',
+      headers: { ...writeHeaders, cookie },
+      payload: { entityType, entityId, action },
+    });
+  }
+
+  it('REFUSES A LEARNER IN ANOTHER CLASS, with every thread visible to the client', async () => {
+    const w = await forums();
+    const thread = await makeThread(w.learner.cookie, w.klass, 'CLASSONLYTITLE');
+
+    const read = await app.inject({
+      method: 'GET',
+      url: `/api/v1/threads/${thread}`,
+      headers: { cookie: w.otherClassLearner.cookie },
+    });
+    expect(read.statusCode).toBe(404);
+    expect(read.body).not.toContain('CLASSONLYTITLE');
+
+    const fromAnotherSchool = await app.inject({
+      method: 'GET',
+      url: `/api/v1/threads/${thread}`,
+      headers: { cookie: w.stranger.cookie },
+    });
+    expect(fromAnotherSchool.statusCode).toBe(404);
+    expect(fromAnotherSchool.body).not.toContain('CLASSONLYTITLE');
+  });
+
+  it('SERVES AN EMPTY FEED FOR A CLASS THE CALLER IS NOT IN', async () => {
+    const w = await forums();
+    await makeThread(w.learner.cookie, w.klass, 'CLASSONLYTITLE');
+
+    const feed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${w.klass}/threads`,
+      headers: { cookie: w.otherClassLearner.cookie },
+    });
+    expect(feed.body).not.toContain('CLASSONLYTITLE');
+    expect(feed.json<{ items: unknown[] }>().items).toHaveLength(0);
+  });
+
+  it('REFUSES A CLASSMATE POSTING INTO A CLASS THEY ARE NOT IN', async () => {
+    const w = await forums();
+    const posted = await app.inject({
+      method: 'POST',
+      url: `/api/v1/classes/${w.klass}/threads`,
+      headers: { ...writeHeaders, cookie: w.stranger.cookie },
+      payload: { title: 'Hello from elsewhere', contentMarkdown: 'Should never land.' },
+    });
+    expect(posted.statusCode).toBe(404);
+  });
+
+  it('REFUSES A CLASSMATE EDITING OR DELETING SOMEBODY ELSE’S POST', async () => {
+    /**
+     * 404, NOT 403, AND THE DIFFERENCE IS THE POLICY'S CHOICE OF DISPOSITION.
+     *
+     * `discussionThreadPolicy` denies a non-author's `update` with `hide`,
+     * because there is nothing here for the caller to act on: they can read the
+     * post, they simply do not own it, and a 403 would only confirm that a
+     * particular id is an editable post belonging to somebody. A locked thread
+     * is the opposite case and answers 403 — the author IS entitled to know why
+     * their own post stopped accepting edits.
+     */
+    const w = await forums();
+    const thread = await makeThread(w.learner.cookie, w.klass);
+    const reply = await makeReply(w.learner.cookie, thread);
+
+    for (const url of [`/api/v1/threads/${thread}`, `/api/v1/replies/${reply}`]) {
+      const edited = await app.inject({
+        method: 'PUT',
+        url,
+        headers: { ...writeHeaders, cookie: w.classmate.cookie },
+        payload: { contentMarkdown: 'Rewritten by somebody else.' },
+      });
+      expect(edited.statusCode, url).toBe(404);
+
+      const deleted = await app.inject({
+        method: 'DELETE',
+        url,
+        headers: { ...bodylessWriteHeaders, cookie: w.classmate.cookie },
+      });
+      expect(deleted.statusCode, url).toBe(404);
+    }
+  });
+
+  it('ENFORCES THE LOCK WITH THE DATABASE ENFORCER BYPASSED', async () => {
+    /**
+     * THE SHARPEST TEST IN THIS BLOCK.
+     *
+     * The locked-thread rule section 3 asks for lives in the WITH CHECK of
+     * `discussion_replies_insert`, and `edu_app_norls` walks straight past it.
+     * If the routes were trusting the database for this, the reply below would
+     * be written and the lock would be decoration.
+     *
+     * It is refused, by `discussionReplyPolicy`, with `reveal` rather than
+     * `hide` — the learner is looking at the thread and is owed the reason.
+     */
+    const w = await forums();
+    const thread = await makeThread(w.learner.cookie, w.klass);
+    expect((await moderate(w.teacher.cookie, thread, 'lock')).statusCode).toBe(204);
+
+    const attempted = await app.inject({
+      method: 'POST',
+      url: `/api/v1/threads/${thread}/replies`,
+      headers: { ...writeHeaders, cookie: w.classmate.cookie },
+      payload: { contentMarkdown: 'Sneaking past the lock.' },
+    });
+    expect(attempted.statusCode, attempted.body).toBe(403);
+    expect(attempted.body).toContain('locked');
+
+    // And the thread is still readable: locking ends a conversation, it does
+    // not delete one.
+    const read = await app.inject({
+      method: 'GET',
+      url: `/api/v1/threads/${thread}`,
+      headers: { cookie: w.classmate.cookie },
+    });
+    expect(read.statusCode).toBe(200);
+    expect(read.json<{ replies: unknown[] }>().replies).toHaveLength(0);
+  });
+
+  it('REFUSES AN EDIT INSIDE A LOCKED THREAD, likewise', async () => {
+    const w = await forums();
+    const thread = await makeThread(w.learner.cookie, w.klass);
+    const reply = await makeReply(w.classmate.cookie, thread);
+    expect((await moderate(w.teacher.cookie, thread, 'lock')).statusCode).toBe(204);
+
+    const edited = await app.inject({
+      method: 'PUT',
+      url: `/api/v1/replies/${reply}`,
+      headers: { ...writeHeaders, cookie: w.classmate.cookie },
+      payload: { contentMarkdown: 'Editing round the lock.' },
+    });
+    expect(edited.statusCode).toBe(403);
+  });
+
+  it('KEEPS A HIDDEN THREAD OUT OF A LEARNER’S FEED AND READ, with the row present', async () => {
+    /**
+     * Section 3's "zero leakage" clause names RLS as the mechanism. With RLS
+     * gone the hidden row is right there in the result set, and what removes it
+     * is the per-row `admit` in the service: `listClassThreads` returns
+     * `Guarded` rows and the policy decides each one.
+     *
+     * A filter written into the SQL instead would have vanished here.
+     */
+    const w = await forums();
+    const thread = await makeThread(w.learner.cookie, w.klass, 'HIDDENSUBJECT');
+    expect((await moderate(w.teacher.cookie, thread, 'hide')).statusCode).toBe(204);
+
+    const feed = await app.inject({
+      method: 'GET',
+      url: `/api/v1/classes/${w.klass}/threads`,
+      headers: { cookie: w.classmate.cookie },
+    });
+    expect(feed.body).not.toContain('HIDDENSUBJECT');
+    expect(feed.json<{ items: unknown[] }>().items).toHaveLength(0);
+
+    const read = await app.inject({
+      method: 'GET',
+      url: `/api/v1/threads/${thread}`,
+      headers: { cookie: w.classmate.cookie },
+    });
+    expect(read.statusCode).toBe(404);
+    expect(read.body).not.toContain('HIDDENSUBJECT');
+  });
+
+  it('KEEPS A HIDDEN REPLY OUT OF A THREAD THE READER MAY OTHERWISE SEE', async () => {
+    const w = await forums();
+    const thread = await makeThread(w.learner.cookie, w.klass);
+    const kept = await makeReply(w.classmate.cookie, thread, 'A helpful answer.');
+    const removed = await makeReply(w.classmate.cookie, thread, 'REMOVEDANSWER');
+    expect(kept).not.toBe(removed);
+    expect((await moderate(w.teacher.cookie, removed, 'hide', 'reply')).statusCode).toBe(204);
+
+    const read = await app.inject({
+      method: 'GET',
+      url: `/api/v1/threads/${thread}`,
+      headers: { cookie: w.learner.cookie },
+    });
+    expect(read.statusCode).toBe(200);
+    expect(read.body).not.toContain('REMOVEDANSWER');
+    expect(read.json<{ replies: unknown[] }>().replies).toHaveLength(1);
+  });
+
+  it('REFUSES EVERY MODERATION VERB TO A LEARNER, and to the author of the post', async () => {
+    const w = await forums();
+    const thread = await makeThread(w.learner.cookie, w.klass);
+
+    for (const action of ['hide', 'pin', 'lock', 'approve']) {
+      const asClassmate = await moderate(w.classmate.cookie, thread, action);
+      expect(asClassmate.statusCode, `classmate ${action}`).toBe(404);
+
+      // The AUTHOR is not a moderator of their own thread. Pinning your own
+      // question to the top of the class feed is not self-service.
+      const asAuthor = await moderate(w.learner.cookie, thread, action);
+      expect(asAuthor.statusCode, `author ${action}`).toBe(404);
+    }
+  });
+
+  it('REFUSES A TEACHER OF ANOTHER CLASS, with the thread fully visible to them', async () => {
+    const w = await forums();
+    const thread = await makeThread(w.learner.cookie, w.klass, 'NOTYOURCLASS');
+
+    const read = await app.inject({
+      method: 'GET',
+      url: `/api/v1/threads/${thread}`,
+      headers: { cookie: w.otherTeacher.cookie },
+    });
+    expect(read.statusCode).toBe(404);
+    expect(read.body).not.toContain('NOTYOURCLASS');
+
+    expect((await moderate(w.otherTeacher.cookie, thread, 'hide')).statusCode).toBe(404);
+  });
+
+  it('KEEPS THE MODERATION QUEUE AWAY FROM LEARNERS AND OTHER CLASSES', async () => {
+    const w = await forums();
+    const thread = await makeThread(w.learner.cookie, w.klass, 'REPORTEDSUBJECT');
+    const flagged = await app.inject({
+      method: 'POST',
+      url: '/api/v1/discussions/flag',
+      headers: { ...writeHeaders, cookie: w.classmate.cookie },
+      payload: { entityType: 'thread', entityId: thread, reason: 'This is unkind.' },
+    });
+    expect(flagged.statusCode, flagged.body).toBe(202);
+
+    // The teacher of the class sees it. So does the person who filed it, and
+    // that is deliberate rather than a leak: `content_flags_select` admits
+    // `reporter_id = app_current_actor()` and `contentFlagPolicy` allows
+    // `content_flag.reporter`, both so that somebody who reports a post can see
+    // what became of their report. A reporting mechanism that swallows reports
+    // silently is one children stop using.
+    const asTeacher = await app.inject({
+      method: 'GET',
+      url: '/api/v1/moderation/flags',
+      headers: { cookie: w.teacher.cookie },
+    });
+    expect(asTeacher.statusCode).toBe(200);
+    expect(asTeacher.json<{ items: unknown[] }>().items.length).toBeGreaterThan(0);
+
+    const asReporter = await app.inject({
+      method: 'GET',
+      url: '/api/v1/moderation/flags',
+      headers: { cookie: w.classmate.cookie },
+    });
+    expect(asReporter.statusCode).toBe(200);
+    expect(asReporter.json<{ items: unknown[] }>().items).toHaveLength(1);
+
+    // Everybody else sees nothing — the REPORTED AUTHOR above all, who must
+    // never learn that a report exists or who filed it.
+    for (const [who, session] of [
+      ['author', w.learner],
+      ['another class’s teacher', w.otherTeacher],
+      ['another school', w.stranger],
+    ] as const) {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/api/v1/moderation/flags',
+        headers: { cookie: session.cookie },
+      });
+      const leaked =
+        response.statusCode === 200 &&
+        response.json<{ items: unknown[] }>().items.length > 0;
+      expect(leaked, `${who} saw the queue`).toBe(false);
+      expect(response.body, `${who} saw the subject`).not.toContain(w.classmate.id);
+    }
+  });
+
+  it('REFUSES THE ANSWERER ACCEPTING THEIR OWN ANSWER', async () => {
+    const w = await forums();
+    const thread = await makeThread(w.learner.cookie, w.klass);
+    const reply = await makeReply(w.classmate.cookie, thread);
+
+    const selfAwarded = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/replies/${reply}/accept`,
+      headers: { ...writeHeaders, cookie: w.classmate.cookie },
+      payload: {},
+    });
+    expect(selfAwarded.statusCode).not.toBe(200);
+
+    // The person who asked may, and that is what makes the refusal above a
+    // permission rather than a broken endpoint.
+    const byQuestioner = await app.inject({
+      method: 'PATCH',
+      url: `/api/v1/replies/${reply}/accept`,
+      headers: { ...writeHeaders, cookie: w.learner.cookie },
+      payload: {},
+    });
+    expect(byQuestioner.statusCode, byQuestioner.body).toBe(200);
+  });
+});

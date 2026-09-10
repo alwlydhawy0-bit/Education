@@ -379,6 +379,79 @@ reason alone.
   but nothing records that it happened, so a uniqueness failure would present as
   one learner's page mysteriously not loading (RISK-PF-11).
 
+## Added in Task 014 — class discussion forums and moderation
+
+**This task introduced the first place on the platform where one child's writing
+is put in front of another child.** Every risk below is about that, and none of
+them is a bug: they are the limits of what a first-pass filter and a small
+teacher's queue can do.
+
+- **The content filter is a first-pass trigger for human review, not a
+  content-safety system, and calling it one would be the actual risk.** It
+  matches a term list after normalization. It does not understand context,
+  sarcasm, coded language, in-group slang, a photo described in words, or
+  bullying conducted entirely in polite sentences — which is most of it. What it
+  catches is the loud, obvious end, and what it produces is a queue for an adult
+  to read. Section 2B asked for exactly that and it delivers exactly that
+  (RISK-COM-01).
+- **Partial letter spacing evades it.** `f u c k` is caught, because the
+  separator run is collapsed; `1d1 0t` — a confusable substitution with ONE
+  interior space in the middle of the word — is not, because it is neither a
+  full letter-by-letter run nor a contiguous word. Tightening the pattern to
+  catch it starts flagging ordinary hyphenated and abbreviated writing, and a
+  filter that flags a child for writing `co - operate` is one that trains a
+  class to ignore it. The miss is asserted as current behaviour in
+  `tests/unit/community-content-filter.test.ts` with the reasoning attached,
+  rather than left for somebody to discover as a surprise (RISK-COM-02).
+- **The term list is short, English-and-Arabic, and maintained by nobody in
+  particular.** There is no process for reviewing it, no owner, and no schedule.
+  A word list that is not maintained decays into a list of what somebody thought
+  of on one afternoon in 2026 (RISK-COM-03).
+- **A reported post stays visible until a human looks at it.** Reporting files a
+  flag; it does not hide anything. That is deliberate — auto-hiding on report
+  hands every learner a mute button for their classmates, which is a worse
+  weapon than the one it defends against — but it means the interval between a
+  report and a teacher opening the queue is an interval in which the reported
+  post is being read (RISK-COM-04).
+- **Nothing notifies a teacher that the queue has something in it.** There is no
+  email, no push, no digest, no unread count anywhere in the product. A teacher
+  who does not open `/moderation/flags` does not learn that a child reported
+  something, and the whole reporting path is worth what that habit is worth.
+  This is the single most consequential gap in the domain and it is a product
+  gap rather than a security one (RISK-COM-05).
+- **Deleting a thread deletes every reply in it, including other children's.**
+  The cascade is on the foreign key. An author who deletes their question takes
+  the answers with it, and the people who wrote them are neither warned nor
+  asked. Soft-deleting the thread and keeping the subtree readable would be the
+  kinder design; it was not built (RISK-COM-06).
+- **`app_forum_display_name` returns the account display name a school
+  registered, and a learner cannot choose a forum name.** Portfolios let a
+  learner write their own title precisely because registration data is not
+  something a child composed for an audience. A forum has no such escape: the
+  name their school typed is the name their class sees (RISK-COM-07).
+- **A moderator's reason is not recorded.** `MODERATION_ACTION_TAKEN` names who,
+  what and which post, and there is no field for why. A child whose post was
+  hidden can see that it was hidden and cannot be told what for, and a
+  disagreement about a moderation decision has no written basis to appeal
+  against (RISK-COM-08).
+- **`content_flag:review`, `content_flag:read` and `discussion_reply:read` are
+  declared in the vocabulary and called nowhere.** The policy decides all three
+  correctly. Flag resolution happens today under the post's `moderate`
+  decision plus the `content_flags_review` RLS policy — both present, both
+  asking the same question — so this is a naming gap rather than a missing gate,
+  but it means the audit trail records the moderation action and not a separate
+  flag-review action. `tests/architecture/community-boundaries.test.ts` asserts
+  the uncalled set is exactly these three, so it cannot quietly grow
+  (RISK-COM-09).
+- **Nothing rate-limits reading.** `forum.post` caps writes at 60 per 15
+  minutes and `moderation.report` caps reports at 20, but a learner in a class
+  can poll a thread as fast as they like. Every read is authorized, so this is
+  a load question rather than a disclosure one (RISK-COM-10).
+- **Eight levels of nesting is a number, not a finding.** It was chosen because
+  a deeper tree is unreadable on a phone and because an unbounded recursion is a
+  denial-of-service on the guard's recursive query. Nobody has tested it against
+  a real class conversation (RISK-COM-11).
+
 ## Added in Task 012 — the AI tutor
 
 - **No guardian may read a child's tutor conversations, and that is an OPEN

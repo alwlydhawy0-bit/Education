@@ -291,12 +291,62 @@ sanitizer (no spread, no `delete`, no field whose name looks like an
 identifier), that the public resolver never runs `withActor`, and that the
 public queries carry their own key check as well as relying on RLS.
 
+### `community` — **[BUILT]** (Task 014)
+
+Owns `discussion_threads`, `discussion_replies` and `content_flags`. **The only
+domain where one user's writing is served to another user**, which is the fact
+that shapes everything about it — every other domain decides what a person
+discloses, and this one also decides what a child is exposed to.
+
+Its boundary is a CLASS, not an organization, and it is one boundary rather than
+a hierarchy of widening ones. `app_actor_in_class_forum(class_id)` resolves to a
+single fact — a member or teacher of this active class — and there is no
+organization-wide read anywhere in the domain, no cross-class visibility, and no
+public path at all. An administrator's reach stops at their own school's
+classes; a teacher moderates the classes they actually teach.
+
+It reads `class_memberships`, `classes` and `teacher_assignments` only through
+SQL helpers the RLS policies also call — `app_actor_in_class_forum`,
+`app_actor_moderates_class`, `app_actor_owns_thread`, `app_class_organization` —
+so the policy engine and the database answer from one definition.
+
+**It does not read `users`.** A post's author name comes from
+`app_forum_display_name(user_id, class_id)`, a `SECURITY DEFINER` function
+bounded twice: the caller must be in the room and so must the person being
+named. This is the third domain to meet the same lesson — VULN-054 was a join to
+`lessons`, VULN-055 a join to `users` — and the rule is now enforced rather than
+remembered: `tests/architecture/community-boundaries.test.ts` fails on `JOIN
+users` anywhere in the module.
+
+It imports `checkMarkdown` from `platform/security/markdown-safety.ts`. That
+file was written for Task 010 and lived under `modules/notebook/` until this
+task needed it; importing it from there would have violated dependency rule 3,
+so **it moved to `platform/`** rather than being copied or reached across for.
+It was always a platform primitive and the notebook module was only its first
+caller.
+
+It writes to no other domain's tables. `content_flags` rows disappear only with
+the thread they concern, through the foreign key, or with the reply, through
+`content_flag_reply_cleanup` — a `SECURITY DEFINER` trigger, because as
+invoker-rights it made a reported reply permanently undeletable (VULN-057).
+
+The reply tree is held by a **composite foreign key** rather than a check:
+`(parent_reply_id, thread_id)` references `(id, thread_id)`, so a reply whose
+parent lives in another class's thread is refused by the schema. Every policy on
+the platform would admit that row.
+
+`tests/architecture/community-boundaries.test.ts` also enforces that the content
+filter is pure and imports nothing, that every content-bearing write is screened
+and re-screened on edit, that `createFlag` carries no `RETURNING` clause
+(VULN-058), and that an author's edit statement names exactly the columns an
+author owns.
+
 ## Planned domains — **[DESIGNED]**, boundaries only
 
 `learning-paths` · `activities` ·
 `assessments` · `mastery` · `experiments` · `files` ·
 `ai-gateway` · `ai-assistant` ·
-`recommendations` · `community` · `moderation` · `notifications` · `analytics` ·
+`recommendations` · `notifications` · `analytics` ·
 `administration`.
 
 None exist. They are listed so their boundaries are considered before code is

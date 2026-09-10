@@ -118,7 +118,12 @@ export async function auditIndexes(client: pg.ClientBase): Promise<IndexFinding[
     cols: string;
   }>(UNINDEXED_CASCADES);
   for (const row of cascades) {
-    const action = row.action === 'c' ? 'ON DELETE CASCADE' : row.action === 'n' ? 'ON DELETE SET NULL' : 'ON DELETE SET DEFAULT';
+    const action =
+      row.action === 'c'
+        ? 'ON DELETE CASCADE'
+        : row.action === 'n'
+          ? 'ON DELETE SET NULL'
+          : 'ON DELETE SET DEFAULT';
     findings.push({
       rule: 'I1',
       subject: `${row.tbl}.${row.conname}`,

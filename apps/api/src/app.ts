@@ -235,7 +235,9 @@ export async function buildApp(options: BuildAppOptions): Promise<BuiltApp> {
     // `connectRateLimitRedis` for what happens without it.
     const connected = await connectRateLimitRedis(rateLimitRedis);
     if (!connected) {
-      logger.warn('the shared rate-limit store was unreachable at boot; counting locally until it returns');
+      logger.warn(
+        'the shared rate-limit store was unreachable at boot; counting locally until it returns',
+      );
     }
     app.addHook('onClose', async () => {
       try {

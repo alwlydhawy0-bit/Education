@@ -102,11 +102,7 @@ export interface RateLimitStoreDeps {
 
 /** The subset of a Redis client this store uses. Kept tiny so tests can fake it. */
 export interface RateLimitRedis {
-  eval(
-    script: string,
-    numKeys: number,
-    ...args: readonly (string | number)[]
-  ): Promise<unknown>;
+  eval(script: string, numKeys: number, ...args: readonly (string | number)[]): Promise<unknown>;
   quit(): Promise<unknown>;
 }
 
@@ -223,7 +219,13 @@ function parseWindowMs(window: unknown): number {
       const amount = Number(match[1]);
       const unit = match[2];
       const scale =
-        unit === 'millisecond' ? 1 : unit === 'second' ? 1_000 : unit === 'minute' ? 60_000 : 3_600_000;
+        unit === 'millisecond'
+          ? 1
+          : unit === 'second'
+            ? 1_000
+            : unit === 'minute'
+              ? 60_000
+              : 3_600_000;
       return amount * scale;
     }
   }

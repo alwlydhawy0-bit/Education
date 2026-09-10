@@ -97,10 +97,7 @@ export function parseEnvFile(contents: string): Record<string, string> {
  */
 const PLACEHOLDERS = ['CHANGE_ME', 'REPLACE_ME', 'your-', 'xxxxx', '<', 'TODO'];
 
-export function checkEnv(
-  env: Record<string, string>,
-  overrideEnvironment?: string,
-): EnvProblem[] {
+export function checkEnv(env: Record<string, string>, overrideEnvironment?: string): EnvProblem[] {
   const problems: EnvProblem[] = [];
   const candidate = { ...env };
   if (overrideEnvironment) candidate['NODE_ENV'] = overrideEnvironment;

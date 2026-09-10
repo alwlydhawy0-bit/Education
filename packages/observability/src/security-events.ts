@@ -553,9 +553,7 @@ export const SecurityEventType = {
  *
  * Move one into `SecurityEventType` in the same change that adds its emitter.
  */
-export const RESERVED_SECURITY_EVENT_TYPES = [
-  'file.activity.unusual',
-] as const;
+export const RESERVED_SECURITY_EVENT_TYPES = ['file.activity.unusual'] as const;
 
 export type SecurityEventType = (typeof SecurityEventType)[keyof typeof SecurityEventType];
 

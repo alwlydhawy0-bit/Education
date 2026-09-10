@@ -329,7 +329,7 @@ export const RATE_LIMIT_POLICIES = {
     name: 'portfolio.public',
     max: 60,
     timeWindow: '15 minutes',
-    rationale: 'Slug enumeration against an unauthenticated route serving minors\' pages.',
+    rationale: "Slug enumeration against an unauthenticated route serving minors' pages.",
   },
 
   /** Creating or editing a project. Row-count abuse, as with artifacts. */
@@ -402,7 +402,7 @@ export const RATE_LIMIT_POLICIES = {
     name: 'analytics.export',
     max: 10,
     timeWindow: '1 hour',
-    rationale: 'Bulk extraction of a school\'s data through a compromised staff session.',
+    rationale: "Bulk extraction of a school's data through a compromised staff session.",
   },
 
   moderationAction: {
@@ -561,7 +561,11 @@ export async function registerRateLimiting(
     // development, a test, or a single instance that has accepted the trade.
     logger.warn(
       'rate limiting uses an in-process store; limits are per-instance and are NOT shared across replicas',
-      { requirement: 'shared store (Redis or equivalent)', risk: 'RISK-RATE-01', hardenedEnvironment },
+      {
+        requirement: 'shared store (Redis or equivalent)',
+        risk: 'RISK-RATE-01',
+        hardenedEnvironment,
+      },
     );
   } else {
     logger.info('rate limiting uses a shared store; configured limits are fleet-wide');

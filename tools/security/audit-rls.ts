@@ -151,7 +151,8 @@ const COMMAND_CODE: Readonly<Record<string, string>> = {
 export async function auditRls(client: pg.ClientBase): Promise<Finding[]> {
   const findings: Finding[] = [];
 
-  const { rows: tables } = await client.query<TableRow>(`
+  const { rows: tables } = await client.query<TableRow>(
+    `
     SELECT c.relname,
            c.relrowsecurity,
            c.relforcerowsecurity,
@@ -172,7 +173,9 @@ export async function auditRls(client: pg.ClientBase): Promise<Finding[]> {
       JOIN pg_namespace n ON n.oid = c.relnamespace
      WHERE n.nspname = 'public' AND c.relkind = 'r'
      ORDER BY c.relname
-  `, [APP_ROLE]);
+  `,
+    [APP_ROLE],
+  );
 
   const { rows: policies } = await client.query<PolicyRow>(`
     SELECT c.relname,
@@ -258,7 +261,8 @@ export async function auditRls(client: pg.ClientBase): Promise<Finding[]> {
     findings.push({
       rule: 'R3',
       subject: key,
-      detail: 'policy is unconditionally true for the application role — RLS switched on and enforcing nothing',
+      detail:
+        'policy is unconditionally true for the application role — RLS switched on and enforcing nothing',
     });
   }
 

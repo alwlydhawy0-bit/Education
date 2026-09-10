@@ -24,10 +24,12 @@ import {
   createQuestion,
   createUnit,
   createUser,
+  grantRole,
   linkGuardian,
   recordProgress,
   truncateAll,
 } from '../setup/fixtures.ts';
+import { TEST_SUPERUSER_URL } from '../setup/env.ts';
 import { hashPassword } from '../../apps/api/src/platform/security/passwords.ts';
 
 /**
@@ -3036,5 +3038,230 @@ describe('class discussion forums, with RLS disabled', () => {
       payload: {},
     });
     expect(byQuestioner.statusCode, byQuestioner.body).toBe(200);
+  });
+});
+
+describe('institutional analytics, with RLS disabled', () => {
+  /**
+   * THE BLOCK THAT ANSWERS "WHICH GATE DID THE WORK?" FOR THE SCHOOL BOUNDARY.
+   *
+   * Section 2C's headline requirement is that an administrator of school A must
+   * NEVER reach school B's metrics, and this domain states that requirement in
+   * three places: an RLS policy on each table, a tenant predicate inside each
+   * repository query, and the policy engine's `actorIsOrgAdmin`.
+   *
+   * Running against `edu_app_norls` removes the first of the three. Every row
+   * of every school is visible to the database client, so anything refused
+   * below was refused by the application — which is exactly the property Task
+   * 013 discovered it did NOT have on its one anonymous route (VULN-056), and
+   * the reason every query in this domain carries its own predicate.
+   */
+  async function seedAndLogin(
+    email: string,
+    roles: readonly string[] | undefined,
+    organizationId: string | null,
+  ): Promise<{ id: string; cookie: string }> {
+    const user = await createUser({
+      email,
+      ...(roles ? { roles } : {}),
+      organizationId,
+      passwordHash: await hashPassword(PASSWORD),
+    });
+    const loggedIn = await app.inject({
+      method: 'POST',
+      url: '/api/v1/auth/login',
+      headers: writeHeaders,
+      payload: { email, password: PASSWORD },
+    });
+    expect(loggedIn.statusCode).toBe(204);
+    return {
+      id: user.id,
+      cookie: `edu_session=${sessionCookieFrom(loggedIn.headers['set-cookie'])}`,
+    };
+  }
+
+  /** Two schools, each with real metric rows in the table. */
+  async function schools() {
+    const orgA = await createOrganization('NoRLS Analytics A');
+    const orgB = await createOrganization('NoRLS Analytics B');
+
+    const adminA = await seedAndLogin('nrls-an-admin-a@test.local', ['admin'], orgA);
+    const adminB = await seedAndLogin('nrls-an-admin-b@test.local', ['admin'], orgB);
+    const teacherA = await seedAndLogin('nrls-an-teacher-a@test.local', ['teacher'], orgA);
+    const learnerA = await seedAndLogin('nrls-an-learner-a@test.local', undefined, orgA);
+    await grantRole(adminA.id, 'admin', 'organization', orgA);
+    await grantRole(adminB.id, 'admin', 'organization', orgB);
+
+    const classA = await createClass(orgA, 'NA1');
+    const classB = await createClass(orgB, 'NB1');
+    await addClassMember(classA, learnerA.id);
+    await assignTeacher(teacherA.id, classA);
+
+    const curriculum = await createCurriculum({
+      organizationId: null,
+      code: 'nrls_an',
+      status: 'published',
+    });
+    const level = await createEducationLevel('nrls_an_lvl');
+    const course = await createCourse({
+      organizationId: null,
+      curriculumId: curriculum,
+      levelId: level,
+      status: 'published',
+    });
+    const unit = await createUnit({ courseId: course, status: 'published' });
+    const lesson = await createLesson({
+      unitId: unit,
+      status: 'published',
+      contentBody: 'Numbers.',
+    });
+    await assignCourseToClass({ classId: classA, courseId: course });
+    await assignCourseToClass({ classId: classB, courseId: course });
+    await recordProgress({ userId: learnerA.id, lessonId: lesson, status: 'completed' });
+
+    // THE REFRESH RUNS AS THE OWNER, which is what a scheduled job is — and it
+    // has to, because `edu_app_norls` has no EXECUTE on these functions. That
+    // is not an inconvenience to route around: the refresh being owner-only is
+    // one of this domain's controls, and a suite that granted itself EXECUTE to
+    // make setup easier would be testing a system nobody ships.
+    //
+    // Both schools get rows, so "school B's numbers" genuinely exist to leak.
+    const owner = new pg.Client({ connectionString: TEST_SUPERUSER_URL });
+    await owner.connect();
+    try {
+      for (const org of [orgA, orgB]) {
+        await owner.query('SELECT app_analytics_refresh_daily($1, CURRENT_DATE)', [org]);
+        await owner.query('SELECT app_analytics_refresh_courses($1)', [org]);
+      }
+    } finally {
+      await owner.end();
+    }
+
+    return { orgA, orgB, classA, classB, adminA, adminB, teacherA, learnerA };
+  }
+
+  it('THE OTHER SCHOOL’S ROWS REALLY ARE VISIBLE TO THE CLIENT', async () => {
+    // The precondition, asserted rather than assumed. If school B had no rows,
+    // or if this role were not really bypassing RLS, every refusal below would
+    // be vacuous — which is how Task 013's round 9 wasted an afternoon.
+    const w = await schools();
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      const { rows } = await raw.query<{ n: string }>(
+        'SELECT count(*) AS n FROM analytics_daily_school_metrics WHERE organization_id = $1',
+        [w.orgB],
+      );
+      expect(Number(rows[0]?.n)).toBeGreaterThan(0);
+    } finally {
+      await raw.end();
+    }
+  });
+
+  it('REFUSES SCHOOL B TO SCHOOL A’S ADMINISTRATOR, with every row readable', async () => {
+    const w = await schools();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/analytics/school/overview',
+      headers: { cookie: w.adminA.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    // The repository's own `organization_id = app_actor_organization()` is what
+    // keeps school B out here. Without it the query would return both schools'
+    // days interleaved, and the response schema would happily render them.
+    expect(response.body).not.toContain(w.orgB);
+    expect(response.json<{ days: unknown[] }>().days.length).toBeGreaterThan(0);
+  });
+
+  it('REFUSES SCHOOL B’S CLASS ROW TO SCHOOL A’S ADMINISTRATOR', async () => {
+    const w = await schools();
+    const list = await app.inject({
+      method: 'GET',
+      url: '/api/v1/analytics/courses/performance',
+      headers: { cookie: w.adminA.cookie },
+    });
+    const classIds = list.json<{ items: { classId: string }[] }>().items.map((i) => i.classId);
+    expect(classIds).toContain(w.classA);
+    expect(classIds).not.toContain(w.classB);
+
+    const named = await app.inject({
+      method: 'GET',
+      url: `/api/v1/analytics/courses/performance?classId=${w.classB}`,
+      headers: { cookie: w.adminA.cookie },
+    });
+    expect(named.statusCode).toBe(404);
+  });
+
+  it('REFUSES THE EXECUTIVE DASHBOARD TO A TEACHER, with the rows in reach', async () => {
+    const w = await schools();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/analytics/school/overview',
+      headers: { cookie: w.teacherA.cookie },
+    });
+    // Nothing in the database is stopping this: the row is right there and the
+    // client can see it. `analyticsPolicy` is what refuses.
+    expect(response.statusCode).toBe(403);
+    expect(response.body).not.toContain('lessonsCompleted');
+  });
+
+  it('REFUSES A LEARNER EVERY ENDPOINT, with every row visible', async () => {
+    const w = await schools();
+    for (const url of [
+      '/api/v1/analytics/school/overview',
+      '/api/v1/analytics/courses/performance',
+      '/api/v1/analytics/students/at-risk',
+      '/api/v1/analytics/export?dataset=school_overview',
+    ]) {
+      const response = await app.inject({ method: 'GET', url, headers: { cookie: w.learnerA.cookie } });
+      expect([403, 404], `${url} -> ${response.statusCode}`).toContain(response.statusCode);
+    }
+  });
+
+  it('KEEPS THE NAMED AT-RISK LIST FROM AN ADMINISTRATOR', async () => {
+    // The FERPA line, with the database's opinion switched off entirely.
+    // `app_analytics_at_risk` would still return nothing — it authorizes
+    // itself — but the 403 and its explanation come from the policy.
+    const w = await schools();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/analytics/students/at-risk',
+      headers: { cookie: w.adminA.cookie },
+    });
+    expect(response.statusCode).toBe(403);
+    expect(response.body).toContain('teachers');
+  });
+
+  it('EXPORTS ONLY ONE SCHOOL, with both schools’ rows in the table', async () => {
+    const w = await schools();
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/analytics/export?dataset=course_performance',
+      headers: { cookie: w.adminA.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).not.toContain('NB1');
+    expect(response.body).toContain('NA1');
+  });
+
+  it('STILL NEUTRALIZES A CSV FORMULA, which has nothing to do with RLS', async () => {
+    // The one control in this domain that does not depend on a gate at all: the
+    // sanitizer is a pure function, so it holds with the database wide open.
+    const w = await schools();
+    const raw = new pg.Client({ connectionString: NO_RLS_URL });
+    await raw.connect();
+    try {
+      await raw.query('UPDATE classes SET name = $1 WHERE id = $2', ["=HYPERLINK(\"http://x\")", w.classA]);
+    } finally {
+      await raw.end();
+    }
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/v1/analytics/export?dataset=course_performance',
+      headers: { cookie: w.adminA.cookie },
+    });
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('"\'=HYPERLINK');
   });
 });

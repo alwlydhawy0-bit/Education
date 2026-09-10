@@ -54,9 +54,50 @@ the RLS that makes the tenant boundary real.
 | ------------------------------ | ----------------------------- |
 | `pnpm typecheck`               | clean, exit 0                 |
 | `pnpm lint`                    | clean, exit 0                 |
-| `pnpm test` (all six projects) | see §7                        |
+| `pnpm test` (all six projects) | 96 files, 3,406 tests, green  |
 | Defect injection round 14      | see §7                        |
 | Live boot check                | see below                     |
+
+**The live boot check, in full.** Migrations 0032–0033 applied to the
+development database; the API booted as a real process; a session was promoted
+to organization administrator and the endpoints driven over HTTP with a
+browser-shaped origin.
+
+```
+GET /analytics/school/overview                200, one day, masteryIndex null
+GET /analytics/courses/performance            200
+GET /analytics/school/overview?organizationId=<other>   400 — no such field
+GET /analytics/export?dataset=school_overview 200, text/csv
+GET /analytics/students/at-risk (as admin)    403 "available to the teachers of each class"
+GET /analytics/export?dataset=users           400
+```
+
+The export's headers came back exactly as designed —
+`content-type: text/csv; charset=utf-8`, `content-disposition: attachment;
+filename="school-overview.csv"`, `x-content-type-options: nosniff`,
+`cache-control: no-store` — and the file itself shows the null mastery score as
+an **empty cell**:
+
+```
+"metric_date","total_active_students",...,"average_mastery_score","ai_tutor_sessions"
+"2026-09-10","0",...,"","0"
+```
+
+Not `null`, not `0`. That is the property VULN-059 is about, verified at the far
+end of the real pipeline rather than in a unit test.
+
+**The audit events landed and carry no numbers**, which is the other thing only a
+live boot proves:
+
+```
+analytics.report_read  detail: {"grain":"school","days":1}
+analytics.report_read  detail: {"grain":"class","rows":0}
+analytics.exported     detail: {"dataset":"school_overview","format":"csv","rows":1}
+```
+
+A grain and a row count. No metric value anywhere — an audit trail containing the
+figures would be a second copy of the dashboard in a place with different access
+rules. Reading and exporting are distinct event types, as §3 requires.
 
 **Verified with each gate removed, separately.**
 `tests/integration/rls-analytics.test.ts` runs 27 statements as `edu_app` with
@@ -235,7 +276,16 @@ docs/security/limitations.md                   +~75  RISK-AN-01…12
 
 ## 7. TEST RESULTS
 
-PLACEHOLDER_GATE
+**The full gate, on the clean tree, after everything below.**
+
+```
+pnpm typecheck   exit 0
+pnpm lint        exit 0
+pnpm test        96 files, 3,406 tests, all passing  (922s)
+```
+
+All six vitest projects — unit, architecture, web, integration, security,
+evaluation. Nothing skipped, nothing quarantined.
 
 **This task's suites**
 
@@ -248,7 +298,56 @@ PLACEHOLDER_GATE
 | `tests/security/analytics.test.ts` | 35 | nothing — both gates, real HTTP |
 | `tests/security/layered-defense.test.ts` (analytics) | 8 | RLS |
 
-PLACEHOLDER_INJECTION
+**Defect injection round 14 — 16 injected, 16 caught.**
+
+| # | Defect | Caught by |
+| - | ------ | --------- |
+| F1 | The daily query drops its own tenant predicate | arch, **then layered** |
+| F2 | The course query drops its tenant predicate | arch, layered |
+| F3 | `classResource` loses the class-to-school conjunct | sec, layered |
+| F4 | The null-organization guard is dropped | sec |
+| F5 | An administrator is allowed the named at-risk list | unit, arch, sec, layered |
+| F6 | A teacher is admitted to the executive dashboard | unit |
+| F7 | A class-grained refusal reveals rather than hides | unit, sec, layered |
+| F8 | `actorTeachesClass` tested for truthiness, so null counts | unit |
+| F9 | The whitespace formula triggers are dropped | unit, arch |
+| F10 | The cell is quoted before it is neutralized | unit, arch, sec, layered |
+| F11 | Every string is exempted from neutralization | unit, arch, sec, layered |
+| F12 | `at_risk` becomes an exportable dataset | arch, sec |
+| F13 | The query schemas stop being strict | sec, layered |
+| F14 | The unnamed course list stops being authorized | sec, layered |
+| F15 | The export is decided at the school grain regardless of dataset | sec |
+| F16 | The mastery scale reverts to scoring `attempted` as zero | rls, sec |
+
+**Two results taught something, and both are recorded in the code.**
+
+**F1 was caught only by the architecture suite reading the source**, and that
+exposed a vacuous assertion in the layered-defence block. It checked that school
+B's id was absent from the overview response — but **the overview response
+deliberately carries no organization id at all**, because the caller has exactly
+one school and already knows which. The string could never appear whether the
+tenant predicate was present or not.
+
+The fix asserts the observable CONSEQUENCE instead. The daily table is one row
+per school per day, so two schools merged means two rows for today; uniqueness of
+the date is what the boundary holding looks like from outside. *When a response
+is deliberately stripped of the field a leak would name, the leak has to be
+detected by its cardinality.* F1 re-verified as caught by arch **and** layered.
+
+**F6 is inert on the real path, and that is itself a defence worth naming.**
+Admitting a teacher to the executive dashboard changed nothing over HTTP,
+because `schoolResource` sets `actorTeachesClass: null` at the school grain —
+the resource structurally cannot carry a teaching claim there, so the widened
+branch has nothing to match. The unit suite caught it by constructing the
+resource directly. Reporting it as an escape would have been a false alarm
+pointing at a hole that is not there.
+
+**The baseline check earned its keep again.** Round 14 refused to start until
+the clean tree was green, which it was — but the same check caught a stopped
+PostgreSQL in round 13 and would have reported sixteen meaningless catches
+without it.
+
+
 
 ---
 

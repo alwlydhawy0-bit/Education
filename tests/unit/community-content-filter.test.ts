@@ -89,6 +89,33 @@ describe('payload tricks', () => {
     expect(flagged(`you are an ${text}`)).toBe(true);
   });
 
+  /**
+   * DEFECT INJECTION ROUND 13, F2 — THE ONE THAT ESCAPED.
+   *
+   * Neutering the `{2,}` repeat collapse in `normalizeForFilter` left every
+   * test in this file passing, because the second aggressive reading in
+   * `screenContent` squashes EVERY run to a single letter and that catches
+   * `idiiiiot` on its own. The table above is entirely terms with no doubled
+   * letters, so the two readings agreed on all of it.
+   *
+   * They disagree exactly where a flagged term contains a double letter of its
+   * own. `assshole` needs the run reduced to TWO — `asshole` — and the
+   * aggressive reading reduces it to one, giving `ashole`, which is not a term.
+   * So the `{2,}` collapse is the only thing catching a padded `assshole`, and
+   * nothing was asserting it.
+   *
+   * That is the whole argument for two readings rather than one, and it now has
+   * a test instead of a comment.
+   */
+  it.each([
+    ['assshole', 'a doubled letter padded to three'],
+    ['asssssshole', 'padded further'],
+    ['shittty', 'the same in a different term'],
+    ['a\u200bsssshole', 'padded and hidden behind an invisible character'],
+  ])('catches %s (%s)', (text) => {
+    expect(flagged(`you are an ${text}`)).toBe(true);
+  });
+
   it.each([
     [ZWSP, 'zero-width space'],
     [ZWJ, 'zero-width joiner'],

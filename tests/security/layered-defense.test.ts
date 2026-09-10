@@ -3166,11 +3166,31 @@ describe('institutional analytics, with RLS disabled', () => {
       headers: { cookie: w.adminA.cookie },
     });
     expect(response.statusCode).toBe(200);
-    // The repository's own `organization_id = app_actor_organization()` is what
-    // keeps school B out here. Without it the query would return both schools'
-    // days interleaved, and the response schema would happily render them.
-    expect(response.body).not.toContain(w.orgB);
-    expect(response.json<{ days: unknown[] }>().days.length).toBeGreaterThan(0);
+    const days = response.json<{ days: { metricDate: string }[] }>().days;
+    expect(days.length).toBeGreaterThan(0);
+
+    /**
+     * ONE ROW PER DATE, AND THAT IS THE ONLY ASSERTION THAT WORKS HERE.
+     *
+     * Defect injection round 14, F1, exposed the first version of this test as
+     * vacuous. It asserted `body).not.toContain(w.orgB)` — but the overview
+     * response deliberately carries NO organization id at all (the caller has
+     * exactly one school and already knows which), so the string could never
+     * appear whether the tenant predicate was present or not. Dropping the
+     * predicate was caught only by the architecture suite reading the source.
+     *
+     * With both schools' rows merged there would be TWO rows for today, because
+     * the daily table is one row per school per day. Uniqueness of the date is
+     * therefore the observable consequence of the tenant boundary holding — and
+     * it is observable precisely because the payload hides the id.
+     *
+     * The general shape: when a response is deliberately stripped of the field
+     * a leak would name, the leak has to be detected by its CARDINALITY.
+     */
+    const dates = days.map((d) => d.metricDate);
+    expect(new Set(dates).size, `duplicate dates means two schools merged: ${dates}`).toBe(
+      dates.length,
+    );
   });
 
   it('REFUSES SCHOOL B’S CLASS ROW TO SCHOOL A’S ADMINISTRATOR', async () => {

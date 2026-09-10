@@ -341,12 +341,62 @@ and re-screened on edit, that `createFlag` carries no `RETURNING` clause
 (VULN-058), and that an author's edit statement names exactly the columns an
 author owns.
 
+### `analytics` — **[BUILT]** (Task 015)
+
+Owns `analytics_daily_school_metrics` and `analytics_course_performance`. **The
+only domain whose tables are DERIVED**, and the only one that reads across
+almost every other domain's data — which makes its boundary a different shape
+from everything else here.
+
+Its boundary is a SCHOOL, and the tenant is taken from the LEARNER'S CLASS
+rather than from the content. That is the domain's central decision:
+`courses.organization_id` is nullable because null means shared curriculum
+studied by many schools, so a tenant derived from the content chain answers null
+for exactly the courses most schools use, and answers the wrong school for a
+course one school happens to own. `classes.organization_id` is NOT NULL, and
+`class_memberships` is the only join in the schema that is both non-null and
+about a person.
+
+**It writes to no other domain's tables, and no request writes to its own.**
+`edu_app` holds `SELECT` and nothing else on both tables. Every number is a fact
+about rows that live elsewhere, and the only correct way to change one is to
+change the underlying fact and re-run a refresh function that runs as the table
+owner. A write path would be a way to make a dashboard say something the
+school's data does not.
+
+It reads `class_memberships`, `classes`, `teacher_assignments`,
+`lesson_progress`, `assessment_attempts`, `objective_evidence`, `ai_messages`
+and the curriculum tree — all through `SECURITY DEFINER` refresh functions with
+policies for the definer role. `ai_conversations` and `ai_messages` gained their
+first definer policies here; 0027 had deliberately removed its definer helper in
+favour of a composite key (VULN-050), so there were none to inherit.
+
+**It does not call `app_objective_mastery`.** That function is actor-dependent —
+it withholds an unreleased result from the learner and their guardian — and a
+stored aggregate has no reader whose entitlements could apply. The refresh calls
+`app_analytics_authoritative_mastery`, the same tally without the withholding
+clause, which is the staff vantage point declared rather than inherited. It is
+safe only because the RLS admits no learner and no guardian at any grain.
+
+The tenant is bound structurally: `analytics_course_performance` references
+`classes (id, organization_id)` through a composite foreign key, so a row whose
+organization disagrees with its class cannot be written by anybody holding
+INSERT. `classes` gained the `UNIQUE (id, organization_id)` that makes it
+possible — the only change this task made to another domain's schema, and it is
+additive.
+
+`tests/architecture/analytics-boundaries.test.ts` enforces that no request
+schema declares an `organizationId`, that every query against an analytics table
+carries its own tenant predicate as well as relying on RLS (VULN-056), that the
+refresh takes no lock stronger than a plain read, and that export and read are
+authorized by the same facts.
+
 ## Planned domains — **[DESIGNED]**, boundaries only
 
 `learning-paths` · `activities` ·
 `assessments` · `mastery` · `experiments` · `files` ·
 `ai-gateway` · `ai-assistant` ·
-`recommendations` · `notifications` · `analytics` ·
+`recommendations` · `notifications` ·
 `administration`.
 
 None exist. They are listed so their boundaries are considered before code is

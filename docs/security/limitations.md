@@ -379,6 +379,71 @@ reason alone.
   but nothing records that it happened, so a uniqueness failure would present as
   one learner's page mysteriously not loading (RISK-PF-11).
 
+## Added in Task 015 — institutional analytics
+
+**This task built the first reports whose subject is other people in bulk.**
+Every risk below follows from that: the numbers are about hundreds of learners
+and are read by adults with power over them.
+
+- **THERE ARE NO DEPARTMENTS ON THIS PLATFORM, so "Department Head" is served as
+  an ordinary teacher.** The task specification asks for department-scoped
+  reporting; the data model has organizations, classes, teacher assignments and
+  eight roles, none of which is a department. Inventing a `departments` table
+  would have been redesigning the project rather than filling a gap in it, so a
+  head of department sees exactly the classes they personally teach — which is
+  narrower than the specification intends. A school that organises by department
+  cannot express that here (RISK-AN-01).
+- **Nothing calls the refresh functions.** `app_analytics_refresh_daily` and
+  `app_analytics_refresh_courses` exist, are correct and are tested; there is no
+  scheduler, no cron entry and no job runner on this platform. Until something
+  invokes them the tables stay empty and every endpoint honestly returns nothing.
+  This is the single largest gap in the domain and it is a deployment gap rather
+  than a security one (RISK-AN-02).
+- **The day boundary is UTC.** `timestamptz::date` at the server default. A
+  school in UTC+8 has its school day split across two metric rows; a school in
+  UTC-5 sees an evening's work land on tomorrow. Nothing here reads a school's
+  timezone because nothing on this platform records one (RISK-AN-03).
+- **`total_active_teachers` counts only teachers who RELEASED A RESULT that
+  day.** It is the one teacher action this platform timestamps against a
+  teacher. A teacher who spent the day writing lessons, moderating a forum or
+  reading dashboards counts as inactive, so the number is a floor rather than a
+  measure and a school reading it as "staff engagement" will be misled
+  (RISK-AN-04).
+- **The at-risk list cannot be exported, deliberately.** A CSV of struggling
+  minors is the artefact that gets forwarded, left on a laptop and opened by
+  people the school never authorized. A teacher can read it on screen, bounded
+  by a session. Somebody who genuinely needs it in a spreadsheet cannot have it,
+  and will eventually ask why (RISK-AN-05).
+- **A school with nothing assessed shows a null mastery index rather than a
+  number.** That is the correct answer — see VULN-059 for what the alternative
+  did — but a dashboard has to render it, and "no data yet" is harder to draw
+  than a zero. A frontend that coerces it will reintroduce the defect at the
+  presentation layer, where no test on this platform can see it (RISK-AN-06).
+- **The mastery scale is a reporting convenience and not a grade.** 0 / 50 / 100
+  over graded objectives. Nobody scored 50% on anything, and the number must
+  never be shown to a learner as if they had — which is one of several reasons
+  learners are banned from these tables (RISK-AN-07).
+- **The metrics are computed from the STAFF vantage point**, so they include
+  results a teacher has not released to the learner. That is the only coherent
+  choice for a stored aggregate, which has no reader whose entitlements could
+  apply — and it is safe only for as long as no learner or guardian can read any
+  row. Widening the RLS on either table, at any grain, turns the mastery index
+  into a way of announcing an unreleased mark (RISK-AN-08).
+- **`analytics.report_read` is the only read this platform logs, and it will be
+  the noisiest event in the system if a dashboard ever polls.** The rate limit
+  bounds it at 120 per fifteen minutes per actor, which is 480 events an hour
+  from one enthusiastic tab (RISK-AN-09).
+- **The export assembles the whole file in memory before sending a byte**,
+  capped at 200 rows. A school with more class-course pairs than that gets a
+  truncated report with no indication that it was truncated (RISK-AN-10).
+- **`completion_rate_pct` divides by published lessons at refresh time.**
+  Publishing a new unit makes every class's completion rate fall, which is
+  arithmetically correct and will read to a head teacher as a sudden decline
+  (RISK-AN-11).
+- **Nothing detects that a refresh has stopped running.** A stale table is
+  indistinguishable from a quiet week: the numbers simply stop changing, and
+  `updated_at` is on the row rather than surfaced in any response (RISK-AN-12).
+
 ## Added in Task 014 — class discussion forums and moderation
 
 **This task introduced the first place on the platform where one child's writing

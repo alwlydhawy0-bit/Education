@@ -1,10 +1,42 @@
-# Deployment — Vercel (web client)
+# Deployment — Vercel
 
 What is deployed, what is verified, and what has repeatedly gone wrong.
 
-**Scope: only `apps/web` is deployed to Vercel. The API is not deployed
-anywhere.** That is a fact about the current state of the project, not an
-oversight of this document, and it has runtime consequences (§6).
+> **THE ROOT DEPLOYMENT NOW BUILDS `edunext/`, NOT `apps/web`.**
+>
+> The root Vercel project was serving a legacy template instead of the EduNext
+> client. `vercel.json` at the repository root now builds `edunext` — the Arabic
+> RTL React app — and `apps/web` is **no longer deployed by anything**. It keeps
+> its own `apps/web/vercel.json` for a deployment whose Root Directory is set to
+> `apps/web`, but no such project exists today.
+>
+> The current root config:
+>
+> ```json
+> {
+>   "framework": null,
+>   "installCommand": "cd edunext && npm ci",
+>   "buildCommand": "cd edunext && npm run build",
+>   "outputDirectory": "edunext/dist"
+> }
+> ```
+>
+> **`installCommand` is the line that matters and the line most likely to be
+> deleted as redundant.** `edunext` is deliberately NOT in `pnpm-workspace.yaml`:
+> it installs with npm and carries its own lockfile. Vercel, left alone, sees
+> `pnpm-lock.yaml` and `packageManager` at the repository root, runs
+> `pnpm install`, installs the workspace, and leaves `edunext/node_modules`
+> EMPTY — so the build fails on its first import, with a message about a missing
+> module rather than about the installer.
+>
+> `framework` stays `null` rather than `"vite"`. Explicitly naming the preset
+> would probably also work now that the build and output are pinned, but `null`
+> is the value that actually fixed the `[UNRESOLVED_ENTRY]` failure below, and
+> the preset buys nothing when both values it would supply are already given.
+>
+> Sixteen fitness tests in `tests/architecture/deployment-config.test.ts` hold
+> every one of these to the repository — including a test that fails when
+> `installCommand` is removed, verified by removing it.
 
 ---
 

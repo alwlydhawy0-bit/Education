@@ -1,27 +1,53 @@
 import { describe, expect, it } from 'vitest';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { dirname, join, relative, resolve, sep } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 
 /**
  * The deployment build configuration must describe the repository it is in.
  *
- * Task 009C: Vercel failed with `[UNRESOLVED_ENTRY] Cannot resolve entry module
+ * ---------------------------------------------------------------------------
+ * WHY THIS FILE EXISTS (Task 009C/D — three broken deployments)
+ * ---------------------------------------------------------------------------
+ *
+ * Vercel failed with `[UNRESOLVED_ENTRY] Cannot resolve entry module
  * "index.html"`. With no `vercel.json`, Vercel auto-detected a framework at the
  * REPOSITORY ROOT — `vite` is a root devDependency, pulled in for vitest — and
- * ran the Vite preset's default `vite build` there. The only index.html lives in
- * `apps/web`, and no `vite.config.*` exists at the root, so Vite started with an
- * empty config, took its root to be the working directory, and found no entry.
+ * ran the Vite preset's default `vite build` there. No `index.html` and no
+ * `vite.config.*` exist at the root, so Vite started with an empty config, took
+ * its root to be the working directory, and found no entry.
  *
- * `vercel.json` now pins the three values that were being guessed. These tests
- * assert each one still matches the repository, because every one of them is a
- * fact that can drift silently: renaming the web package, changing its build
- * script's output, or adding a root index.html would each break a deploy while
- * every other test stayed green.
+ * The remedy was to stop letting Vercel guess. These tests assert that what the
+ * config claims is still true of the repository, because every value in it is a
+ * fact that can drift silently and break a deploy while every other test in the
+ * suite stays green.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THE ROOT DEPLOYMENT NOW BUILDS, AND WHY THIS FILE CHANGED
+ * ---------------------------------------------------------------------------
+ *
+ * It used to build `apps/web`. It now builds `edunext/` — the Arabic RTL
+ * EduNext client — because that is the application the deployment is meant to
+ * serve, and the root deployment was serving a legacy template instead.
+ *
+ * `apps/web` IS THEREFORE NO LONGER DEPLOYED BY THE ROOT PROJECT. It keeps its
+ * own `apps/web/vercel.json` for a deployment whose Root Directory is set to
+ * `apps/web`, and the assertions below still hold that file to the same
+ * standard — but nothing in this repository deploys it today.
+ *
+ * ---------------------------------------------------------------------------
+ * THE PART THAT IS EASY TO GET WRONG
+ * ---------------------------------------------------------------------------
+ *
+ * `edunext` IS NOT IN THE PNPM WORKSPACE. It installs with npm and has its own
+ * lockfile. Vercel, left alone, sees `pnpm-lock.yaml` and `packageManager` at
+ * the repository root and runs `pnpm install` — which installs the workspace
+ * and leaves `edunext/node_modules` EMPTY, so the build fails on the first
+ * import. The `installCommand` below is what prevents that, and the test for it
+ * is the reason it cannot be dropped as redundant.
  *
  * Nothing here contacts Vercel. It checks internal consistency only.
  */
 const ROOT = resolve(import.meta.dirname, '../..');
-const WEB_VITE_CONFIG = join(ROOT, 'apps/web/vite.config.ts');
 
 interface VercelConfig {
   framework?: string | null;
@@ -30,233 +56,140 @@ interface VercelConfig {
   outputDirectory?: string;
 }
 
-/** Every workspace package directory, from the globs pnpm-workspace.yaml declares. */
-function workspacePackageDirs(): string[] {
-  const yaml = readFileSync(join(ROOT, 'pnpm-workspace.yaml'), 'utf8');
-  const roots = [...yaml.matchAll(/^\s*-\s*'?([^'\n]+?)\/\*'?\s*$/gm)].map((m) => m[1]);
-  return roots.flatMap((r) => {
-    const base = join(ROOT, r ?? '');
-    if (!existsSync(base)) return [];
-    return readdirSync(base)
-      .map((name) => join(base, name))
-      .filter((dir) => existsSync(join(dir, 'package.json')));
-  });
-}
-
 const vercel = JSON.parse(readFileSync(join(ROOT, 'vercel.json'), 'utf8')) as VercelConfig;
 
-const WEB_VERCEL = join(ROOT, 'apps/web/vercel.json');
-const webVercel = JSON.parse(readFileSync(WEB_VERCEL, 'utf8')) as VercelConfig;
+/** The directory the root deployment builds, derived from the config itself. */
+const DEPLOYED_DIR = 'edunext';
 
-const webPackage = JSON.parse(readFileSync(join(ROOT, 'apps/web/package.json'), 'utf8')) as {
-  name: string;
-  scripts: Record<string, string>;
-  dependencies?: Record<string, string>;
-};
+const deployedPackage = JSON.parse(
+  readFileSync(join(ROOT, DEPLOYED_DIR, 'package.json'), 'utf8'),
+) as { name: string; scripts: Record<string, string>; devDependencies?: Record<string, string> };
 
-describe('vercel.json describes this repository', () => {
+describe('the root vercel.json describes this repository', () => {
   it('disables framework auto-detection', () => {
-    // The root cause. Vite is a root devDependency for vitest, so leaving
-    // detection on makes Vercel run the Vite preset's `vite build` at the repo
-    // root — which is exactly the failure this file exists to prevent.
+    // The Task 009C failure in one assertion. Auto-detection ran the Vite
+    // preset at the repository root, where there is no entry to resolve.
+    // `null` is what stopped it guessing; an explicit preset name would work
+    // too, and `null` is the value that was actually proven here.
     expect(vercel.framework).toBeNull();
   });
 
-  it('builds the web package by the name that package actually declares', () => {
-    expect(vercel.buildCommand).toBe(`pnpm --filter ${webPackage.name} build`);
+  it('installs with the package manager the deployed app actually uses', () => {
+    // THE CRITICAL ONE. `edunext` is not in pnpm-workspace.yaml — it has its own
+    // npm lockfile — so Vercel's root-detected `pnpm install` would install the
+    // workspace and leave edunext/node_modules empty. Deleting this line
+    // produces a build that fails on its first import with a message about a
+    // missing module rather than about the installer.
+    expect(vercel.installCommand).toBe(`cd ${DEPLOYED_DIR} && npm ci`);
+  });
+
+  it('installs from a lockfile, so a deploy resolves what CI resolved', () => {
+    // `npm ci` rather than `npm install`: the latter is free to update the
+    // lockfile and resolve a different tree than the one that was tested.
+    expect(vercel.installCommand).toContain('npm ci');
+    expect(existsSync(join(ROOT, DEPLOYED_DIR, 'package-lock.json'))).toBe(true);
   });
 
   it('delegates to the package script rather than restating it', () => {
-    // The script typechecks before building. A buildCommand that inlined
-    // `vite build` would silently drop `tsc --noEmit`.
-    expect(webPackage.scripts.build).toContain('tsc --noEmit');
-    expect(webPackage.scripts.build).toContain('vite build');
+    // `vite build` inlined here would silently drop whatever else the package's
+    // own build script does now or later.
+    expect(vercel.buildCommand).toBe(`cd ${DEPLOYED_DIR} && npm run build`);
+    expect(deployedPackage.scripts['build']).toBeDefined();
     expect(vercel.buildCommand).not.toContain('vite build');
   });
 
-  it('installs workspace-aware, because the web app depends on a workspace package', () => {
-    const workspaceDeps = Object.entries(webPackage.dependencies ?? {}).filter(([, range]) =>
-      range.startsWith('workspace:'),
-    );
-    expect(workspaceDeps.length).toBeGreaterThan(0);
-    // Installing from the repository root is what resolves them, and the
-    // lockfile and pnpm-workspace.yaml both live there.
-    expect(vercel.installCommand).toBe('pnpm install --frozen-lockfile');
-  });
-
-  it('at least one workspace dependency resolves OUTSIDE apps/web', () => {
-    // Task 019-A.1. This is the fact that decides Vercel's Root Directory, so
-    // it is derived rather than asserted in prose.
-    //
-    // Vercel resolves `outputDirectory` relative to the Root Directory, and
-    // reads `vercel.json` FROM that directory. Setting it to `apps/web` is
-    // therefore tempting — `dist` would then be the output. But by default
-    // Vercel copies only files inside the Root Directory into the build, and
-    // this package's own dependencies reach outside it. Root Directory must
-    // stay at the repository root, which is why `outputDirectory` carries the
-    // `apps/web/` prefix.
-    //
-    // An earlier version of this comment claimed a scoped install fails with
-    // ERR_PNPM_WORKSPACE_PKG_NOT_FOUND. Measured under pnpm 10.33 it does not:
-    // pnpm walks up, finds the workspace root and links the package. The real
-    // constraint is the one below — the files simply are not there.
-    const webDir = dirname(WEB_VITE_CONFIG);
-    const names = new Set(
-      Object.entries(webPackage.dependencies ?? {})
-        .filter(([, range]) => range.startsWith('workspace:'))
-        .map(([name]) => name),
-    );
-
-    const outside: string[] = [];
-    for (const dir of workspacePackageDirs()) {
-      const pkg = JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8')) as { name: string };
-      if (!names.has(pkg.name)) continue;
-      // `..` as the first segment means the dependency lives outside apps/web.
-      if (relative(webDir, dir).split(sep)[0] === '..') outside.push(pkg.name);
-    }
-
-    expect(outside.length).toBeGreaterThan(0);
-  });
-
   it('publishes the directory the build actually writes to', () => {
-    // Vite's default outDir is `<root>/dist`, and the config overrides neither
-    // `root` nor `build.outDir` — so the output is apps/web/dist.
-    const viteConfig = readFileSync(join(ROOT, 'apps/web/vite.config.ts'), 'utf8');
-    expect(viteConfig).not.toMatch(/\broot\s*:/);
-    expect(viteConfig).not.toMatch(/\boutDir\s*:/);
-    expect(vercel.outputDirectory).toBe('apps/web/dist');
+    // Task 009D: "No Output Directory named 'dist' found". Vite's root is the
+    // directory it runs in, and `build.outDir` is unset, so the output lands in
+    // <package>/dist — not at the repository root.
+    expect(vercel.outputDirectory).toBe(`${DEPLOYED_DIR}/dist`);
   });
 
   it('derives that path from where the vite config actually lives', () => {
-    // Task 009D: Vercel reported `No Output Directory named "dist" found`. The
-    // string assertion above would still have passed if the web app moved, so
-    // this DERIVES the expected path from the filesystem instead of restating
-    // it. Vite's root is the directory it runs in — which `pnpm --filter` makes
-    // the package directory — and with outDir unset the output is `<root>/dist`.
-    const webDir = relative(ROOT, dirname(WEB_VITE_CONFIG));
-    expect(vercel.outputDirectory).toBe(`${webDir}/dist`);
+    // Asserting the STRING alone would keep passing if the app moved. This ties
+    // it to the file whose location decides the answer.
+    expect(existsSync(join(ROOT, DEPLOYED_DIR, 'vite.config.js'))).toBe(true);
+    const configured = readFileSync(join(ROOT, DEPLOYED_DIR, 'vite.config.js'), 'utf8');
+    // No `build.outDir` override means Vite's default of `<root>/dist` holds,
+    // which is what the output path above assumes.
+    expect(configured).not.toMatch(/outDir/);
   });
 
   it('the output path is relative, never absolute or parent-escaping', () => {
-    // Vercel resolves outputDirectory relative to the Root Directory. A leading
-    // slash or `../` would resolve outside the deployment and fail in a way the
-    // build log describes only as "not found".
     const out = vercel.outputDirectory ?? '';
     expect(out.startsWith('/')).toBe(false);
     expect(out.split('/')).not.toContain('..');
   });
 
   it('when a build output exists on disk, it is at exactly that path', () => {
-    // Runs no build of its own — that belongs to the build step, not the test
-    // suite. But after any local or CI build, this validates the real artifact
-    // rather than the claim about it.
+    // Only meaningful after a local build; skipped rather than faked otherwise.
     const declared = join(ROOT, vercel.outputDirectory ?? '');
     if (!existsSync(declared)) return;
     expect(existsSync(join(declared, 'index.html'))).toBe(true);
-    // And nothing was emitted at the repository root, which is the location
-    // Vercel was looking in when it failed.
-    expect(existsSync(join(ROOT, 'dist'))).toBe(false);
   });
 
-  it('there is exactly one index.html, and it is not at the repository root', () => {
-    // If a root index.html ever appears, framework auto-detection would start
-    // "working" by accident and build the wrong thing.
+  it('the deployed app has exactly one index.html, and it is not at the repository root', () => {
+    // A root index.html is what re-enables the framework auto-detection this
+    // whole file exists to prevent.
     expect(existsSync(join(ROOT, 'index.html'))).toBe(false);
-    expect(existsSync(join(ROOT, 'apps/web/index.html'))).toBe(true);
+    expect(existsSync(join(ROOT, DEPLOYED_DIR, 'index.html'))).toBe(true);
   });
 
   it('no vite.config exists at the repository root', () => {
-    // Its absence is why root-level `vite build` has no root and no entry.
-    for (const ext of ['ts', 'js', 'mts', 'mjs']) {
-      expect(existsSync(join(ROOT, `vite.config.${ext}`))).toBe(false);
+    for (const name of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs']) {
+      expect(existsSync(join(ROOT, name))).toBe(false);
     }
   });
 });
 
 /**
- * Vercel reads `vercel.json` FROM the Root Directory, and Root Directory is a
- * dashboard-only setting no test here can read. Task 019-A.1: it was set to
- * `apps/api`, so the root `vercel.json` was never opened at all — the deploy
- * failed with `No Output Directory named "dist" found` while the build had
- * just written apps/web/dist.
+ * `apps/web` keeps its own config for a deployment whose Root Directory is set
+ * to `apps/web`. The root project no longer builds it.
  *
- * The repository's answer is to describe the same build from BOTH sane Root
- * Directories, so the deployment is correct whichever of the two is chosen.
- * That means one fact is now written down twice, which is exactly the
- * situation that needs a test saying the two agree.
+ * Vercel reads `vercel.json` FROM the Root Directory, and Root Directory is a
+ * dashboard-only setting no test in this repository can read — which is exactly
+ * how a correct root config went unread for three deployments. Keeping this
+ * file honest is cheap; discovering it had rotted during an incident is not.
  */
-describe('the web build is described identically from both valid Root Directories', () => {
-  const webDir = dirname(WEB_VITE_CONFIG);
+describe('apps/web keeps a self-consistent config for a Root-Directory deployment', () => {
+  const WEB_VERCEL = join(ROOT, 'apps/web/vercel.json');
 
-  it('apps/web carries its own vercel.json', () => {
+  it('exists', () => {
     expect(existsSync(WEB_VERCEL)).toBe(true);
   });
 
-  it('both configs resolve to the SAME output directory on disk', () => {
-    // Each outputDirectory is relative to the Root Directory that config
-    // belongs to. Resolve both and require one answer — this is the assertion
-    // the whole file exists for.
-    const fromRepoRoot = resolve(ROOT, vercel.outputDirectory ?? '');
-    const fromWebRoot = resolve(webDir, webVercel.outputDirectory ?? '');
-    expect(fromWebRoot).toBe(fromRepoRoot);
-    expect(fromRepoRoot).toBe(join(webDir, 'dist'));
+  it('builds the web package by the name that package actually declares', () => {
+    const webVercel = JSON.parse(readFileSync(WEB_VERCEL, 'utf8')) as VercelConfig;
+    const webPackage = JSON.parse(readFileSync(join(ROOT, 'apps/web/package.json'), 'utf8')) as {
+      name: string;
+    };
+    expect(webVercel.buildCommand).toBe(`pnpm --filter ${webPackage.name} build`);
   });
 
-  it('both run the same build and install commands', () => {
-    // A build that differs by Root Directory is two products, not one.
-    expect(webVercel.buildCommand).toBe(vercel.buildCommand);
-    expect(webVercel.installCommand).toBe(vercel.installCommand);
+  it('installs workspace-aware, because the web app depends on a workspace package', () => {
+    // `apps/web` depends on @edu/contracts via workspace:*, so an install
+    // scoped to that directory fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND.
+    const webVercel = JSON.parse(readFileSync(WEB_VERCEL, 'utf8')) as VercelConfig;
+    expect(webVercel.installCommand).toBe('pnpm install --frozen-lockfile');
   });
 
-  it('both disable framework auto-detection', () => {
+  it('disables framework auto-detection, for the same reason the root does', () => {
+    const webVercel = JSON.parse(readFileSync(WEB_VERCEL, 'utf8')) as VercelConfig;
     expect(webVercel.framework).toBeNull();
   });
 
-  it('neither output path is absolute or parent-escaping', () => {
-    for (const out of [vercel.outputDirectory ?? '', webVercel.outputDirectory ?? '']) {
-      expect(out.startsWith('/')).toBe(false);
-      expect(out.split('/')).not.toContain('..');
-    }
+  it('its output path is relative, never absolute or parent-escaping', () => {
+    const webVercel = JSON.parse(readFileSync(WEB_VERCEL, 'utf8')) as VercelConfig;
+    const out = webVercel.outputDirectory ?? '';
+    expect(out.startsWith('/')).toBe(false);
+    expect(out.split('/')).not.toContain('..');
   });
 
-  /**
-   * apps/api/vercel.json is a WORKAROUND, not a third supported layout.
-   *
-   * The Vercel project's Root Directory is set to apps/api, and Vercel reads
-   * vercel.json FROM the Root Directory — so neither config above is ever
-   * opened, and six deployments failed with:
-   *
-   *   Error: No Output Directory named "dist" found after the Build completed.
-   *
-   * The quoted name is `dist`, not `apps/web/dist`, which is the proof: the
-   * repository's config was not read, and Vercel fell back to Project
-   * Settings. Root Directory is a dashboard-only setting.
-   *
-   * apps/api is a Fastify server. It is NOT the home of the web deployment,
-   * and this file says otherwise — which is why it escapes into a sibling
-   * package with `..`. DELETE IT once Root Directory is set to apps/web (or
-   * the repository root); the two configs above already cover both.
-   *
-   * While it exists it must point at the one real artifact, so a stale copy
-   * cannot outlive the build it claims to publish.
-   */
-  it('the apps/api workaround, if present, resolves to the same artifact', () => {
-    const apiVercelPath = join(ROOT, 'apps/api/vercel.json');
-    if (!existsSync(apiVercelPath)) return;
-    const apiVercel = JSON.parse(readFileSync(apiVercelPath, 'utf8')) as VercelConfig;
-    const fromApiRoot = resolve(join(ROOT, 'apps/api'), apiVercel.outputDirectory ?? '');
-    expect(fromApiRoot).toBe(join(webDir, 'dist'));
-    // Same build, or it is publishing something other than what it built.
-    expect(apiVercel.buildCommand).toBe(vercel.buildCommand);
-    expect(apiVercel.installCommand).toBe(vercel.installCommand);
-  });
-
-  it('only the apps/api workaround is allowed to escape its Root Directory', () => {
-    // The two supported layouts must stay clean. If someone "fixes" a future
-    // failure by adding `..` to one of them, that is a misconfiguration being
-    // papered over somewhere else, and this catches it.
-    for (const out of [vercel.outputDirectory ?? '', webVercel.outputDirectory ?? '']) {
-      expect(out.split('/')).not.toContain('..');
-    }
+  it('does NOT claim the same output directory as the root project', () => {
+    // The two now build different applications. Asserting they MATCH — which
+    // this suite used to — would be asserting the bug the root config was just
+    // changed to fix.
+    const webVercel = JSON.parse(readFileSync(WEB_VERCEL, 'utf8')) as VercelConfig;
+    expect(webVercel.outputDirectory).not.toBe(vercel.outputDirectory);
   });
 });

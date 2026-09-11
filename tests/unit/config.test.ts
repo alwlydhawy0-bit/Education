@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import {
   assertNoPrivateLeakage,
   loadConfig,
+  SECRET_BEARING_KEYS,
   toPublicConfig,
 } from '../../apps/api/src/platform/config.ts';
 
@@ -357,5 +358,41 @@ describe('the environment allowlist and the schema cannot disagree', () => {
     ]) {
       expect({ key, read: allowlisted.has(key) }).toEqual({ key, read: true });
     }
+  });
+});
+
+describe('every credential-bearing setting is declared secret-bearing', () => {
+  /*
+   * ROUND 15, F12. Removing REDIS_URL from `SECRET_BEARING_KEYS` escaped every
+   * suite, because `toPublicConfig` returns two harmless fields — so
+   * `assertNoPrivateLeakage` passes whatever the list contains. The list is a
+   * BACKSTOP against a future edit to `toPublicConfig`, and a backstop nothing
+   * asserts is one that silently stops covering things.
+   */
+  it('lists exactly the settings whose values are credentials', () => {
+    expect([...SECRET_BEARING_KEYS].sort()).toEqual(['AI_API_KEY', 'DATABASE_URL', 'REDIS_URL']);
+  });
+
+  it('covers every configured URL that can carry a password in its userinfo', () => {
+    // Derived rather than restated: a future FOO_URL that accepts credentials
+    // has to be considered here, instead of being added to the schema and
+    // forgotten. `AI_BASE_URL` is excluded deliberately — it is a destination,
+    // never authenticated in the URL itself.
+    const credentialUrls = ['DATABASE_URL', 'REDIS_URL'];
+    for (const key of credentialUrls) {
+      expect(SECRET_BEARING_KEYS as readonly string[]).toContain(key);
+    }
+  });
+
+  it('actually refuses to boot when such a value reaches the public config', () => {
+    // The mechanism the list feeds, exercised end to end: a public config that
+    // echoed the Redis URL must be a startup failure, not a warning.
+    const config = loadConfig({
+      NODE_ENV: 'development',
+      DATABASE_URL: 'postgres://u:p@h:5432/d', // secret-scan-allow: fixture, not a credential
+      REDIS_URL: 'redis://default:hunter2@cache:6379', // secret-scan-allow: fixture, not a credential
+    });
+    const leaky = { ...toPublicConfig(config), oops: config.REDIS_URL } as never;
+    expect(() => assertNoPrivateLeakage(config, leaky)).toThrow(/REDIS_URL/);
   });
 });

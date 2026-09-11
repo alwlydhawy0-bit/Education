@@ -167,3 +167,91 @@ describe('the schema carries the indexes its own constraints require', () => {
     expect(findings.map((f) => `[${f.rule}] ${f.subject}: ${f.detail}`)).toEqual([]);
   });
 });
+
+/**
+ * AND THE AUDIT IS PROVEN ABLE TO FAIL.
+ *
+ * Round 15 (F18) changed the audit's `confdeltype IN ('c','n','d')` filter to a
+ * value no constraint has. It found nothing, the assertion above expected
+ * nothing, and the suite passed — a green tick over an audit that had stopped
+ * looking. The RLS audit was proven falsifiable by eight injections when it was
+ * written; this one never was, and that asymmetry is the whole finding.
+ *
+ * The same technique: break the schema inside a transaction, watch the audit
+ * notice, roll back. DDL is transactional in PostgreSQL, so nothing leaks into
+ * the suites that run after this one.
+ */
+describe('the index audit detects what it claims to detect', () => {
+  async function withBrokenSchema(ddl: string) {
+    await connected;
+    await client.query('BEGIN');
+    try {
+      await client.query(ddl);
+      return await auditIndexes(client);
+    } finally {
+      await client.query('ROLLBACK');
+    }
+  }
+
+  it('I1 — a cascading foreign key with no covering index', async () => {
+    const findings = await withBrokenSchema(`
+      CREATE TABLE idx_probe_parent (id uuid PRIMARY KEY);
+      CREATE TABLE idx_probe_child (
+        id uuid PRIMARY KEY,
+        parent_id uuid REFERENCES idx_probe_parent (id) ON DELETE CASCADE
+      );
+    `);
+    const hit = findings.filter((f) => f.rule === 'I1' && f.subject.includes('idx_probe_child'));
+    expect(hit).toHaveLength(1);
+    expect(hit[0]?.detail).toContain('ON DELETE CASCADE');
+  });
+
+  it('I1 — SET NULL counts too, because it also scans the child table', async () => {
+    const findings = await withBrokenSchema(`
+      CREATE TABLE idx_probe_p2 (id uuid PRIMARY KEY);
+      CREATE TABLE idx_probe_c2 (
+        id uuid PRIMARY KEY,
+        parent_id uuid REFERENCES idx_probe_p2 (id) ON DELETE SET NULL
+      );
+    `);
+    expect(
+      findings.filter((f) => f.rule === 'I1' && f.subject.includes('idx_probe_c2')),
+    ).toHaveLength(1);
+  });
+
+  it('I1 — an indexed cascading key is NOT reported', async () => {
+    // The other half: a rule that fires on everything is as useless as one that
+    // fires on nothing.
+    const findings = await withBrokenSchema(`
+      CREATE TABLE idx_probe_p3 (id uuid PRIMARY KEY);
+      CREATE TABLE idx_probe_c3 (
+        id uuid PRIMARY KEY,
+        parent_id uuid REFERENCES idx_probe_p3 (id) ON DELETE CASCADE
+      );
+      CREATE INDEX idx_probe_c3_fk_ix ON idx_probe_c3 (parent_id);
+    `);
+    expect(findings.filter((f) => f.subject.includes('idx_probe_c3'))).toHaveLength(0);
+  });
+
+  it('I1 — a NO ACTION key is not reported, because refusing stops at the first match', async () => {
+    const findings = await withBrokenSchema(`
+      CREATE TABLE idx_probe_p4 (id uuid PRIMARY KEY);
+      CREATE TABLE idx_probe_c4 (
+        id uuid PRIMARY KEY,
+        parent_id uuid REFERENCES idx_probe_p4 (id)
+      );
+    `);
+    expect(findings.filter((f) => f.subject.includes('idx_probe_c4'))).toHaveLength(0);
+  });
+
+  it('I2 — an index whose columns are a leading prefix of another', async () => {
+    const findings = await withBrokenSchema(`
+      CREATE TABLE idx_probe_r (a uuid, b uuid, c uuid);
+      CREATE INDEX idx_probe_r_a ON idx_probe_r (a);
+      CREATE INDEX idx_probe_r_ab ON idx_probe_r (a, b);
+    `);
+    const hit = findings.filter((f) => f.rule === 'I2' && f.subject.includes('idx_probe_r_a'));
+    expect(hit).toHaveLength(1);
+    expect(hit[0]?.detail).toContain('idx_probe_r_ab');
+  });
+});

@@ -89,6 +89,30 @@ const UNINDEXED_CASCADES = `
  * table. Unique indexes are excluded on BOTH sides of the comparison: a unique
  * index is a constraint, not an access path, and dropping one changes what the
  * database permits rather than only what it costs.
+ *
+ * ---------------------------------------------------------------------------
+ * THE COMPARISON IS BY TEXT, AND THAT IS NOT LAZINESS — IT IS THE FIX
+ * ---------------------------------------------------------------------------
+ *
+ * This rule was written with `slice = array` and NEVER ONCE FIRED. `indkey` is
+ * an `int2vector`, which casts to a ZERO-based array; a slice of it comes back
+ * ONE-based. PostgreSQL's array equality compares dimension bounds as well as
+ * contents, so:
+ *
+ *     '[0:0]={1}'::int2[] = '{1}'::int2[]   -->   FALSE
+ *
+ * The predicate was structurally incapable of being true. The audit reported
+ * "no redundant indexes" on every run, and that clean result meant nothing —
+ * a rule that always passes is indistinguishable from a rule that works, which
+ * is the entire reason `tests/integration/query-plans.test.ts` now injects a
+ * known-redundant pair and asserts the audit finds it.
+ *
+ * `array_to_string` ignores bounds and compares contents in order, which is
+ * exactly the question being asked.
+ *
+ * Found by defect injection round 15 (F18): changing this rule's sibling filter
+ * escaped every suite, which prompted writing the falsification tests that
+ * exposed this.
  */
 const REDUNDANT_INDEXES = `
   SELECT t.relname AS tbl,
@@ -104,7 +128,8 @@ const REDUNDANT_INDEXES = `
      AND NOT x.indisunique AND NOT y.indisunique
      AND x.indpred IS NULL AND y.indpred IS NULL
      AND array_length(x.indkey::int2[], 1) < array_length(y.indkey::int2[], 1)
-     AND (y.indkey::int2[])[0:array_length(x.indkey::int2[], 1) - 1] = x.indkey::int2[]
+     AND array_to_string((y.indkey::int2[])[0:array_length(x.indkey::int2[], 1) - 1], ',')
+       = array_to_string(x.indkey::int2[], ',')
    ORDER BY 1, 2
 `;
 

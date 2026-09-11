@@ -1,0 +1,50 @@
+-- ===========================================================================
+-- 0035 — A REDUNDANT INDEX, AND THE RULE THAT SHOULD HAVE FOUND IT IN 0020
+-- ===========================================================================
+--
+-- `assessment_attempts` carries two indexes that lead on the same column:
+--
+--   assessment_attempts_assessment_idx  (assessment_id)                 [0019]
+--   assessment_attempts_released_idx    (assessment_id, released_at)    [0020]
+--
+-- The second is a strict superset of the first. PostgreSQL can use a composite
+-- index for a query that constrains only its leading column, so every plan the
+-- single-column index could serve, the composite serves too. It is never the
+-- better choice, and it costs a write on every INSERT and every UPDATE that
+-- touches `assessment_id` — on the table that grows every time a learner sits
+-- an assessment.
+--
+-- ---------------------------------------------------------------------------
+-- WHY IT SURVIVED FOUR TASKS
+-- ---------------------------------------------------------------------------
+--
+-- `tools/db/audit-indexes.ts` has had a rule for exactly this since Task 016.
+-- The rule never fired, and could not have: it compared an array slice against
+-- an array with `=`, and `indkey::int2[]` is ZERO-based while a slice of it is
+-- ONE-based. PostgreSQL array equality compares bounds as well as contents, so
+--
+--     '[0:0]={1}'::int2[] = '{1}'::int2[]   -->   FALSE
+--
+-- the predicate was structurally incapable of being true. The audit reported
+-- "no redundant indexes" on every run, and that clean result meant nothing.
+--
+-- Defect injection round 15 (F18) is what exposed it — not by finding this
+-- index, but by showing that breaking the audit's OTHER rule changed no test
+-- result. Writing the falsification tests that closes that gap is what made the
+-- dead predicate visible.
+--
+-- THE LESSON, which is the same one the RLS audit already carried: an audit is
+-- not evidence until something has watched it fail. This one shipped with a
+-- passing result and no proof it could ever produce a different one.
+--
+-- ---------------------------------------------------------------------------
+-- SAFETY
+-- ---------------------------------------------------------------------------
+--
+-- Dropping an index cannot lose data and cannot break a query — only slow one.
+-- Here it cannot do that either, because the composite covers the same access
+-- path. `IF EXISTS` so a database that has already had it removed by hand is
+-- not an error.
+-- ===========================================================================
+
+DROP INDEX IF EXISTS assessment_attempts_assessment_idx;

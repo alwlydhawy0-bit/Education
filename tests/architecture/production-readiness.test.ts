@@ -117,6 +117,26 @@ describe('the shipped source runs under --experimental-strip-types', () => {
   });
 });
 
+describe('the rate limiter never fails open', () => {
+  it('sets skipOnError: false explicitly', () => {
+    /*
+     * ROUND 15, F7. Flipping this to `true` escaped every suite, because the
+     * store on the other side of it does not throw — it degrades and calls back
+     * successfully — so nothing observable changes TODAY.
+     *
+     * That is exactly why it needs a source assertion rather than a behavioural
+     * one. `skipOnError: false` is defence in depth against a FUTURE store that
+     * does throw: the plugin's own default is `true`, which means "if the store
+     * errors, let the request through". A control whose value only matters
+     * after someone else's future change has no behaviour to test, and is
+     * therefore the easiest kind of line to delete as redundant.
+     */
+    const source = stripComments(read('apps/api/src/platform/security/rate-limit.ts'), 'ts');
+    expect(source).toMatch(/skipOnError:\s*false/);
+    expect(source).not.toMatch(/skipOnError:\s*true/);
+  });
+});
+
 describe('the process entry point logs through the redactor', () => {
   it('main.ts calls no console method', () => {
     // It used to. `console.error('Failed to start:', error)` printed a raw pg

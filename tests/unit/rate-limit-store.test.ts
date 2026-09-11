@@ -155,6 +155,31 @@ describe('when the store is unreachable it DEGRADES — not open, not closed', (
     expect(events.filter((e) => e.degraded)).toHaveLength(1);
   });
 
+  it('records it once even when the store dies with requests already IN FLIGHT', async () => {
+    /*
+     * THE SEQUENTIAL TEST ABOVE CANNOT FAIL, AND ROUND 15 PROVED IT (F6).
+     *
+     * Deleting the `if (this.degraded) return` guard from `enterDegraded`
+     * changed nothing there, because after the first failure every later call
+     * short-circuits at the top of `incr` and never reaches the `.catch()` that
+     * calls it. The guard is only reachable while several requests are
+     * ALREADY IN FLIGHT when the store dies — which is precisely the shape of a
+     * real outage, and precisely what a loop of `await` cannot reproduce.
+     *
+     * Ten concurrent calls all pass the degraded check before any promise
+     * settles, so all ten land in the catch. With the guard: one event. Without
+     * it: ten, and an investigation reading the audit trail sees ten outages
+     * where there was one.
+     */
+    const { redis, events, Ctor } = build();
+    const store = new Ctor({ timeWindow: 60_000 });
+    redis.failing = true;
+
+    await Promise.all(Array.from({ length: 10 }, () => incr(store, '9.9.9.9')));
+
+    expect(events.filter((e) => e.degraded)).toHaveLength(1);
+  });
+
   it('reports only the error MESSAGE, because a Redis error can carry a password', async () => {
     const { redis, events, Ctor } = build();
     const store = new Ctor({ timeWindow: 60_000 });

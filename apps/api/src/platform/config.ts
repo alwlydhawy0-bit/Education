@@ -105,7 +105,15 @@ export const CONFIG_KEYS = [
  * Used by `assertNoPrivateLeakage` as a runtime backstop against a future edit
  * to `toPublicConfig` that adds a field without thinking about it.
  */
-const SECRET_BEARING_KEYS = ['DATABASE_URL', 'AI_API_KEY', 'REDIS_URL'] as const;
+/**
+ * EXPORTED so a test can assert its contents (round 15, F12).
+ *
+ * Removing a key from this list changes nothing observable: `toPublicConfig`
+ * returns two safe fields, so `assertNoPrivateLeakage` passes either way. The
+ * list is a BACKSTOP against a future edit to `toPublicConfig`, and a backstop
+ * with no test is a backstop that quietly stops covering things.
+ */
+export const SECRET_BEARING_KEYS = ['DATABASE_URL', 'AI_API_KEY', 'REDIS_URL'] as const;
 
 const configSchema = z
   .object({

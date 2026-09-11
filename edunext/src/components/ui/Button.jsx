@@ -13,7 +13,7 @@ import { ArrowLeft, LoaderCircle } from 'lucide-react';
  * of the text — again, no mirroring needed.
  */
 const VARIANTS = {
-  primary: 'bg-primary text-white hover:bg-primary-hover shadow-soft',
+  primary: 'bg-primary text-on-primary hover:bg-primary-hover shadow-soft',
   soft: 'bg-primary-light text-primary hover:bg-accent-lavender',
   ghost: 'text-text-muted hover:bg-surface-alt hover:text-text-main',
 };

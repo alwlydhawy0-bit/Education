@@ -111,7 +111,7 @@ export default function Courses() {
               className={[
                 'rounded-full px-3.5 py-1.5 text-xs font-medium transition-colors duration-200',
                 category === id
-                  ? 'bg-primary text-white shadow-soft'
+                  ? 'bg-primary text-on-primary shadow-soft'
                   : 'bg-surface-alt text-text-muted hover:bg-primary-light hover:text-primary',
               ].join(' ')}
             >
@@ -171,7 +171,7 @@ function EmptyResults({ onReset }) {
       <button
         type="button"
         onClick={onReset}
-        className="mt-1 rounded-full bg-primary-light px-4 py-2 text-xs font-medium text-primary transition-colors duration-200 hover:bg-primary hover:text-white"
+        className="mt-1 rounded-full bg-primary-light px-4 py-2 text-xs font-medium text-primary transition-colors duration-200 hover:bg-primary hover:text-on-primary"
       >
         إعادة ضبط البحث
       </button>

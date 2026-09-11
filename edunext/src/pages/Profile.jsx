@@ -166,7 +166,7 @@ function GuestProfile() {
         </p>
         <Link
           to="/login"
-          className="mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-white shadow-soft transition-colors duration-200 hover:bg-primary-hover"
+          className="mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-on-primary shadow-soft transition-colors duration-200 hover:bg-primary-hover"
         >
           <span>تسجيل الدخول</span>
           <LogIn className="h-4 w-4" aria-hidden="true" />

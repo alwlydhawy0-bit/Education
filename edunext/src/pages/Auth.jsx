@@ -287,7 +287,7 @@ function ArcHeader() {
         like it is sliding off the curve.
       */}
       <BookOpen
-        className="absolute left-5 top-5 h-7 w-7 text-white sm:left-6 sm:top-6 sm:h-8 sm:w-8"
+        className="absolute left-5 top-5 h-7 w-7 text-on-primary sm:left-6 sm:top-6 sm:h-8 sm:w-8"
         strokeWidth={1.75}
       />
     </div>

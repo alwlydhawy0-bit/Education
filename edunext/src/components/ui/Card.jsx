@@ -23,7 +23,7 @@ export default function Card({
     'card-surface',
     padded ? 'p-5' : '',
     interactive
-      ? 'transition-shadow transition-colors duration-200 hover:border-accent-lavender hover:shadow-[0_8px_28px_-4px_rgba(30,27,75,0.08)]'
+      ? 'transition-shadow transition-colors duration-200 hover:border-accent-lavender hover:shadow-lift'
       : '',
     className,
   ]

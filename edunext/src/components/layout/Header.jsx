@@ -119,7 +119,7 @@ function SignInButton() {
     <button
       type="button"
       onClick={() => navigate('/login', { state: { from: location } })}
-      className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-white shadow-soft transition-colors duration-200 hover:bg-primary-hover"
+      className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-on-primary shadow-soft transition-colors duration-200 hover:bg-primary-hover"
     >
       <span>تسجيل الدخول</span>
       <LogIn className="h-4 w-4" aria-hidden="true" />
@@ -218,11 +218,22 @@ function NotificationBell({ count = 0 }) {
  * system preference on first load, and remembers a deliberate choice. Tailwind
  * is configured with `darkMode: 'class'` so `dark:` variants resolve from it.
  *
- * WHAT IT DOES NOT DO YET, said plainly: the dark palette is not part of this
- * task. No `dark:` token exists, so today the visible effect is the icon
- * changing. That is the honest half-step — the alternative is a button that is
- * wired to nothing at all, which is harder to finish later because there is no
- * seam to finish.
+ * IT NOW ACTUALLY CHANGES THE THEME. For several tasks this button flipped the
+ * class, stored the choice, swapped its own icon — and changed nothing else,
+ * because no dark palette existed behind it. That was recorded here as an
+ * honest half-step and it was still a control that did not work, which a user
+ * reported before any test did: nothing in the suite could tell the difference
+ * between a toggle wired to a palette and one wired to nothing.
+ *
+ * The palette lives in `index.css` as CSS variables redefined under `.dark`, so
+ * every token in the app resolves differently the moment this class flips. No
+ * component needed a `dark:` variant.
+ *
+ * The initial value is also computed in a blocking script in `index.html`. This
+ * effect still runs and still owns the class afterwards, but by the time React
+ * mounts, the correct theme is already painted. The storage key and the
+ * system-preference fallback are duplicated between the two on purpose and must
+ * stay in step — the comment in `index.html` says so from the other side.
  */
 function ThemeToggle() {
   const [isDark, setIsDark] = useState(() => {
@@ -234,7 +245,24 @@ function ThemeToggle() {
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', isDark);
-    window.localStorage.setItem('edunext:theme', isDark ? 'dark' : 'light');
+
+    /*
+     * The browser's own chrome takes its colour from this meta tag — the status
+     * bar on iOS, the address bar on Android. Leaving it at the light beige
+     * puts a bright band above a dark page, which is the most visible way a
+     * dark theme can look unfinished on a phone. The values match
+     * `--color-canvas` in each theme.
+     */
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute('content', isDark ? '#14121F' : '#FBF9F5');
+
+    try {
+      window.localStorage.setItem('edunext:theme', isDark ? 'dark' : 'light');
+    } catch {
+      // Private browsing throws on write. The theme still applies for this
+      // page; it simply will not be remembered.
+    }
   }, [isDark]);
 
   return (

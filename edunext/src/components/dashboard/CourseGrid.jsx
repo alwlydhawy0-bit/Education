@@ -84,7 +84,7 @@ function CourseCard({ course, showProgress }) {
   const guard = useGuardedAction();
 
   return (
-    <article className="card-surface flex h-full flex-col gap-4 p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent-lavender hover:shadow-[0_8px_28px_-4px_rgba(30,27,75,0.08)]">
+    <article className="card-surface flex h-full flex-col gap-4 p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent-lavender hover:shadow-lift">
       <div className="flex items-start gap-3">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-light">
           <Icon className="h-5 w-5 text-primary" aria-hidden="true" />
@@ -160,7 +160,7 @@ function CourseCard({ course, showProgress }) {
             type="button"
             onClick={guard(() => undefined, 'لمتابعة الدرس')}
             aria-label={showProgress ? `متابعة ${title}` : `ابدئي ${title}`}
-            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-primary-light px-4 text-xs font-medium text-primary transition-colors duration-200 hover:bg-primary hover:text-white"
+            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-primary-light px-4 text-xs font-medium text-primary transition-colors duration-200 hover:bg-primary hover:text-on-primary"
           >
             <span>{showProgress ? 'متابعة' : 'ابدئي'}</span>
             <Play className="h-3.5 w-3.5" aria-hidden="true" />

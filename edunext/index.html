@@ -31,6 +31,46 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 
     <title>إدنكست | تعلّم … اصنع مستقبلك</title>
+
+    <!--
+      THEME, APPLIED BEFORE THE FIRST PAINT.
+
+      React sets the `dark` class in an effect, which runs after the first frame
+      has already been painted — so a visitor who chose the dark theme would see
+      the page flash light and then snap dark on every single load. The fix has
+      to be a BLOCKING script in <head>: it is the only code that runs before
+      the browser paints anything.
+
+      It is deliberately tiny and dependency-free for the same reason. Anything
+      that has to be fetched or parsed first would reintroduce the flash it
+      exists to prevent.
+
+      The storage key and the fallback MUST match `ThemeToggle` in
+      `components/layout/Header.jsx` exactly. If they drift, this script and the
+      React state disagree and the icon ends up showing the opposite of the
+      theme on screen.
+
+      try/catch because reading storage THROWS rather than returning null in
+      private browsing and locked-down enterprise profiles; a theme preference
+      is never worth a blank page.
+    -->
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem('edunext:theme');
+          var dark = stored
+            ? stored === 'dark'
+            : window.matchMedia('(prefers-color-scheme: dark)').matches;
+          if (dark) {
+            document.documentElement.classList.add('dark');
+            var meta = document.querySelector('meta[name="theme-color"]');
+            if (meta) meta.setAttribute('content', '#14121F');
+          }
+        } catch (error) {
+          /* No stored preference available: the light theme is the default. */
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

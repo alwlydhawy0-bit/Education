@@ -131,7 +131,7 @@ export default function About() {
                 className={[
                   'inline-flex w-fit rounded-full px-3 py-1 text-[11px] font-medium',
                   state === 'done'
-                    ? 'bg-primary text-white'
+                    ? 'bg-primary text-on-primary'
                     : state === 'active'
                       ? 'bg-accent-lavender text-primary'
                       : 'bg-surface-alt text-text-muted',
@@ -169,7 +169,7 @@ export default function About() {
         </div>
         <Link
           to={isAuthenticated ? '/' : '/courses'}
-          className="inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-white shadow-soft transition-colors duration-200 hover:bg-primary-hover"
+          className="inline-flex h-11 shrink-0 items-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-on-primary shadow-soft transition-colors duration-200 hover:bg-primary-hover"
         >
           <span>{isAuthenticated ? 'إلى لوحتي' : 'تصفّحي الدورات'}</span>
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />

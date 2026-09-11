@@ -32,43 +32,80 @@ export default {
    * reads `prefers-color-scheme` only for the first visit, before a choice
    * exists.
    *
-   * The dark PALETTE is not defined yet — that is a token task, not a layout
-   * one — so today no `dark:` variant is used anywhere. This is the seam that
-   * lets the palette land later without touching a component.
+   * THE DARK PALETTE IS NOW DEFINED, and it needs no `dark:` variants at all.
+   * Every colour below resolves through a CSS variable that `index.css`
+   * redefines under `.dark`, so a component written once is correct in both
+   * themes. The seam that was promised turned out to be cheaper than expected:
+   * the components did not have to change, only the values behind their names.
    */
   darkMode: 'class',
   theme: {
     extend: {
+      /*
+       * EVERY COLOUR IS A CSS VARIABLE, AND THAT IS WHAT MAKES DARK MODE WORK.
+       *
+       * The values live in `index.css` under `:root` and `.dark`; this file only
+       * names them. The alternative — a literal here plus a `dark:` variant on
+       * every element that uses it — would have meant editing well over a
+       * hundred class lists, and missing one leaves a white card sitting in a
+       * dark page with nothing to catch it. With variables, `bg-canvas` is
+       * already correct in both themes wherever it appears.
+       *
+       * `<alpha-value>` is the part that is easy to get wrong. Tailwind
+       * substitutes the opacity from modifiers like `bg-surface-alt/40` and
+       * `ring-primary/40` into that placeholder — but only if the variable holds
+       * SPACE-SEPARATED RGB CHANNELS ("251 249 245") rather than a colour
+       * string. Store `#FBF9F5` in the variable and every opacity modifier in
+       * the app silently stops working.
+       */
       colors: {
-        // The page itself. Warm light beige — never pure white, which is what
-        // keeps long study sessions comfortable.
-        canvas: '#FBF9F5',
+        // The page itself. Warm light beige in the day, deep purple-navy at
+        // night — never pure white and never pure black, which is what keeps a
+        // long study session comfortable in either theme.
+        canvas: 'rgb(var(--color-canvas) / <alpha-value>)',
 
         // Cards and panels that sit on the canvas.
         surface: {
-          DEFAULT: '#FFFFFF',
-          alt: '#F5F0E6',
+          DEFAULT: 'rgb(var(--color-surface) / <alpha-value>)',
+          alt: 'rgb(var(--color-surface-alt) / <alpha-value>)',
         },
 
-        // Royal purple: the single accent. Actions, active state, progress.
+        // The single accent. Actions, active state, progress.
         primary: {
-          DEFAULT: '#6D28D9',
-          hover: '#5B21B6',
-          light: '#F3E8FF',
+          DEFAULT: 'rgb(var(--color-primary) / <alpha-value>)',
+          hover: 'rgb(var(--color-primary-hover) / <alpha-value>)',
+          light: 'rgb(var(--color-primary-light) / <alpha-value>)',
         },
 
-        // Supporting tints. `subtle` is the hairline border colour, and it is a
-        // warm beige rather than a grey so borders never read as cold.
+        /*
+         * WHAT GOES ON TOP OF `primary`, AS ITS OWN TOKEN.
+         *
+         * This did not exist before dark mode and could not be avoided once it
+         * did. `primary` has to satisfy two jobs at once: a FILL that carries a
+         * label, and TEXT on a dark surface. In the light theme one deep violet
+         * does both — white reads on it at 7.1:1. In the dark theme it cannot:
+         * a violet light enough to read as text on a near-black page (6.8:1) is
+         * far too light to carry white text (2.1:1, unreadable).
+         *
+         * So the pairing is named rather than assumed. `text-white` on a purple
+         * button was a hidden assumption that the button is always dark; every
+         * one of those is now `text-on-primary`, which is white by day and the
+         * deep canvas colour by night.
+         */
+        'on-primary': 'rgb(var(--color-on-primary) / <alpha-value>)',
+
+        // Supporting tints. `subtle` is the hairline border colour — a warm
+        // beige by day so borders never read as cold, a muted violet by night.
         accent: {
-          lavender: '#DDD6FE',
-          subtle: '#E8E1D5',
+          lavender: 'rgb(var(--color-accent-lavender) / <alpha-value>)',
+          subtle: 'rgb(var(--color-accent-subtle) / <alpha-value>)',
         },
 
-        // Body text. Deep purple-navy rather than black, so it belongs to the
-        // same family as the accent instead of fighting it.
+        // Body text. Never pure black or pure white: both belong to the same
+        // purple family as the accent rather than fighting it.
         text: {
-          main: '#1E1B4B',
-          muted: '#6B7280',
+          main: 'rgb(var(--color-text-main) / <alpha-value>)',
+          muted: 'rgb(var(--color-text-muted) / <alpha-value>)',
         },
       },
 
@@ -77,9 +114,27 @@ export default {
       },
 
       boxShadow: {
-        // Barely there, and tinted with the text colour rather than pure black:
-        // a neutral shadow over a warm canvas looks like dirt.
-        soft: '0 4px 20px -2px rgba(30, 27, 75, 0.04)',
+        /*
+         * Barely there, and tinted with the text colour rather than pure black:
+         * a neutral shadow over a warm canvas looks like dirt.
+         *
+         * It is a variable for the same reason the colours are. A 4%-opacity
+         * shadow is invisible against a dark page — the card edge simply
+         * disappears — so the dark theme raises the opacity and darkens the
+         * tint, which is the only way a raised surface still reads as raised.
+         */
+        soft: 'var(--shadow-soft)',
+
+        /*
+         * The hover/raised state. It was written inline as
+         * `shadow-[0_8px_28px_-4px_rgba(30,27,75,0.08)]` in four places — an
+         * arbitrary value repeated, which is a token that has not been named
+         * yet. Naming it is what let the dark theme give it a different value;
+         * an 8%-opacity purple shadow simply does not exist on a dark page, so
+         * a card that lifted on hover in the light theme did nothing at all in
+         * the dark one.
+         */
+        lift: 'var(--shadow-lift)',
       },
 
       /*

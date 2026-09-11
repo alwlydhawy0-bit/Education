@@ -41,7 +41,7 @@ export default function Sidebar() {
       {/* هوية المنصة */}
       <NavLink to="/" className="flex items-center gap-3 rounded-2xl px-2 pt-2">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary shadow-soft">
-          <GraduationCap className="h-6 w-6 text-white" aria-hidden="true" />
+          <GraduationCap className="h-6 w-6 text-on-primary" aria-hidden="true" />
         </span>
         <span className="min-w-0">
           {/* The brand name is a proper noun in Latin script. `dir="ltr"`
@@ -113,7 +113,7 @@ function NavRow({ to, label, Icon }) {
           'group flex w-full items-center justify-between gap-3 rounded-lg px-3 py-2.5',
           'text-sm font-medium transition-colors duration-200',
           isActive
-            ? 'bg-primary text-white shadow-soft'
+            ? 'bg-primary text-on-primary shadow-soft'
             : 'text-text-main hover:bg-primary-light hover:text-primary',
         ].join(' ')
       }
@@ -126,7 +126,7 @@ function NavRow({ to, label, Icon }) {
               does not follow the parent's hover state on its own. */}
           <Icon
             className={`h-[18px] w-[18px] shrink-0 transition-colors ${
-              isActive ? 'text-white' : 'text-text-muted group-hover:text-primary'
+              isActive ? 'text-on-primary' : 'text-text-muted group-hover:text-primary'
             }`}
             aria-hidden="true"
           />

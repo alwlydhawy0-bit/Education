@@ -19,6 +19,96 @@
 
 @layer base {
   /*
+   * THE PALETTE, AS VARIABLES. Both themes, in one place.
+   *
+   * ---------------------------------------------------------------------------
+   * WHY THE CHANNELS ARE SPACE-SEPARATED NUMBERS AND NOT HEX
+   * ---------------------------------------------------------------------------
+   *
+   * `tailwind.config.js` reads these as `rgb(var(--color-x) / <alpha-value>)`,
+   * which is what lets `bg-surface-alt/40`, `ring-primary/40` and every other
+   * opacity modifier in the app keep working. Writing `#FBF9F5` here instead
+   * would produce `rgb(#FBF9F5 / 0.4)` — invalid CSS, silently dropped, and the
+   * app would lose every translucent surface at once.
+   *
+   * ---------------------------------------------------------------------------
+   * THE DARK THEME IS NOT THE LIGHT ONE INVERTED
+   * ---------------------------------------------------------------------------
+   *
+   * A true inversion gives pure black and a violet so bright it vibrates. The
+   * dark canvas here is a deep purple-navy — the same family as the text colour
+   * in the light theme — so the two themes read as one product in two moods
+   * rather than as two different apps.
+   *
+   * Contrast was computed, not eyeballed. Against the dark canvas: body text
+   * 15.6:1, muted text 7.0:1, primary-as-text 6.8:1. On a primary fill, the
+   * paired `on-primary` gives 6.8:1. All comfortably past WCAG AA, which
+   * matters more here than in the light theme because Arabic letterforms carry
+   * a lot of their meaning in thin strokes that a low-contrast pairing eats.
+   */
+  :root {
+    --color-canvas: 251 249 245;
+    --color-surface: 255 255 255;
+    --color-surface-alt: 245 240 230;
+
+    --color-primary: 109 40 217;
+    --color-primary-hover: 91 33 182;
+    --color-primary-light: 243 232 255;
+    --color-on-primary: 255 255 255;
+
+    --color-accent-lavender: 221 214 254;
+    --color-accent-subtle: 232 225 213;
+
+    --color-text-main: 30 27 75;
+    --color-text-muted: 107 114 128;
+
+    --shadow-soft: 0 4px 20px -2px rgb(30 27 75 / 0.04);
+    --shadow-lift: 0 8px 28px -4px rgb(30 27 75 / 0.08);
+
+    color-scheme: light;
+  }
+
+  .dark {
+    --color-canvas: 20 18 31;
+    --color-surface: 28 25 48;
+    --color-surface-alt: 37 33 57;
+
+    /*
+     * The accent LIGHTENS in the dark theme. A #6D28D9 button on a near-black
+     * page is a dark shape on a dark page; the eye loses it. #A78BFA reads as
+     * the same brand colour while actually being visible — and, paired with the
+     * deep `on-primary` below, still carries a label at 6.8:1.
+     */
+    --color-primary: 167 139 250;
+    --color-primary-hover: 196 181 253;
+    --color-primary-light: 46 37 71;
+    --color-on-primary: 20 18 31;
+
+    --color-accent-lavender: 76 63 122;
+    --color-accent-subtle: 50 44 74;
+
+    --color-text-main: 237 234 246;
+    --color-text-muted: 168 162 192;
+
+    /*
+     * A 4% shadow over a dark page is nothing at all. Depth in a dark theme
+     * comes from a stronger, darker shadow plus the lighter surface colour
+     * above — both are needed; either alone leaves cards floating edgeless.
+     */
+    --shadow-soft: 0 4px 20px -2px rgb(0 0 0 / 0.45);
+    --shadow-lift: 0 8px 28px -4px rgb(0 0 0 / 0.6);
+
+    /*
+     * `color-scheme` is not decoration. It tells the browser to render form
+     * controls, the caret, and the default scrollbar in their dark variants.
+     * Without it a dark page grows a bright white scrollbar and light-grey
+     * search inputs, which is the giveaway that a dark theme was painted on
+     * rather than declared.
+     */
+    color-scheme: dark;
+  }
+
+  /*
    * RTL IS SET IN TWO PLACES ON PURPOSE.
    *
    * `index.html` carries `lang="ar" dir="rtl"` so the direction is correct
@@ -103,11 +193,13 @@
   background: transparent;
 }
 
+/* Tokenised along with everything else: a hard-coded beige thumb would stay
+   beige on the dark canvas and frame the page in a pale stripe. */
 ::-webkit-scrollbar-thumb {
-  background-color: #e8e1d5;
+  background-color: rgb(var(--color-accent-subtle));
   border-radius: 9999px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background-color: #ddd6fe;
+  background-color: rgb(var(--color-accent-lavender));
 }

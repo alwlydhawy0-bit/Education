@@ -96,7 +96,7 @@ export default function WeeklySchedule({ today = new Date().getDay() }) {
                 aria-current={isToday ? 'date' : undefined}
                 className={[
                   'flex flex-col items-center gap-1 rounded-xl px-1 py-2 text-center transition-colors',
-                  isToday ? 'bg-primary text-white' : 'bg-surface-alt/60 text-text-muted',
+                  isToday ? 'bg-primary text-on-primary' : 'bg-surface-alt/60 text-text-muted',
                 ].join(' ')}
               >
                 <span aria-hidden="true" className="w-full text-[10px] font-medium leading-none">

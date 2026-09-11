@@ -19,7 +19,7 @@ export default function CourseCard({ course }) {
   return (
     <Link
       to={`/courses/${id}`}
-      className="card-surface flex h-full flex-col gap-3 p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent-lavender hover:shadow-[0_8px_28px_-4px_rgba(30,27,75,0.08)]"
+      className="card-surface flex h-full flex-col gap-3 p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent-lavender hover:shadow-lift"
     >
       <div className="flex items-start gap-3">
         <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-primary-light">

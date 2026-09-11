@@ -184,7 +184,7 @@ function VideoPlaceholder({ title, enrolled, guard }) {
           type="button"
           onClick={guard(() => undefined, 'لبدء مشاهدة الدرس')}
           aria-label={enrolled ? `تشغيل: ${title}` : `سجّلي الدخول لمشاهدة: ${title}`}
-          className="flex h-16 w-16 items-center justify-center rounded-full bg-primary text-white shadow-soft transition-transform duration-200 hover:scale-105"
+          className="flex h-16 w-16 items-center justify-center rounded-full bg-primary text-on-primary shadow-soft transition-transform duration-200 hover:scale-105"
         >
           <Play className="h-7 w-7" aria-hidden="true" />
         </button>
@@ -306,7 +306,7 @@ function CourseNotFound({ id }) {
       </p>
       <Link
         to="/courses"
-        className="mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-white shadow-soft transition-colors duration-200 hover:bg-primary-hover"
+        className="mt-2 inline-flex h-11 items-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-on-primary shadow-soft transition-colors duration-200 hover:bg-primary-hover"
       >
         <span>تصفّحي كل الدورات</span>
         <ArrowLeft className="h-4 w-4" aria-hidden="true" />

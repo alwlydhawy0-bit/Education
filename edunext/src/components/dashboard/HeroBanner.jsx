@@ -59,7 +59,7 @@ export default function HeroBanner({ onResume }) {
         <button
           type="button"
           onClick={guard(onResume, 'لمتابعة رحلتك التعليمية')}
-          className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-white shadow-soft transition-colors duration-200 hover:bg-primary-hover"
+          className="mt-6 inline-flex h-11 items-center justify-center gap-2 rounded-full bg-primary px-6 text-sm font-medium text-on-primary shadow-soft transition-colors duration-200 hover:bg-primary-hover"
         >
           <span>{copy.cta}</span>
           <ArrowLeft className="h-4 w-4" aria-hidden="true" />

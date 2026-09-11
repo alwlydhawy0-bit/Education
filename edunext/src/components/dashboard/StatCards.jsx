@@ -1,4 +1,6 @@
 import { Award, BookOpen, Clock, Loader } from 'lucide-react';
+import { useAuth } from '../../auth/useAuth.js';
+import { COURSES } from '../../data/courses.js';
 
 /**
  * The four headline numbers.
@@ -16,25 +18,85 @@ import { Award, BookOpen, Clock, Loader } from 'lucide-react';
  *    subjects. Each card is a `<dl>` pair, so the label and the value are
  *    announced together and in the right order.
  */
-const STATS = [
+/**
+ * A GUEST'S NUMBERS ARE NOT A MEMBER'S NUMBERS WITH THE NAMES KEPT.
+ *
+ * This section used to be a hard-coded "12 دورات مسجّلة / 5 قيد الإنجاز / 48
+ * ساعة / 3 شهادات" shown to everyone. Under the freemium model that reads as an
+ * outright falsehood to a visitor with no account — and it sat directly beneath
+ * a banner inviting them to browse WITHOUT one, on the same screen. Spotted in a
+ * dark-theme screenshot while checking something else entirely; no test could
+ * have caught it, because the numbers were always going to be exactly what the
+ * component said they were.
+ *
+ * So the guest gets CATALOGUE facts — what the platform contains — and the
+ * member gets ACCOUNT facts. Same four cards, same layout, different subject:
+ * one describes the product, the other describes you.
+ */
+const MEMBER_STATS = [
   { id: 'enrolled', label: 'الدورات المسجّلة', value: '12', unit: null, Icon: BookOpen },
   { id: 'active', label: 'قيد الإنجاز', value: '5', unit: null, Icon: Loader },
   { id: 'hours', label: 'الساعات المكتملة', value: '48', unit: 'ساعة', Icon: Clock },
   { id: 'certificates', label: 'الشهادات المكتسبة', value: '3', unit: null, Icon: Award },
 ];
 
+/** Derived from the catalogue, so these cannot drift from what /courses shows. */
+const GUEST_STATS = [
+  {
+    id: 'catalogue',
+    label: 'دورة متاحة',
+    value: String(COURSES.length),
+    unit: null,
+    Icon: BookOpen,
+  },
+  {
+    id: 'lessons',
+    label: 'درسًا',
+    value: String(COURSES.reduce((total, course) => total + course.lessonCount, 0)),
+    unit: null,
+    Icon: Loader,
+  },
+  {
+    id: 'hours',
+    label: 'من المحتوى',
+    value: String(COURSES.reduce((total, course) => total + course.durationHours, 0)),
+    unit: 'ساعة',
+    Icon: Clock,
+  },
+  {
+    id: 'free',
+    label: 'درسًا مجانيًا للتجربة',
+    value: String(
+      COURSES.reduce(
+        (total, course) =>
+          total +
+          course.syllabus.reduce(
+            (units, unit) => units + unit.lessons.filter((lesson) => lesson.free).length,
+            0,
+          ),
+        0,
+      ),
+    ),
+    unit: null,
+    Icon: Award,
+  },
+];
+
 export default function StatCards() {
+  const { isAuthenticated } = useAuth();
+  const stats = isAuthenticated ? MEMBER_STATS : GUEST_STATS;
+
   return (
     <section aria-labelledby="stats-heading">
       <h2 id="stats-heading" className="sr-only">
-        إحصائياتك
+        {isAuthenticated ? 'إحصائياتك' : 'المنصة بالأرقام'}
       </h2>
 
       <dl className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        {STATS.map(({ id, label, value, unit, Icon }) => (
+        {stats.map(({ id, label, value, unit, Icon }) => (
           <div
             key={id}
-            className="card-surface flex items-center gap-3 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent-lavender hover:shadow-[0_8px_28px_-4px_rgba(30,27,75,0.08)] sm:gap-4 sm:p-5"
+            className="card-surface flex items-center gap-3 p-4 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent-lavender hover:shadow-soft sm:gap-4 sm:p-5"
           >
             <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary-light sm:h-11 sm:w-11">
               <Icon className="h-5 w-5 text-primary" aria-hidden="true" />

@@ -82,6 +82,32 @@ export default {
         soft: '0 4px 20px -2px rgba(30, 27, 75, 0.04)',
       },
 
+      /*
+       * The step transition on the authentication screen.
+       *
+       * Y ONLY, DELIBERATELY. A translate on X would have to know which way
+       * "forward" points, and that answer flips with the writing direction — so
+       * it would need an `rtl:` variant and would be wrong in one direction the
+       * day someone forgot it. Vertical motion means the same thing in every
+       * language.
+       *
+       * `both` holds the opening frame before the animation starts, which is
+       * what stops a flash of the finished state on the first paint.
+       *
+       * Always reach for this through `motion-safe:`. A user who has asked their
+       * operating system for reduced motion has asked for it here too.
+       */
+      keyframes: {
+        'step-in': {
+          '0%': { opacity: '0', transform: 'translateY(8px)' },
+          '100%': { opacity: '1', transform: 'translateY(0)' },
+        },
+      },
+
+      animation: {
+        'step-in': 'step-in 280ms cubic-bezier(0.22, 1, 0.36, 1) both',
+      },
+
       fontFamily: {
         // Readex Pro carries Arabic and Latin in one family with matching
         // proportions, so mixed strings ("28 ساعة") stay on one baseline.

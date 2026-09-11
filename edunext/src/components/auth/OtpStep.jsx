@@ -328,7 +328,7 @@ export default function OtpStep({
         </p>
       ) : null}
 
-      <Button type="submit" disabled={pending} className="mt-6 w-full">
+      <Button type="submit" loading={pending} className="mt-6 w-full">
         {pending ? 'جارٍ التحقق…' : 'تأكيد الدخول'}
       </Button>
 

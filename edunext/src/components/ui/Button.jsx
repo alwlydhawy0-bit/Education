@@ -1,4 +1,4 @@
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, LoaderCircle } from 'lucide-react';
 
 /**
  * The primary action, and the one place the RTL arrow decision is made.
@@ -27,6 +27,8 @@ export default function Button({
   variant = 'primary',
   size = 'md',
   withArrow = false,
+  loading = false,
+  disabled = false,
   className = '',
   children,
   ...rest
@@ -41,10 +43,41 @@ export default function Button({
     .filter(Boolean)
     .join(' ');
 
+  /*
+   * THE LOADING STATE DISABLES THE BUTTON, IT DOES NOT MERELY LOOK BUSY.
+   *
+   * A spinner that leaves the button clickable invites a second submission of
+   * whatever the first one was doing — a second code sent to the same address,
+   * a second verification of the same code. Tying the two together here means
+   * no call site can show the spinner and forget the guard.
+   *
+   * `aria-busy` carries the same fact to a screen reader, which cannot see the
+   * spinner; the label callers pass while loading ("جارٍ التحقق…") carries it
+   * again in text, for a reader who gets neither.
+   */
   return (
-    <button type="button" className={classes} {...rest}>
+    <button
+      type="button"
+      className={classes}
+      disabled={disabled || loading}
+      aria-busy={loading || undefined}
+      {...rest}
+    >
+      {/*
+        The spinner comes FIRST in source order, which RTL places at the right —
+        the reading start, where a leading icon belongs. Same reasoning as the
+        arrow below, mirrored.
+
+        It spins even under `prefers-reduced-motion`. The guidance there is
+        aimed at large or parallax movement, and the alternative for a 16px
+        indicator is a frozen spinner, which reads as a hung interface rather
+        than as a calm one.
+      */}
+      {loading ? <LoaderCircle className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
       <span>{children}</span>
-      {withArrow ? <ArrowLeft className="h-4 w-4" aria-hidden="true" /> : null}
+      {/* Hidden while loading: the spinner already occupies the icon slot, and
+          showing both makes one short button carry two competing signals. */}
+      {withArrow && !loading ? <ArrowLeft className="h-4 w-4" aria-hidden="true" /> : null}
     </button>
   );
 }

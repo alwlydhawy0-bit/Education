@@ -131,7 +131,7 @@ export default function EmailStep({ email, onEmailChange, onSubmit, error, onErr
         ) : null}
       </div>
 
-      <Button type="submit" withArrow disabled={pending} className="mt-6 w-full">
+      <Button type="submit" withArrow loading={pending} className="mt-6 w-full">
         {pending ? 'جارٍ الإرسال…' : 'إرسال رمز التحقق'}
       </Button>
     </form>

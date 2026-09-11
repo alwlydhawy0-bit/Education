@@ -103,7 +103,46 @@ export default function Auth({ onAuthenticated }) {
   };
 
   return (
-    <main className="flex min-h-[100dvh] items-center justify-center bg-canvas px-4 py-10">
+    /*
+      THE FULL-BLEED SHELL.
+
+      `relative overflow-hidden` makes this the positioning context for any
+      ambient background shape added later, and clips it to the viewport rather
+      than letting it push the page sideways.
+
+      TWO UNITS HERE ARE DELIBERATE AND BOTH ARE THE LESS OBVIOUS CHOICE:
+
+      `min-h-[100dvh]`, not `min-h-screen`. `min-h-screen` is `100vh`, which on
+      a mobile browser is the LARGE viewport — the height the page would have if
+      the address bar were hidden. With the bar showing, `100vh` is taller than
+      what the user can see, so the bottom of a centred card drifts under the
+      browser chrome. `100dvh` is the height that is actually visible and
+      resizes as the bar comes and goes. `AppLayout` already uses `dvh` for this
+      exact reason, so this also keeps the two shells consistent. No `vh`
+      fallback is paired with it: stacking `min-h-screen min-h-[100dvh]` on one
+      element leaves which rule wins to Tailwind's internal sort order rather
+      than to the class order written here, and `dvh` has been in every engine
+      since 2022 anyway.
+
+      `w-full`, NOT `w-screen`. Per spec, `vw` resolves against the viewport
+      INCLUDING the classic scrollbar gutter, so a `100vw` element on a browser
+      that reserves gutter space is wider than the space it has and the page
+      gains a horizontal scrollbar nobody asked for.
+
+      Two honest qualifications, because this is a guard rather than a fix for
+      an observed bug. First, it could not be reproduced in this project's
+      headless Chromium, which uses overlay scrollbars and reports a gutter of
+      zero however it is launched — so the claim above rests on the spec and on
+      desktop Firefox/Windows Chrome behaviour, not on a measurement taken here.
+      Second, it would not bite THIS page even where it does apply: the card is
+      centred in a viewport-height box, so there is never a vertical scrollbar
+      and therefore never a gutter.
+
+      `w-full` is still the right choice, just for a plainer reason than a bug
+      report: a block-level element already fills its parent, so `w-full` states
+      the intent and has no case where it can disagree with the viewport.
+    */
+    <main className="relative flex min-h-[100dvh] w-full items-center justify-center overflow-hidden bg-surface-alt/40 p-4 sm:p-6">
       {/*
         `overflow-hidden` is what turns the arc from a square into a quarter
         disc clipped by the card's own 16px corner. Without it the decoration

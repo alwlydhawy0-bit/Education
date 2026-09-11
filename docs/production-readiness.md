@@ -84,13 +84,13 @@ proving each gate holds with the other removed.
 
 ## 4. Database and vector indexing
 
-`pnpm db:audit-indexes` — **PASS, 0 findings** across 216 indexes and 103
+`pnpm db:audit-indexes` — **PASS, 0 findings** across 215 indexes and 103
 foreign keys.
 
 | Check                                           | Status           | Evidence                                       |
 | ----------------------------------------------- | ---------------- | ---------------------------------------------- |
 | Every cascading foreign key is indexed          | PASS             | migration 0034 added 34; rule I1 keeps it true |
-| No redundant indexes                            | PASS             | rule I2                                        |
+| No redundant indexes                            | PASS             | rule I2, after the fix below; migration 0035   |
 | Vector retrieval filters before it ranks        | PASS             | `tests/integration/query-plans.test.ts`        |
 | Vector retrieval returns a full, exact top-K    | PASS             | `MATERIALIZED` CTE — **VULN-061**              |
 | Statement timeout bounds a runaway query        | PASS             | `statement_timeout: 10s` in `platform/db.ts`   |
@@ -104,6 +104,35 @@ so at scale it chose the HNSW index for the ORDER BY and filtered afterwards —
 and pgvector 0.6 has no iterative index scan, so post-filtering returns fewer
 rows than the limit, silently. Measured: `LIMIT 8` returned **3**, ten times out
 of ten. See VULN-061.
+
+**The second finding, which is about this audit rather than the database.** Rule
+I2 — "no redundant indexes" — had never once been capable of firing. It compared
+a leading slice of one index's column list against another's:
+
+```sql
+(y.indkey::int2[])[0:array_length(x.indkey::int2[], 1) - 1] = x.indkey::int2[]
+```
+
+`indkey` is a `pg_catalog` vector with a ZERO-based lower bound, an array slice
+in PostgreSQL is ONE-based, and array equality compares bounds as well as
+elements. `'[0:0]={1}' = '{1}'` is therefore FALSE no matter what the columns
+are. The predicate was structurally incapable of returning true, so "PASS, no
+redundant indexes" had been asserting nothing at all since the audit was
+written. Comparing the slices with `array_to_string` fixes it.
+
+The fixed rule found a real redundancy on its first run, live since migration
+0020: `assessment_attempts_assessment_idx (assessment_id)` is a leading prefix
+of `assessment_attempts_released_idx (assessment_id, released_at)`, so the
+narrower index cost write amplification on every attempt row and bought
+nothing. Migration 0035 drops it, which is why the index count fell from 216 to 215.
+
+It was found by writing falsification tests for the audit — injecting a
+redundancy and expecting the audit to complain — as part of closing defect
+injection round 15 (F18). The RLS audit shipped with eight such tests and the
+index audit shipped with none, and that difference is exactly where the dead
+rule hid. **An audit is not evidence until something has watched it fail.**
+Both audits now have falsification tests in
+`tests/integration/query-plans.test.ts` and `tests/integration/rls-audit.test.ts`.
 
 ---
 
@@ -189,18 +218,37 @@ as one.
 ## 8. The commands, in the order an operator would run them
 
 ```bash
+pnpm run format                           # prettier --check, CI's first step
 pnpm deploy:check-env .env.production     # before anything is built
 pnpm security:secrets                     # nothing committed
 pnpm security:audit                       # no high/critical advisories
 pnpm typecheck && pnpm lint && pnpm test  # the full gate
 
-DATABASE_URL="postgres://edu_migrator:...@host/db" pnpm db:migrate
-DATABASE_URL="postgres://postgres:...@host/db" pnpm security:rls
-DATABASE_URL="postgres://postgres:...@host/db" pnpm db:audit-indexes
+DATABASE_URL="$MIGRATOR_URL" pnpm db:migrate
+DATABASE_URL="$CATALOG_READER_URL" pnpm security:rls
+DATABASE_URL="$CATALOG_READER_URL" pnpm db:audit-indexes
 ```
 
-The two audits need a role that can read `pg_policy` and `pg_proc`; they read
-the catalog and write nothing.
+The URLs above are read from the shell, never written down. A connection string
+carries a password, and a documented example with the password position filled
+in — even elided to `...` — is a pattern that gets copied with a real value in
+it. `pnpm security:secrets` refuses that shape anywhere in the repository, and
+it refused these three lines when they were written the other way.
+
+`$MIGRATOR_URL` is the schema owner, used for migrations and nothing else.
+`$CATALOG_READER_URL` needs only to read `pg_policy` and `pg_proc`; both audits
+read the catalog and write nothing.
+
+**`pnpm run format` is first on that list for a reason.** It is the first step
+of CI's `static` job, and it had been failing across 76 files since at least
+forty commits back. A failing step ends a GitHub Actions job, so everything
+behind it — lint, typecheck, the unit project, the architecture project, the web
+client build, and the assertion that no server-only value reached the client
+bundle — had not been running in CI at all. The failures were pure line
+wrapping, which is exactly why nobody looked: a red check that fails for a
+harmless reason gets read as noise, and then it stops being a check and starts
+being a lid on the checks behind it. The repository is now formatted and the
+step passes.
 
 ---
 

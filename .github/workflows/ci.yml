@@ -128,6 +128,22 @@ jobs:
           --health-timeout 5s
           --health-retries 10
 
+      # The rate-limit store's Lua script is executed by
+      # tests/integration/rate-limit-store-redis.test.ts against a REAL server.
+      # That suite fails rather than skipping when Redis is absent, deliberately:
+      # it exists because the unit suite's fake never ran the script, and a
+      # suite that skips its way past a missing dependency reports success for a
+      # guarantee nobody checked. So this service is required, not optional.
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
     env:
       PGHOST: 127.0.0.1
       PGPORT: '5432'
@@ -139,6 +155,7 @@ jobs:
       TEST_APP_PASSWORD: app_ci_pw
       TEST_MIGRATOR_PASSWORD: mig_ci_pw
       TEST_NORLS_PASSWORD: norls_ci_pw
+      TEST_REDIS_URL: redis://127.0.0.1:6379
 
     steps:
       - uses: actions/checkout@v4

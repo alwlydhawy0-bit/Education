@@ -14,16 +14,16 @@ infrastructure to match a vocabulary would be the opposite of hardening.
 So the brief was read as its four requirements rather than its four product
 names, and each was mapped onto what exists:
 
-| Asked for                        | What it means here                                                         |
-| -------------------------------- | -------------------------------------------------------------------------- |
-| Upstash / Redis rate limiting    | A **shared store** behind the existing policy catalogue. Redis, required in production. |
-| Helmet / CSP / CORS              | Already present. Verified end to end, including on a 404, and extended with the proxy setting that decides what an IP *is*. |
-| Supabase RLS audit               | A **catalog-derived** audit of the platform's own RLS: six rules, every table, proven able to fail. |
-| pgvector optimisation            | A query-plan investigation that found a correctness bug, not a slow query.  |
-| Pino / Winston structured logging | Already structured, already redacting. Fixed the one file that went around it. |
-| `.env.production` validation      | A validator that runs the **server's own schema** before an image is built.  |
-| Dockerfile / Compose             | Written, reviewed, and verified as far as an environment with no container registry allows. |
-| `/health`                        | Split into liveness and readiness, because conflating them causes outages.   |
+| Asked for                         | What it means here                                                                                                          |
+| --------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Upstash / Redis rate limiting     | A **shared store** behind the existing policy catalogue. Redis, required in production.                                     |
+| Helmet / CSP / CORS               | Already present. Verified end to end, including on a 404, and extended with the proxy setting that decides what an IP _is_. |
+| Supabase RLS audit                | A **catalog-derived** audit of the platform's own RLS: six rules, every table, proven able to fail.                         |
+| pgvector optimisation             | A query-plan investigation that found a correctness bug, not a slow query.                                                  |
+| Pino / Winston structured logging | Already structured, already redacting. Fixed the one file that went around it.                                              |
+| `.env.production` validation      | A validator that runs the **server's own schema** before an image is built.                                                 |
+| Dockerfile / Compose              | Written, reviewed, and verified as far as an environment with no container registry allows.                                 |
+| `/health`                         | Split into liveness and readiness, because conflating them causes outages.                                                  |
 
 **Nothing established was redesigned.** The policy catalogue, the origin guard,
 the helmet configuration, the authorization engine and the RLS policies are
@@ -31,7 +31,7 @@ untouched except where a defect was demonstrated.
 
 ---
 
-## 2. THE THREE DEFECTS
+## 2. THE FIVE DEFECTS
 
 Each was found by running or measuring something, not by reading it.
 
@@ -92,6 +92,49 @@ one global bucket, every security event naming the proxy.
 The parser now accepts only an address or CIDR list and refuses both silent
 forms — the hop count, and the blanket `true` that believes a client-supplied
 header.
+
+### VULN-064 — the rule guaranteeing no redundant indexes had never been able to fire
+
+Found late, while writing falsification tests for the index audit as part of
+closing defect injection round 15. Rule I2 compared a leading slice of one
+index's column list against another's. `pg_index.indkey` is a catalog vector
+with a **zero**-based lower bound, a PostgreSQL array slice is **one**-based,
+and array equality compares bounds as well as elements — so the predicate was
+FALSE for every pair of indexes on every table.
+
+"PASS — no redundant indexes" had therefore been asserting nothing at all since
+the audit was written. The fixed rule found a real redundancy on its first run,
+live since migration 0020: `assessment_attempts_assessment_idx` is a leading
+prefix of `assessment_attempts_released_idx`, costing write amplification on the
+platform's hottest write path and buying nothing. Migration 0035 drops it.
+
+The RLS audit shipped with eight falsification tests. The index audit shipped
+with none, and that is exactly where a dead rule could hide. **An audit is not
+evidence until something has watched it fail.**
+
+### The CI gate had been failing at its first step, so none of the rest of it ran
+
+Not a defect in the product; a defect in the thing that is supposed to catch
+defects, which is worse than it sounds.
+
+`.github/workflows/ci.yml` runs `pnpm run format` — `prettier --check .` — as the
+first step of the `static` job. It was failing across **76 files**, and had been
+since at least 2026-09-07, forty commits back. A failing step ends the job, so
+**every step after it had not run in CI**: lint, typecheck, the unit project, the
+architecture project, the web client build, and the assertion that no
+server-only value reached the client bundle. That last one is a security check.
+
+Nothing was actually broken — the failures were pure line-wrapping, and the full
+gate passes before and after — which is precisely why it went unnoticed for so
+long. A gate that fails for a harmless reason gets read as noise, and then it
+stops being a gate. The whole repository is now formatted (`prettier --write .`,
+77 files, no semantic change) and `pnpm run format` passes, so the steps behind
+it run again.
+
+**The lesson.** _A red check that everyone has learned to ignore is worse than no
+check, because it also hides the checks behind it._ This one was found by
+running CI's own commands locally rather than assuming the gate this task kept
+citing was the gate CI was executing.
 
 ---
 
@@ -189,19 +232,20 @@ a server connecting as the schema owner silently bypasses RLS everywhere.
 
 ## 4. VERIFIED
 
-| Gate                                 | Result                          |
-| ------------------------------------ | ------------------------------- |
-| `pnpm typecheck`                     | clean, exit 0                   |
-| `pnpm lint`                          | clean, exit 0                   |
-| `pnpm test` (all six projects)       | PLACEHOLDER_GATE                |
-| `pnpm security:rls`                  | PASS — 0 findings, 51 tables    |
-| `pnpm db:audit-indexes`              | PASS — 0 findings, 216 indexes  |
-| `pnpm security:secrets`              | PASS — 442 files                |
-| `pnpm security:audit`                | 0 high, 0 critical              |
-| `pnpm deploy:check-env` (template)   | correctly REFUSES until filled  |
-| `docker compose config`              | valid                           |
-| Defect injection round 15            | PLACEHOLDER_INJECTION           |
-| Live checks                          | see §5                          |
+| Gate                               | Result                              |
+| ---------------------------------- | ----------------------------------- |
+| `pnpm run format`                  | clean, exit 0 — after the fix in §2 |
+| `pnpm typecheck`                   | clean, exit 0                       |
+| `pnpm lint`                        | clean, exit 0                       |
+| `pnpm test` (all six projects)     | 105 files, 3,532 tests, exit 0      |
+| `pnpm security:rls`                | PASS — 0 findings, 51 tables        |
+| `pnpm db:audit-indexes`            | PASS — 0 findings, 215 indexes      |
+| `pnpm security:secrets`            | PASS — 472 files                    |
+| `pnpm security:audit`              | 0 high, 0 critical                  |
+| `pnpm deploy:check-env` (template) | correctly REFUSES until filled      |
+| `docker compose config`            | valid                               |
+| Defect injection round 15          | 20 injected, 20 caught, 0 escaped   |
+| Live checks                        | see §5                              |
 
 ---
 
@@ -238,7 +282,7 @@ with the full helmet set on both, and the boot log as structured JSON:
 **The image, as far as this environment allows.** It was NOT built: the egress
 policy denies CONNECT to `docker.io`, `ghcr.io`, `mcr.microsoft.com`, `quay.io`
 and `public.ecr.aws` alike, so no base image can be pulled. Everything the
-Dockerfile *does* was reproduced natively — the exact install command into a
+Dockerfile _does_ was reproduced natively — the exact install command into a
 clean tree (88 packages), the exact copied file set, a boot from that tree under
 the full production posture, the exact HEALTHCHECK one-liner (exit 0 when ready,
 exit 1 with nothing listening), and the SIGTERM drain above.
@@ -269,8 +313,10 @@ NEW
   Dockerfile  docker-compose.yml  .env.production.example
   docs/production-readiness.md                         the checklist
   tests/unit/{trusted-proxy,rate-limit-store,check-env,health}.test.ts
+  db/migrations/0035_drop_redundant_attempt_index.sql  drops the redundancy I2 found (VULN-064)
   tests/architecture/production-readiness.test.ts
   tests/integration/{rls-audit,query-plans}.test.ts
+  tests/integration/rate-limit-store-redis.test.ts     the real Lua, a real server
   tests/security/deployment-surface.test.ts
 
 CHANGED
@@ -281,6 +327,9 @@ CHANGED
   apps/api/src/modules/knowledge/knowledge.repository.ts  the MATERIALIZED scope (VULN-061)
   packages/observability/src/logger.ts                 stderrJsonSink
   packages/observability/src/security-events.ts        ratelimit.store_degraded
+  tools/db/audit-indexes.ts                            rule I2's prefix predicate (VULN-064)
+  tests/unit/config.test.ts                            SECRET_BEARING_KEYS, the hardened env
+  tests/architecture/deployment-config.test.ts         retargeted from apps/web to edunext
   docs/security/{rate-limiting,limitations,vulnerability-log}.md
   docs/deployment-api.md
 ```
@@ -289,7 +338,102 @@ CHANGED
 
 ## 7. TEST RESULTS
 
-PLACEHOLDER_RESULTS
+**The full gate, on the clean tree, with every fix below in place.**
+
+```
+pnpm typecheck   exit 0
+pnpm lint        exit 0
+pnpm test        105 files, 3,532 tests, all passing  (919s)
+```
+
+All six vitest projects — unit, architecture, web, integration, security,
+evaluation. Nothing skipped, nothing quarantined.
+
+**This task's suites**
+
+| Suite                                              | Tests | What it removes                                  |
+| -------------------------------------------------- | ----- | ------------------------------------------------ |
+| `tests/unit/trusted-proxy.test.ts`                 | 12    | everything — the parser is pure                  |
+| `tests/unit/rate-limit-store.test.ts`              | 13    | Redis (a fake, so the outage path can be driven) |
+| `tests/unit/check-env.test.ts`                     | 18    | the process environment                          |
+| `tests/unit/health.test.ts`                        | 8     | the database                                     |
+| `tests/unit/config.test.ts`                        | 47    | the process environment                          |
+| `tests/architecture/production-readiness.test.ts`  | 22    | behaviour — asserts on source text               |
+| `tests/architecture/deployment-config.test.ts`     | 16    | Vercel — asserts the config describes this repo  |
+| `tests/integration/rls-audit.test.ts`              | 12    | nothing — real catalog, real injections          |
+| `tests/integration/query-plans.test.ts`            | 10    | nothing — real planner, real `EXPLAIN`           |
+| `tests/integration/rate-limit-store-redis.test.ts` | 7     | nothing — the real Lua, a real server            |
+| `tests/security/deployment-surface.test.ts`        | 18    | nothing — real HTTP                              |
+| `tests/security/rate-limiting.test.ts`             | 7     | nothing — real HTTP                              |
+
+**Defect injection round 15 — 20 injected, 20 caught, 0 escaped.**
+
+Five of these escaped on the first clean run, and each escape is a gap that was
+closed rather than argued away.
+
+| #   | Defect                                                                        | Caught by       |
+| --- | ----------------------------------------------------------------------------- | --------------- |
+| F1  | The route is dropped from the bucket key, so every route shares one counter   | unit, **plans** |
+| F2  | A store error FAILS OPEN — every request allowed while Redis is down          | unit            |
+| F3  | The expiry is refreshed on every hit, so a burst slides the window forever    | plans†          |
+| F4  | The recovery-probe cooldown is removed — a dead store is called every request | unit            |
+| F5  | The whole error object is reported, and a Redis error carries a password      | unit            |
+| F6  | The degradation event fires per request rather than on the transition         | unit†           |
+| F7  | The plugin is allowed to skip the limiter when the store errors               | arch†           |
+| F8  | Blanket proxy trust is accepted, so any caller picks their own bucket         | unit, sec       |
+| F9  | A hop count is accepted — Fastify would silently trust no peer at all         | unit, sec       |
+| F10 | The boot log prints the internal subnets — topology is reconnaissance         | unit            |
+| F11 | Production no longer requires a shared store, so limits silently multiply     | unit, sec       |
+| F12 | The Redis URL stops being treated as secret-bearing                           | unit†           |
+| F13 | Liveness depends on the database, so a database blip restarts the whole fleet | unit            |
+| F14 | The readiness memo is removed — an unauthenticated pool amplifier             | unit            |
+| F15 | The readiness body names the dependency and the failure                       | unit            |
+| F16 | The scope stops being materialized, so the planner may rank before filtering  | plans           |
+| F17 | The RLS audit stops requiring FORCE, so the owner bypasses every policy       | plans           |
+| F18 | The index audit stops looking at cascading foreign keys                       | plans†          |
+| F19 | The validator stops catching placeholders left in a copied template           | unit            |
+| F20 | The validator stops checking the proxy setting                                | unit            |
+
+† escaped on the first run; the suite that catches it now did not exist, or did
+not reach that behaviour, until the escape was closed.
+
+**What the five escapes were actually about**
+
+- **F3 — the fake had never run the script.** `tests/unit/rate-limit-store.test.ts`
+  replaces Redis with a fake that INTERPRETS the Lua script's contract. That is
+  the right tool for the outage path (a real server will not fail on cue) and it
+  means the script itself was executed by nothing in the repository. Moving
+  `PEXPIRE` out of the `count == 1` branch makes every request renew the window,
+  so a sustained burst never reaches the limit and rate limiting stops existing
+  — and nothing noticed. `tests/integration/rate-limit-store-redis.test.ts` now
+  runs the real script against a real server. A missing Redis **fails** that
+  suite rather than skipping it: a suite that skips when its dependency is
+  absent reports success for a guarantee nobody checked, which is the same
+  failure shape in a different costume.
+
+- **F6 — a serial test cannot see a transition bug.** The existing case drove
+  the store one request at a time, where "first failure" and "the transition"
+  are the same moment. Ten concurrent requests into a dead store separate them.
+
+- **F7 — a setting with no behaviour of its own.** `skipOnError: false` changes
+  nothing observable today; it only matters after someone flips it. There is
+  nothing to test behaviourally, so it is a fitness function over the source.
+
+- **F12 — a connection string carries a password.** `REDIS_URL` had been added
+  to the schema without being added to the set the validator refuses to print.
+
+- **F18 — the escape that was a real bug.** See VULN-064. Rule I2 of the index
+  audit ("no redundant indexes") compared a zero-based catalog vector against a
+  one-based array slice, and PostgreSQL array equality compares bounds, so the
+  predicate could never be true. The rule had been reporting PASS since the day
+  it was written without ever being able to report anything else. Fixing it
+  surfaced a genuine redundancy live since migration 0020, dropped by migration 0035. The audit's index count fell from 216 to 215 as a result.
+
+**The green-baseline check.** Every suite above was confirmed passing on the
+unmodified tree before and after the round. The runner restores through
+`git checkout --` and verifies the tree is clean at every defect boundary,
+aborting rather than producing a result that a previous defect's residue might
+explain.
 
 ---
 
@@ -324,7 +468,7 @@ result-set semantics that an approximate index quietly does not satisfy.
 The remedy is not vigilance. It is `tests/integration/query-plans.test.ts`,
 which extracts the query from the repository source and asserts on the PLAN.
 That is a new kind of test for this codebase, and the class of defect it covers
-— *correct code, legal optimisation, wrong answer* — has no other detector.
+— _correct code, legal optimisation, wrong answer_ — has no other detector.
 
 A second, smaller lesson, learned for the second time and now written where it
 will be read: **a fitness function must assert on code, never on the

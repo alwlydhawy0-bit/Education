@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { DEFAULT_ACADEMIC } from '../data/academic.js';
 import { AuthContext } from './context.js';
 
 /**
@@ -43,6 +44,7 @@ const DEMO_USER = {
   unreadCount: 1,
   avatarUrl: null,
   memberSince: 'مارس 2025',
+  academic: DEFAULT_ACADEMIC,
   certificates: [
     { id: 'c1', title: 'أساسيات تحليل البيانات — الوحدة الأولى', issuedAt: 'مايو 2025' },
     { id: 'c2', title: 'مقدمة في تصميم الواجهات', issuedAt: 'يوليو 2025' },
@@ -74,9 +76,47 @@ const DEMO_USER = {
  */
 const SESSION_KEY = 'edunext:session';
 
+/**
+ * THE ACADEMIC PROFILE IS STORED SEPARATELY FROM THE SESSION MARKER.
+ *
+ * The marker is a boolean fact about this browser. The academic profile is
+ * DATA, and keeping the two apart means the shapes cannot be confused: reading
+ * a corrupt profile can never be mistaken for "there is a session", and a
+ * failure to parse it degrades to the defaults rather than to a signed-out
+ * visitor staring at a login screen they did not ask for.
+ *
+ * These are preferences, not credentials, so persisting them in the clear is
+ * fine — which is exactly why the session marker next to them is NOT a token.
+ * On a real backend this comes from the profile endpoint and this key becomes
+ * a cache of it.
+ */
+const ACADEMIC_KEY = 'edunext:academic';
+
+function readStoredAcademic() {
+  try {
+    const raw = window.sessionStorage.getItem(ACADEMIC_KEY);
+    if (!raw) return DEFAULT_ACADEMIC;
+    const parsed = JSON.parse(raw);
+    /*
+     * Read defensively. This value survives a reload, so a build that renames
+     * a field leaves the OLD shape in a returning visitor's browser — and
+     * `academic.stage` coming back `undefined` would render an empty select
+     * with no selected option, which looks like the page failed to load.
+     * Falling back per field keeps a partial profile usable.
+     */
+    return {
+      stage: typeof parsed?.stage === 'string' ? parsed.stage : DEFAULT_ACADEMIC.stage,
+      major: typeof parsed?.major === 'string' ? parsed.major : DEFAULT_ACADEMIC.major,
+    };
+  } catch {
+    return DEFAULT_ACADEMIC;
+  }
+}
+
 function readStoredSession() {
   try {
-    return window.sessionStorage.getItem(SESSION_KEY) === 'active' ? DEMO_USER : null;
+    if (window.sessionStorage.getItem(SESSION_KEY) !== 'active') return null;
+    return { ...DEMO_USER, academic: readStoredAcademic() };
   } catch {
     // Private browsing and locked-down enterprise profiles both throw on
     // access rather than returning null. A storage failure must degrade to
@@ -88,13 +128,38 @@ function readStoredSession() {
 export function AuthProvider({ children, initialUser = null }) {
   const [user, setUser] = useState(() => initialUser ?? readStoredSession());
 
-  const signIn = useCallback(() => setUser(DEMO_USER), []);
+  const signIn = useCallback(() => setUser({ ...DEMO_USER, academic: readStoredAcademic() }), []);
   const signOut = useCallback(() => setUser(null), []);
+
+  /**
+   * Update one or both academic fields.
+   *
+   * It takes a PATCH rather than the whole object so the two selects can be
+   * independent controls without either having to know the other's current
+   * value — `updateAcademic({ stage })` cannot accidentally blank the major,
+   * which is exactly what passing a full object from a stale closure would do.
+   */
+  const updateAcademic = useCallback((patch) => {
+    setUser((current) =>
+      current === null ? current : { ...current, academic: { ...current.academic, ...patch } },
+    );
+  }, []);
 
   useEffect(() => {
     try {
-      if (user) window.sessionStorage.setItem(SESSION_KEY, 'active');
-      else window.sessionStorage.removeItem(SESSION_KEY);
+      if (user) {
+        window.sessionStorage.setItem(SESSION_KEY, 'active');
+        window.sessionStorage.setItem(ACADEMIC_KEY, JSON.stringify(user.academic));
+      } else {
+        window.sessionStorage.removeItem(SESSION_KEY);
+        /*
+         * The profile goes with the session. It describes the person who just
+         * left, and on a shared machine the next visitor must not inherit it —
+         * a signed-out browser showing "دراسات عليا · علوم بيانات" tells them
+         * something about someone else.
+         */
+        window.sessionStorage.removeItem(ACADEMIC_KEY);
+      }
     } catch {
       // Persisting is a convenience; failing to persist must not break the app.
       // The session then simply lasts as long as the page does.
@@ -108,8 +173,8 @@ export function AuthProvider({ children, initialUser = null }) {
    * worth three lines rather than an inline literal.
    */
   const value = useMemo(
-    () => ({ user, isAuthenticated: user !== null, signIn, signOut }),
-    [user, signIn, signOut],
+    () => ({ user, isAuthenticated: user !== null, signIn, signOut, updateAcademic }),
+    [user, signIn, signOut, updateAcademic],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

@@ -1,5 +1,7 @@
-import { ArrowLeft, Check, Clock, Lock, Play, Star, Users } from 'lucide-react';
+import { useState } from 'react';
+import { ArrowLeft, Check, Clock, Lock, NotebookPen, Play, Star, Users } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
+import NotePadModal from '../components/tools/NotePadModal.jsx';
 import { useGuardedAction } from '../auth/useGuardedAction.js';
 import { useAuth } from '../auth/useAuth.js';
 import { Button, LevelDots } from '../components/ui/index.js';
@@ -40,6 +42,7 @@ export default function CourseDetails() {
   const course = getCourse(courseId);
   const { isAuthenticated } = useAuth();
   const guard = useGuardedAction();
+  const [notesOpen, setNotesOpen] = useState(false);
 
   if (!course) return <CourseNotFound id={courseId} />;
 
@@ -153,6 +156,35 @@ export default function CourseDetails() {
           </section>
         </aside>
       </div>
+
+      {/*
+        THE NOTEBOOK IS OPEN TO EVERYONE, INCLUDING GUESTS.
+        
+        Every other action on this page is gated — enrolling, playing a lesson,
+        running the simulation — because each one consumes something the account
+        pays for. Note-taking consumes nothing: the notes live in this browser,
+        belong to the person who typed them, and reach no server. Gating it
+        would be a lock with nothing behind it, and it would block the one thing
+        a guest evaluating the course might genuinely want to do while reading
+        the syllabus.
+      */}
+      <button
+        type="button"
+        onClick={() => setNotesOpen(true)}
+        aria-haspopup="dialog"
+        aria-expanded={notesOpen}
+        className="fixed bottom-24 end-4 z-40 inline-flex h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-on-primary shadow-lift transition-colors duration-200 hover:bg-primary-hover md:bottom-6 md:end-6"
+      >
+        <NotebookPen className="h-4 w-4" aria-hidden="true" />
+        <span>دفتر الملاحظات</span>
+      </button>
+
+      <NotePadModal
+        courseId={courseId}
+        courseTitle={title}
+        open={notesOpen}
+        onClose={() => setNotesOpen(false)}
+      />
     </div>
   );
 }

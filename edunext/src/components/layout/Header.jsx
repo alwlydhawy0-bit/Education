@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Bell, LogIn, Moon, Search, Settings, Sun } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/useAuth.js';
+import { academicSummary } from '../../data/academic.js';
 
 /**
  * The top bar: who you are, what you are looking for, and what you can change.
@@ -59,8 +60,22 @@ export default function Header() {
   );
 }
 
-/** The signed-in learner: avatar, name, role. */
+/**
+ * The signed-in learner: avatar, name, and academic standing.
+ *
+ * THE SECOND LINE PREFERS THE ACADEMIC PROFILE OVER THE ROLE. "طالبة" is true
+ * of every learner here and therefore tells the reader nothing; "مرحلة جامعية ·
+ * علوم حاسب" is about THEM. The role is the fallback for an account that has
+ * not filled the profile in yet — not a placeholder like "غير محدّد", which
+ * would put a defect-shaped string in the header of every new account.
+ *
+ * `truncate` on that line rather than a shorter summary: the two-part string
+ * fits comfortably on a phone, and clipping the rare long combination is
+ * better than abbreviating every one of them pre-emptively.
+ */
 function MemberIdentity({ user }) {
+  const summary = academicSummary(user.academic);
+
   return (
     <Link to="/profile" className="flex min-w-0 items-center gap-3 rounded-full">
       <Avatar name={user.name} src={user.avatarUrl} />
@@ -69,10 +84,10 @@ function MemberIdentity({ user }) {
           مرحبًا، {user.name}
         </span>
         <span className="mt-0.5 flex items-center gap-1.5 text-xs text-text-muted">
-          {/* The dot is decorative; the word "طالبة" already carries the status,
-              so marking it aria-hidden avoids a second announcement of nothing. */}
-          <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
-          {user.role}
+          {/* The dot is decorative; the words beside it already carry the
+              status, so aria-hidden avoids a second announcement of nothing. */}
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-primary" aria-hidden="true" />
+          <span className="truncate">{summary ?? user.role}</span>
         </span>
       </span>
     </Link>

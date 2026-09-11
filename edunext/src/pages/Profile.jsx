@@ -1,7 +1,8 @@
-import { Award, LogIn, Mail, ShieldCheck, UserRound } from 'lucide-react';
+import { Award, GraduationCap, LogIn, Mail, ShieldCheck, UserRound } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../auth/useAuth.js';
-import { Button, LevelDots } from '../components/ui/index.js';
+import { Button, LevelDots, Select } from '../components/ui/index.js';
+import { MAJORS, STAGES, academicSummary } from '../data/academic.js';
 import { enrolledCourses } from '../data/courses.js';
 
 /**
@@ -22,7 +23,7 @@ import { enrolledCourses } from '../data/courses.js';
  * certificates, because there are none to show — not because a guard hid them.
  */
 export default function Profile() {
-  const { user, isAuthenticated, signOut } = useAuth();
+  const { user, isAuthenticated, signOut, updateAcademic } = useAuth();
   const courses = enrolledCourses(isAuthenticated);
 
   if (!isAuthenticated) return <GuestProfile />;
@@ -41,7 +42,9 @@ export default function Profile() {
         </span>
         <div className="min-w-0 flex-1">
           <h1 className="text-lg font-bold text-text-main">{user.name}</h1>
-          <p className="mt-0.5 text-xs text-text-muted">{user.role}</p>
+          <p className="mt-0.5 text-xs text-text-muted">
+            {academicSummary(user.academic) ?? user.role}
+          </p>
           <p className="mt-2 flex items-center gap-1.5 text-xs text-text-muted">
             <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
             {/* An address is an LTR string; without `dir` the browser reorders
@@ -68,6 +71,54 @@ export default function Profile() {
           أنتِ مسجَّلة الدخول منذ {user.memberSince}. جميع الدروس والمحاكاة متاحة لك، ويُحفَظ تقدّمك
           تلقائيًا.
         </p>
+      </section>
+
+      {/* الملف الأكاديمي */}
+      <section aria-labelledby="academic-heading" className="card-surface p-5 sm:p-6">
+        <div className="flex items-start gap-3">
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary-light">
+            <GraduationCap className="h-5 w-5 text-primary" aria-hidden="true" />
+          </span>
+          <div className="min-w-0">
+            <h2 id="academic-heading" className="text-base font-semibold text-text-main">
+              ملفك الأكاديمي
+            </h2>
+            <p className="mt-1 text-xs leading-relaxed text-text-muted">
+              يساعدنا هذا على ترتيب التوصيات ومستوى الشرح. يمكنك تغييره متى شئتِ، ويظهر ملخّصه في
+              أعلى الصفحة.
+            </p>
+          </div>
+        </div>
+
+        {/*
+          THE CHANGE SAVES ON SELECTION. There is no "حفظ" button, and its
+          absence is deliberate: two dropdowns with a save button is a form that
+          can be left in a state the visitor believes they submitted. Writing on
+          change means what is on screen is always what is stored — and with no
+          network call in between, a confirmation toast would be theatre.
+
+          Each select sends only its own field. `updateAcademic` takes a patch
+          precisely so the two controls never need to know each other's value,
+          which is how one of them ends up blanking the other from a stale read.
+        */}
+        <div className="mt-5 grid gap-4 sm:grid-cols-2">
+          <Select
+            id="academic-stage"
+            label="المرحلة الدراسية"
+            hint="أقرب وصف لمرحلتك الحالية."
+            value={user.academic.stage}
+            onChange={(stage) => updateAcademic({ stage })}
+            options={STAGES}
+          />
+          <Select
+            id="academic-major"
+            label="التخصص"
+            hint="اختاري «عام / غير محدّد» إن لم يكن تخصصك في القائمة."
+            value={user.academic.major}
+            onChange={(major) => updateAcademic({ major })}
+            options={MAJORS}
+          />
+        </div>
       </section>
 
       {/* ملخّص الدورات */}

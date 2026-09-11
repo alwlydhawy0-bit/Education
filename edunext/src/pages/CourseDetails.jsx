@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ArrowLeft, Check, Clock, Lock, NotebookPen, Play, Star, Users } from 'lucide-react';
 import { Link, useParams } from 'react-router-dom';
+import AIAssistantWidget from '../components/ai/AIAssistantWidget.jsx';
 import NotePadModal from '../components/tools/NotePadModal.jsx';
 import { useGuardedAction } from '../auth/useGuardedAction.js';
 import { useAuth } from '../auth/useAuth.js';
@@ -158,26 +159,39 @@ export default function CourseDetails() {
       </div>
 
       {/*
-        THE NOTEBOOK IS OPEN TO EVERYONE, INCLUDING GUESTS.
-        
-        Every other action on this page is gated — enrolling, playing a lesson,
-        running the simulation — because each one consumes something the account
-        pays for. Note-taking consumes nothing: the notes live in this browser,
-        belong to the person who typed them, and reach no server. Gating it
-        would be a lock with nothing behind it, and it would block the one thing
-        a guest evaluating the course might genuinely want to do while reading
-        the syllabus.
+        THE STUDY TOOLS, IN ONE STACK.
+
+        Both of these are floating buttons anchored to the same corner, and two
+        independently-positioned `fixed` elements are a collision waiting for
+        the first person to add a third. One flex column owns the corner
+        instead, so spacing is a `gap` rather than an offset each button has to
+        guess correctly.
+
+        `bottom-24` on a phone clears the bottom navigation bar; `md:bottom-6`
+        drops it back down once that bar is gone. `end-4` is the inline END —
+        the LEFT in this RTL layout — deliberately opposite the sidebar so the
+        buttons never sit on top of it.
+
+        BOTH TOOLS ARE OPEN TO GUESTS. Every other action on this page is gated
+        because it consumes something the account pays for; taking notes and
+        asking about the syllabus consume nothing and reach no server. Gating
+        them would be a lock with nothing behind it, and would block exactly
+        what a guest evaluating the course wants to do while reading it.
       */}
-      <button
-        type="button"
-        onClick={() => setNotesOpen(true)}
-        aria-haspopup="dialog"
-        aria-expanded={notesOpen}
-        className="fixed bottom-24 end-4 z-40 inline-flex h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-on-primary shadow-lift transition-colors duration-200 hover:bg-primary-hover md:bottom-6 md:end-6"
-      >
-        <NotebookPen className="h-4 w-4" aria-hidden="true" />
-        <span>دفتر الملاحظات</span>
-      </button>
+      <div className="fixed bottom-24 end-4 z-40 flex flex-col items-end gap-2 md:bottom-6 md:end-6">
+        <AIAssistantWidget course={course} />
+
+        <button
+          type="button"
+          onClick={() => setNotesOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={notesOpen}
+          className="inline-flex h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-on-primary shadow-lift transition-colors duration-200 hover:bg-primary-hover"
+        >
+          <NotebookPen className="h-4 w-4" aria-hidden="true" />
+          <span>دفتر الملاحظات</span>
+        </button>
+      </div>
 
       <NotePadModal
         courseId={courseId}

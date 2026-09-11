@@ -27,7 +27,8 @@ import { Fragment } from 'react';
  * THE SUBSET, AND WHY IT IS SMALL
  * ---------------------------------------------------------------------------
  *
- * Headings, bold, italic, inline code, bullet and numbered lists, blockquotes.
+ * Headings, bold, italic, inline and FENCED code, bullet and numbered lists,
+ * blockquotes.
  * That is what the toolbar can produce, and supporting syntax the toolbar
  * cannot write means shipping a parser for input that only arrives by accident.
  * Anything unrecognised renders as the literal text the learner typed — which
@@ -101,6 +102,42 @@ export function renderMarkdown(source) {
   while (index < lines.length) {
     const line = lines[index];
 
+    /*
+     * FENCED CODE FIRST, because everything inside a fence is literal. Checking
+     * headings or lists before this would let a `# comment` line inside a code
+     * block render as a heading — the classic Markdown bug where pasting a
+     * shell snippet rewrites the page.
+     */
+    const fence = /^```\s*([A-Za-z0-9+#-]*)\s*$/.exec(line);
+    if (fence) {
+      const body = [];
+      index += 1;
+      while (index < lines.length && !/^```\s*$/.test(lines[index])) {
+        body.push(lines[index]);
+        index += 1;
+      }
+      // Skip the closing fence when there is one. An UNCLOSED fence simply runs
+      // to the end of the text rather than throwing away the rest of the note.
+      if (index < lines.length) index += 1;
+      blocks.push(
+        <pre
+          key={`c-${index}`}
+          /*
+           * `dir="ltr"` and `text-start` on the block itself: source code reads
+           * left to right in every language, and rendering it in the page's RTL
+           * context moves brackets and semicolons to the wrong end of the line,
+           * which makes it not merely ugly but wrong.
+           */
+          dir="ltr"
+          className="mt-3 overflow-x-auto rounded-xl border border-accent-subtle bg-surface-alt p-3 text-start text-xs leading-relaxed text-text-main"
+        >
+          <code>{body.join('\n')}</code>
+          {fence[1] ? <span className="sr-only"> ({fence[1]})</span> : null}
+        </pre>,
+      );
+      continue;
+    }
+
     const heading = /^(#{1,3})\s+(.*)$/.exec(line);
     if (heading) {
       const level = heading[1].length;
@@ -172,7 +209,7 @@ export function renderMarkdown(source) {
     while (
       index < lines.length &&
       lines[index].trim() !== '' &&
-      !/^(#{1,3}\s|>\s?|[-*]\s|\d+[.)]\s)/.test(lines[index])
+      !/^(#{1,3}\s|>\s?|[-*]\s|\d+[.)]\s|```)/.test(lines[index])
     ) {
       paragraph.push(lines[index]);
       index += 1;

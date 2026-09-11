@@ -54,11 +54,8 @@ const portfolio = (
   ...overrides,
 });
 
-const decide = (
-  actorId: string,
-  action: StudentProjectAction,
-  resource: StudentProjectResource,
-) => studentProjectPolicy(ctx(actorId), action, resource);
+const decide = (actorId: string, action: StudentProjectAction, resource: StudentProjectResource) =>
+  studentProjectPolicy(ctx(actorId), action, resource);
 
 const decidePortfolio = (
   actorId: string,
@@ -133,9 +130,9 @@ describe('studentProjectPolicy — a classmate', () => {
   });
 
   it('is refused when the class is not shared', () => {
-    expect(
-      decide(OTHER, 'student_project:read', project({ visibility: 'public' })).effect,
-    ).toBe('deny');
+    expect(decide(OTHER, 'student_project:read', project({ visibility: 'public' })).effect).toBe(
+      'deny',
+    );
   });
 
   it('cannot write, whatever they can read', () => {
@@ -173,11 +170,8 @@ describe('studentProjectPolicy — a reviewer', () => {
     // Not "visible but not editable": absent. Submitting is the act that
     // consents to an adult reading it.
     expect(
-      decide(
-        OTHER,
-        'student_project:read',
-        project({ status: 'draft', reviewableByActor: true }),
-      ).effect,
+      decide(OTHER, 'student_project:read', project({ status: 'draft', reviewableByActor: true }))
+        .effect,
     ).toBe('deny');
     expect(
       decide(

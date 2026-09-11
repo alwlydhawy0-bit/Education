@@ -43,7 +43,9 @@ const lesson = (overrides: Partial<LessonSource> = {}): LessonSource => ({
 });
 
 const paragraphs = (count: number, filler = 'Lorem ipsum dolor sit amet consectetur. ') =>
-  Array.from({ length: count }, (_unused, i) => `Paragraph ${i}. ${filler.repeat(3)}`).join(String.fromCharCode(10, 10));
+  Array.from({ length: count }, (_unused, i) => `Paragraph ${i}. ${filler.repeat(3)}`).join(
+    String.fromCharCode(10, 10),
+  );
 
 describe('every chunk carries its ancestry', () => {
   it('stamps organization, course, unit and lesson on all of them', () => {
@@ -128,7 +130,9 @@ describe('token boundary handling', () => {
 
   it('splits a long paragraph at a SENTENCE boundary when one exists', () => {
     const sentence = `${'A'.repeat(200)}. `;
-    const chunks = chunkLesson(lesson({ title: '', summary: '', contentBody: sentence.repeat(12) }));
+    const chunks = chunkLesson(
+      lesson({ title: '', summary: '', contentBody: sentence.repeat(12) }),
+    );
     expect(chunks.length).toBeGreaterThan(1);
     // No chunk begins mid-sentence: each starts with the capital that follows
     // a full stop, never with a stray space or a lowercase continuation.
@@ -173,18 +177,28 @@ describe('token boundary handling', () => {
 
   it('packs short paragraphs instead of emitting one chunk each', () => {
     const chunks = chunkLesson(
-      lesson({ title: '', summary: '', contentBody: Array.from({ length: 20 }, (_u, i) => `Line ${i}.`).join(String.fromCharCode(10, 10)) }),
+      lesson({
+        title: '',
+        summary: '',
+        contentBody: Array.from({ length: 20 }, (_u, i) => `Line ${i}.`).join(
+          String.fromCharCode(10, 10),
+        ),
+      }),
     );
     expect(chunks).toHaveLength(1);
   });
 
   it('folds a short trailing fragment into the chunk before it', () => {
     const chunks = chunkLesson(
-      lesson({ title: '', summary: '', contentBody: `${'A'.repeat(1_150)}${String.fromCharCode(10, 10)}tail` }),
+      lesson({
+        title: '',
+        summary: '',
+        contentBody: `${'A'.repeat(1_150)}${String.fromCharCode(10, 10)}tail`,
+      }),
     );
-    expect(chunks.every((c) => c.content.length >= MIN_CHUNK_CHARACTERS || chunks.length === 1)).toBe(
-      true,
-    );
+    expect(
+      chunks.every((c) => c.content.length >= MIN_CHUNK_CHARACTERS || chunks.length === 1),
+    ).toBe(true);
   });
 });
 

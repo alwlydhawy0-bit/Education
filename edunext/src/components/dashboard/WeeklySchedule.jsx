@@ -134,7 +134,9 @@ export default function WeeklySchedule({ today = new Date().getDay() }) {
                 key={id}
                 className="flex items-center gap-3 rounded-card border border-accent-subtle bg-surface-alt/40 p-3 transition-colors duration-200 hover:border-accent-lavender hover:bg-primary-light/40"
               >
-                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${tone}`}>
+                <span
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl ${tone}`}
+                >
                   <Icon className="h-4 w-4" aria-hidden="true" />
                 </span>
 

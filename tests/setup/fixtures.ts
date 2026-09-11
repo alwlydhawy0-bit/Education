@@ -771,20 +771,16 @@ export async function createExperiment(options: {
   const { rows } = await db.query<{ id: string }>(
     `INSERT INTO experiments (activity_id, simulation_type, initial_config)
      VALUES ($1, $2, $3) RETURNING id`,
-    [
-      activityId,
-      options.simulationType ?? 'circuit',
-      JSON.stringify(options.initialConfig ?? {}),
-    ],
+    [activityId, options.simulationType ?? 'circuit', JSON.stringify(options.initialConfig ?? {})],
   );
   const experimentId = rows[0]?.id;
   if (!experimentId) throw new Error('Failed to seed experiment');
 
   if (!options.withoutRules) {
-    await db.query(`INSERT INTO experiment_validation_rules (experiment_id, rules) VALUES ($1, $2)`, [
-      experimentId,
-      JSON.stringify(options.rules ?? { rules: [] }),
-    ]);
+    await db.query(
+      `INSERT INTO experiment_validation_rules (experiment_id, rules) VALUES ($1, $2)`,
+      [experimentId, JSON.stringify(options.rules ?? { rules: [] })],
+    );
   }
 
   if (status !== 'draft') {

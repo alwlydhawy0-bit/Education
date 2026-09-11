@@ -26,10 +26,7 @@ export default function Header({ user, onNavigate }) {
             {/* The dot is decorative; the word "طالبة" already carries the
                 status, so marking it aria-hidden avoids a second announcement
                 of nothing. */}
-            <span
-              className="h-1.5 w-1.5 rounded-full bg-primary"
-              aria-hidden="true"
-            />
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" />
             {user.role}
           </span>
         </span>

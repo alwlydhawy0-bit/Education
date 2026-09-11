@@ -104,9 +104,7 @@ export const createReplyRequestSchema = z
   .strict();
 export type CreateReplyRequest = z.infer<typeof createReplyRequestSchema>;
 
-export const updateReplyRequestSchema = z
-  .object({ contentMarkdown: postBodySchema })
-  .strict();
+export const updateReplyRequestSchema = z.object({ contentMarkdown: postBodySchema }).strict();
 export type UpdateReplyRequest = z.infer<typeof updateReplyRequestSchema>;
 
 /**
@@ -116,9 +114,7 @@ export type UpdateReplyRequest = z.infer<typeof updateReplyRequestSchema>;
  * needs to group posts, no role. A forum shows who said what; it is not a
  * directory of the class.
  */
-export const postAuthorSchema = z
-  .object({ id: idSchema, displayName: z.string() })
-  .strict();
+export const postAuthorSchema = z.object({ id: idSchema, displayName: z.string() }).strict();
 
 export const threadResponseSchema = z
   .object({
@@ -189,14 +185,7 @@ export type FlagContentRequest = z.infer<typeof flagContentRequestSchema>;
  * so that an audit log records which authority was exercised rather than which
  * column moved.
  */
-export const moderationActionSchema = z.enum([
-  'approve',
-  'hide',
-  'pin',
-  'unpin',
-  'lock',
-  'unlock',
-]);
+export const moderationActionSchema = z.enum(['approve', 'hide', 'pin', 'unpin', 'lock', 'unlock']);
 export type ModerationActionName = z.infer<typeof moderationActionSchema>;
 
 export const moderationActionRequestSchema = z
@@ -212,10 +201,13 @@ export const moderationActionRequestSchema = z
     resolveFlagsAs: z.enum(['reviewed', 'dismissed']).nullable().default(null),
   })
   .strict()
-  .refine((v) => !(v.entityType === 'reply' && ['pin', 'unpin', 'lock', 'unlock'].includes(v.action)), {
-    message: 'pin and lock apply to a thread, not to a reply',
-    path: ['action'],
-  });
+  .refine(
+    (v) => !(v.entityType === 'reply' && ['pin', 'unpin', 'lock', 'unlock'].includes(v.action)),
+    {
+      message: 'pin and lock apply to a thread, not to a reply',
+      path: ['action'],
+    },
+  );
 export type ModerationActionRequest = z.infer<typeof moderationActionRequestSchema>;
 
 /**

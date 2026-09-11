@@ -126,9 +126,9 @@ describe('the vocabulary itself', () => {
   });
 
   it('refuses an action evaluated against the wrong kind of resource', () => {
-    expect(() =>
-      engine.decide(ctx(learner), 'assessment_attempt:read', session()),
-    ).toThrow(/targets resource kind/);
+    expect(() => engine.decide(ctx(learner), 'assessment_attempt:read', session())).toThrow(
+      /targets resource kind/,
+    );
   });
 });
 
@@ -195,9 +195,9 @@ describe('writing a lab session is the learner’s alone', () => {
     // `start` is asked about the LAB, not about the session in hand, so a
     // finished run must not bar a new one. The one-live-session-per-lab rule is
     // the partial unique index's job, not the policy's.
-    expect(decide(learner, 'experiment_session:start', session({ state: 'completed' })).effect).toBe(
-      'allow',
-    );
+    expect(
+      decide(learner, 'experiment_session:start', session({ state: 'completed' })).effect,
+    ).toBe('allow');
   });
 });
 
@@ -220,9 +220,9 @@ describe('reading a lab session follows the relationship graph', () => {
   });
 
   it.each(READS)('allows the teacher of the shared class: %s', (action) => {
-    expect(
-      decide(teacher, action, session({ observableByActorAsTeacher: true })).effect,
-    ).toBe('allow');
+    expect(decide(teacher, action, session({ observableByActorAsTeacher: true })).effect).toBe(
+      'allow',
+    );
   });
 
   it.each(READS)('refuses a teacher who does not share the class: %s', (action) => {

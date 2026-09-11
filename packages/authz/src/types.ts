@@ -681,7 +681,6 @@ export interface AiConversationResource extends BaseResource {
   readonly anchorStillAssigned: boolean;
 }
 
-
 export type ProjectVisibility = 'private' | 'class' | 'public';
 export type ProjectStatus = 'draft' | 'submitted' | 'featured';
 
@@ -746,7 +745,6 @@ export interface StudentPortfolioResource extends BaseResource {
   /** How many `public` projects the portfolio currently lists. Resolved in SQL. */
   readonly publicItemCount: number;
 }
-
 
 export type ModerationStatus = 'approved' | 'flagged' | 'hidden';
 
@@ -1157,7 +1155,6 @@ export const STUDENT_ARTIFACT_ACTIONS = [
 
 export type StudentArtifactAction = (typeof STUDENT_ARTIFACT_ACTIONS)[number];
 
-
 /**
  * What may be done with a project.
  *
@@ -1209,7 +1206,6 @@ export const STUDENT_PORTFOLIO_ACTIONS = [
 ] as const;
 
 export type StudentPortfolioAction = (typeof STUDENT_PORTFOLIO_ACTIONS)[number];
-
 
 /**
  * What may be done with a thread.

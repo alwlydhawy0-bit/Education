@@ -418,18 +418,20 @@ export function createPortfolioService(deps: PortfolioServiceDeps): PortfolioSer
             throw validationFailed('That portfolio address is not a usable name');
           }
 
-          const updated = await repository.updatePortfolio(tx, id, input).catch((error: unknown) => {
-            if (
-              pgCode(error) === UNIQUE_VIOLATION &&
-              String((error as Error).message).includes('student_portfolios_slug_uk') &&
-              typeof input.publicSlug === 'string'
-            ) {
-              throw conflict('That portfolio address is already taken', {
-                suggestions: slugCandidates(input.publicSlug, 5).slice(1),
-              });
-            }
-            throw error;
-          });
+          const updated = await repository
+            .updatePortfolio(tx, id, input)
+            .catch((error: unknown) => {
+              if (
+                pgCode(error) === UNIQUE_VIOLATION &&
+                String((error as Error).message).includes('student_portfolios_slug_uk') &&
+                typeof input.publicSlug === 'string'
+              ) {
+                throw conflict('That portfolio address is already taken', {
+                  suggestions: slugCandidates(input.publicSlug, 5).slice(1),
+                });
+              }
+              throw error;
+            });
           if (!updated) throw notFound();
           return updated;
         }),

@@ -64,7 +64,8 @@ describe('no HTML sink exists, which is why markdown is stored verbatim', () => 
    * renderer without a sanitizer, this test is what tells them the assumption
    * they are breaking.
    */
-  const SINKS = /dangerouslySetInnerHTML|\.innerHTML|\.outerHTML|insertAdjacentHTML|document\.write/;
+  const SINKS =
+    /dangerouslySetInnerHTML|\.innerHTML|\.outerHTML|insertAdjacentHTML|document\.write/;
 
   it('the web app contains no HTML injection sink', () => {
     const violations = webCode.filter(([, code]) => SINKS.test(code)).map(([name]) => name);
@@ -99,10 +100,9 @@ describe('no client ever names a storage location', () => {
       byteSize: 1024,
     };
     for (const key of ['storageKey', 'filePath', 'fileUrl', 'url', 'path', 'location', 'bucket']) {
-      expect(
-        registerArtifactRequestSchema.safeParse({ ...valid, [key]: '/x' }).success,
-        key,
-      ).toBe(false);
+      expect(registerArtifactRequestSchema.safeParse({ ...valid, [key]: '/x' }).success, key).toBe(
+        false,
+      );
     }
   });
 

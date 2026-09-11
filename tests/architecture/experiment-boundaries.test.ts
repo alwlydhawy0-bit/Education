@@ -137,9 +137,10 @@ describe('no lab visibility helper is SECURITY DEFINER', () => {
     // a definer function runs it as the owner, for whom every row exists, so it
     // returns true for everybody — which is precisely the defect 0024 shipped
     // and the probe caught. Every sibling in the schema is invoker-rights.
-    const declaration = /CREATE FUNCTION app_actor_sees_experiment\(p_experiment_id uuid\)[\s\S]{0,200}?AS \$\$/.exec(
-      MIGRATION,
-    );
+    const declaration =
+      /CREATE FUNCTION app_actor_sees_experiment\(p_experiment_id uuid\)[\s\S]{0,200}?AS \$\$/.exec(
+        MIGRATION,
+      );
     expect(declaration, 'app_actor_sees_experiment must be declared').not.toBeNull();
     expect(declaration?.[0]).not.toMatch(/SECURITY DEFINER/);
   });

@@ -62,8 +62,13 @@ export interface TutorRepository {
   lessonAnchor(
     tx: Tx,
     lessonId: string,
-  ): Promise<{ lessonId: string; courseId: string; organizationId: string | null;
-               lessonTitle: string; stillAssigned: boolean } | null>;
+  ): Promise<{
+    lessonId: string;
+    courseId: string;
+    organizationId: string | null;
+    lessonTitle: string;
+    stillAssigned: boolean;
+  } | null>;
   createConversation(
     tx: Tx,
     input: { ownerId: string; lessonId: string; title: string },
@@ -247,10 +252,10 @@ export function createTutorRepository(): TutorRepository {
     },
 
     async rename(tx, id, title) {
-      const { rowCount } = await tx.query(
-        `UPDATE ai_conversations SET title = $2 WHERE id = $1`,
-        [id, title],
-      );
+      const { rowCount } = await tx.query(`UPDATE ai_conversations SET title = $2 WHERE id = $1`, [
+        id,
+        title,
+      ]);
       return (rowCount ?? 0) > 0;
     },
 

@@ -95,7 +95,8 @@ describe('the tenant has nowhere to arrive from a request', () => {
      * that does not exist.
      */
     const contract = code(CONTRACT);
-    const requestSchemas = contract.match(/export const \w*QuerySchema[\s\S]*?\.strict\(\);/g) ?? [];
+    const requestSchemas =
+      contract.match(/export const \w*QuerySchema[\s\S]*?\.strict\(\);/g) ?? [];
     expect(requestSchemas.length).toBeGreaterThanOrEqual(4);
     for (const schema of requestSchemas) {
       expect(schema, schema.slice(0, 60)).not.toMatch(/organizationId|organization_id|schoolId/);

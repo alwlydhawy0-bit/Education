@@ -82,7 +82,19 @@ async function world() {
   await assignTeacher(teacher.id, klass);
   await assignTeacher(otherTeacher.id, otherClass);
 
-  return { orgA, orgB, klass, otherClass, learner, peer, outsider, teacher, otherTeacher, stranger, admin };
+  return {
+    orgA,
+    orgB,
+    klass,
+    otherClass,
+    learner,
+    peer,
+    outsider,
+    teacher,
+    otherTeacher,
+    stranger,
+    admin,
+  };
 }
 
 /** A thread written BY the actor THROUGH `edu_app`. */
@@ -302,9 +314,9 @@ describe('the reply tree cannot cross a thread', () => {
     const child = await insertReply(w.peer.id, thread, root);
     expect(child).not.toBeNull();
 
-    expect(
-      await attempt(w.peer.id, 'DELETE FROM discussion_replies WHERE id = $1', [root]),
-    ).toBe(true);
+    expect(await attempt(w.peer.id, 'DELETE FROM discussion_replies WHERE id = $1', [root])).toBe(
+      true,
+    );
     expect(await rows(w.learner.id, 'SELECT id FROM discussion_replies')).toHaveLength(0);
   });
 });
@@ -341,13 +353,15 @@ describe('the locked-thread enforcer', () => {
       ]),
     ).toBe(false);
     expect(
-      await attempt(w.peer.id, `UPDATE discussion_replies SET content_markdown = 'E' WHERE id = $1`, [
-        reply,
-      ]),
+      await attempt(
+        w.peer.id,
+        `UPDATE discussion_replies SET content_markdown = 'E' WHERE id = $1`,
+        [reply],
+      ),
     ).toBe(false);
-    expect(
-      await attempt(w.peer.id, 'DELETE FROM discussion_replies WHERE id = $1', [reply]),
-    ).toBe(false);
+    expect(await attempt(w.peer.id, 'DELETE FROM discussion_replies WHERE id = $1', [reply])).toBe(
+      false,
+    );
   });
 
   it('the AUTHOR cannot unlock their own thread', async () => {
@@ -399,9 +413,11 @@ describe('what a moderator may change', () => {
       ),
     ).toBe(false);
     expect(
-      await attempt(w.teacher.id, `UPDATE discussion_threads SET title = 'Retitled' WHERE id = $1`, [
-        thread,
-      ]),
+      await attempt(
+        w.teacher.id,
+        `UPDATE discussion_threads SET title = 'Retitled' WHERE id = $1`,
+        [thread],
+      ),
     ).toBe(false);
   });
 
@@ -611,12 +627,8 @@ describe('flags', () => {
     const w = await world();
     const thread = await insertThread(w.learner.id, w.klass);
     await flag(w.peer.id, thread);
-    expect(
-      await attempt(w.peer.id, `UPDATE content_flags SET status = 'dismissed'`),
-    ).toBe(false);
-    expect(
-      await attempt(w.teacher.id, `UPDATE content_flags SET status = 'reviewed'`),
-    ).toBe(true);
+    expect(await attempt(w.peer.id, `UPDATE content_flags SET status = 'dismissed'`)).toBe(false);
+    expect(await attempt(w.teacher.id, `UPDATE content_flags SET status = 'reviewed'`)).toBe(true);
   });
 
   it('NOBODY may delete a flag — there is no grant and no policy', async () => {
@@ -638,9 +650,9 @@ describe('flags', () => {
     const reply = await insertReply(w.peer.id, thread);
     expect(await flag(w.learner.id, reply as string, 'reply')).toBe(true);
 
-    expect(
-      await attempt(w.peer.id, 'DELETE FROM discussion_replies WHERE id = $1', [reply]),
-    ).toBe(true);
+    expect(await attempt(w.peer.id, 'DELETE FROM discussion_replies WHERE id = $1', [reply])).toBe(
+      true,
+    );
     expect(await rows(w.teacher.id, 'SELECT id FROM content_flags')).toHaveLength(0);
   });
 

@@ -168,9 +168,7 @@ describe('the script is atomic', () => {
     // Redis runs a script to completion before serving anything else, so this
     // is the property that makes INCR-then-PEXPIRE safe as one operation.
     const store = makeStore(10_000);
-    const results = await Promise.all(
-      Array.from({ length: 20 }, () => incr(store, 'concurrent')),
-    );
+    const results = await Promise.all(Array.from({ length: 20 }, () => incr(store, 'concurrent')));
 
     const counts = results.map((r) => r.current).sort((a, b) => a - b);
     expect(counts).toEqual(Array.from({ length: 20 }, (_, i) => i + 1));

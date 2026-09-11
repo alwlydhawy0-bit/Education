@@ -1,8 +1,4 @@
-import {
-  Guarded,
-  type StudentPortfolioResource,
-  type StudentProjectResource,
-} from '@edu/authz';
+import { Guarded, type StudentPortfolioResource, type StudentProjectResource } from '@edu/authz';
 import {
   resolveSortColumn,
   resolveSortDirection,
@@ -374,13 +370,7 @@ export const portfolioRepository: PortfolioRepository = {
           AND ($5::text IS NULL OR p.status = $5)
         ORDER BY ${column} ${direction}, p.id ASC
         LIMIT $2 OFFSET $3`,
-      [
-        ownerId,
-        query.limit,
-        query.offset,
-        query.visibility ?? null,
-        query.status ?? null,
-      ],
+      [ownerId, query.limit, query.offset, query.visibility ?? null, query.status ?? null],
     );
     return rows.map(toProject);
   },

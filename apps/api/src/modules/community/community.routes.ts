@@ -139,9 +139,7 @@ export function registerCommunityRoutes(app: FastifyInstance, community: Communi
       emptyQuerySchema.parse(request.query ?? {});
       const { id } = idParams.parse(request.params);
       const { thread, replies } = await community.readThread(contextOf(request), id);
-      return reply
-        .status(200)
-        .send({ thread: toThread(thread), replies: replies.map(toReply) });
+      return reply.status(200).send({ thread: toThread(thread), replies: replies.map(toReply) });
     },
   });
 

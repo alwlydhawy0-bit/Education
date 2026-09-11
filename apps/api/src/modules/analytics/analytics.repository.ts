@@ -1,9 +1,5 @@
 import { Guarded, type AnalyticsReportResource } from '@edu/authz';
-import type {
-  AtRiskQuery,
-  CoursePerformanceQuery,
-  SchoolOverviewQuery,
-} from '@edu/contracts';
+import type { AtRiskQuery, CoursePerformanceQuery, SchoolOverviewQuery } from '@edu/contracts';
 import type { Tx } from '../../platform/db.ts';
 
 /**

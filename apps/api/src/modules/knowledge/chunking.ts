@@ -98,7 +98,10 @@ export interface LessonSource extends ChunkAncestry {
 
 /** Collapses runs of whitespace without touching the characters themselves. */
 function normalize(text: string): string {
-  return text.replace(/\r\n?/g, '\n').replace(/[ \t]+/g, ' ').trim();
+  return text
+    .replace(/\r\n?/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim();
 }
 
 /**

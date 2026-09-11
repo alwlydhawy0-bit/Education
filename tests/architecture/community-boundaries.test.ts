@@ -6,7 +6,10 @@ import {
   DISCUSSION_REPLY_ACTIONS,
   DISCUSSION_THREAD_ACTIONS,
 } from '@edu/authz';
-import { MUST_NEVER_MATCH, screenContent } from '../../apps/api/src/modules/community/content-filter.ts';
+import {
+  MUST_NEVER_MATCH,
+  screenContent,
+} from '../../apps/api/src/modules/community/content-filter.ts';
 
 /**
  * Fitness functions for class discussion forums and moderation.
@@ -225,7 +228,9 @@ describe('an author edits only what an author wrote', () => {
   it('updateThread touches exactly title, content and updated_at', () => {
     const body = method(code(REPOSITORY), 'updateThread');
     const setClause = body.slice(body.indexOf('SET'), body.indexOf('WHERE'));
-    const assignments = (setClause.match(/(\w+)\s*=/g) ?? []).map((m) => m.replace(/\s*=$/, '').trim());
+    const assignments = (setClause.match(/(\w+)\s*=/g) ?? []).map((m) =>
+      m.replace(/\s*=$/, '').trim(),
+    );
     // `is_pinned`, `is_locked` and `moderation_status` are ABSENT rather than
     // guarded. A column that is not in the statement cannot be moved by it,
     // whatever the policy and the trigger do.
@@ -235,7 +240,9 @@ describe('an author edits only what an author wrote', () => {
   it('updateReply touches exactly content and updated_at', () => {
     const body = method(code(REPOSITORY), 'updateReply');
     const setClause = body.slice(body.indexOf('SET'), body.indexOf('WHERE'));
-    const assignments = (setClause.match(/(\w+)\s*=/g) ?? []).map((m) => m.replace(/\s*=$/, '').trim());
+    const assignments = (setClause.match(/(\w+)\s*=/g) ?? []).map((m) =>
+      m.replace(/\s*=$/, '').trim(),
+    );
     expect(new Set(assignments)).toEqual(new Set(['content_markdown', 'updated_at']));
     // Not `is_accepted_answer`: acceptance moves through `acceptReply`, whose
     // policy holder is the person who asked the question rather than the person

@@ -50,10 +50,7 @@
 
 /** What the guardrails concluded about one learner turn. */
 export type GuardrailVerdict =
-  | 'blocked_injection'
-  | 'blocked_answer_seeking'
-  | 'out_of_scope'
-  | 'truncated';
+  'blocked_injection' | 'blocked_answer_seeking' | 'out_of_scope' | 'truncated';
 
 export interface GuardrailFinding {
   /** A stable identifier for the audit trail. Never the matched text. */
@@ -140,9 +137,7 @@ function normalizeForMatching(text: string): string {
       // Requiring the repetition is what separates the two cases. "e-mail" and
       // "co-operate" have a single letter-separator pair and survive intact;
       // "i-g-n-o-r-e" has five and does not.
-      .replace(/\b(?:[a-z][\s._\-*|/\\]){2,}[a-z]\b/g, (run) =>
-        run.replace(/[\s._\-*|/\\]/g, ''),
-      )
+      .replace(/\b(?:[a-z][\s._\-*|/\\]){2,}[a-z]\b/g, (run) => run.replace(/[\s._\-*|/\\]/g, ''))
   );
 }
 
@@ -193,7 +188,8 @@ const INJECTION_RULES: readonly Rule[] = [
     // "<|im_start|>" and friends. The structured request already makes these
     // inert (they arrive inside a question field, never an instruction one), so
     // this rule exists purely to record that somebody tried.
-    pattern: /(<\|[a-z_]+\|>|\[\/?INST\]|\[\/?SYS\]|<<\/?SYS>>|^\s*(system|assistant|developer)\s*:)/im,
+    pattern:
+      /(<\|[a-z_]+\|>|\[\/?INST\]|\[\/?SYS\]|<<\/?SYS>>|^\s*(system|assistant|developer)\s*:)/im,
   },
   {
     id: 'override.exfiltrate_configuration',
@@ -285,7 +281,10 @@ function evaluate(rules: readonly Rule[], normalized: string): GuardrailFinding[
 /** The entry point: what may be sent, and what the platform thinks of it. */
 export function sanitizeStudentTurn(raw: string): SanitizedTurn {
   const stripped = raw.replace(INVISIBLE_CHARACTERS, '');
-  const collapsed = stripped.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  const collapsed = stripped
+    .replace(/[ \t]+/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 
   const truncated = collapsed.length > MAX_QUESTION_CHARACTERS;
   const text = truncated ? collapsed.slice(0, MAX_QUESTION_CHARACTERS) : collapsed;

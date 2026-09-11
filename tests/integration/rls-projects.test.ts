@@ -308,9 +308,11 @@ describe('the class and review boundaries', () => {
 
     // And cannot publish it to the world on the child's behalf.
     expect(
-      await attempt(w.teacher.id, `UPDATE student_projects SET visibility = 'public' WHERE id = $1`, [
-        project,
-      ]),
+      await attempt(
+        w.teacher.id,
+        `UPDATE student_projects SET visibility = 'public' WHERE id = $1`,
+        [project],
+      ),
     ).toBe(false);
   });
 

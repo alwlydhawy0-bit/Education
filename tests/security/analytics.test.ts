@@ -145,7 +145,7 @@ async function world() {
 
   // A CLASS NAMED WITH A FORMULA. Ordinary text to every other endpoint on the
   // platform; a live formula to a spreadsheet, months later.
-  const classA = await createClass(orgA, '=cmd|\' /C calc\'!A0');
+  const classA = await createClass(orgA, "=cmd|' /C calc'!A0");
   const otherClass = await createClass(orgA, 'A2');
   const classB = await createClass(orgB, 'B1');
   await addClassMember(classA, learner.id);

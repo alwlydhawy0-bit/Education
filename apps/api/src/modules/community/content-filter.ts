@@ -88,10 +88,34 @@ const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2060-\u2064\ufeff]/g;
  * Recorded as a limitation rather than pretended away.
  */
 const CONFUSABLES: Readonly<Record<string, string>> = Object.freeze({
-  '0': 'o', '1': 'i', '3': 'e', '4': 'a', '5': 's', '7': 't', '8': 'b',
-  '@': 'a', $: 's', '!': 'i', '|': 'i', '+': 't',
-  а: 'a', е: 'e', о: 'o', р: 'p', с: 'c', х: 'x', у: 'y', і: 'i', ѕ: 's',
-  α: 'a', ε: 'e', ο: 'o', ρ: 'p', ι: 'i', ν: 'v', τ: 't',
+  '0': 'o',
+  '1': 'i',
+  '3': 'e',
+  '4': 'a',
+  '5': 's',
+  '7': 't',
+  '8': 'b',
+  '@': 'a',
+  $: 's',
+  '!': 'i',
+  '|': 'i',
+  '+': 't',
+  а: 'a',
+  е: 'e',
+  о: 'o',
+  р: 'p',
+  с: 'c',
+  х: 'x',
+  у: 'y',
+  і: 'i',
+  ѕ: 's',
+  α: 'a',
+  ε: 'e',
+  ο: 'o',
+  ρ: 'p',
+  ι: 'i',
+  ν: 'v',
+  τ: 't',
 });
 
 /**
@@ -134,18 +158,20 @@ export function normalizeForFilter(text: string): string {
     .map((ch) => CONFUSABLES[ch] ?? ch)
     .join('');
 
-  return mapped
-    // `+` ON THE SEPARATOR, not a single character. `f u c k` with two spaces
-    // between each letter defeated the single-separator version: the pattern
-    // consumed one space and then needed a letter, and found another space.
-    // The `{2,}` repetition requirement is what still separates a genuine
-    // letter-by-letter run from `co - operate`, which has one pair and survives.
-    .replace(/\b(?:[a-z][\s._\-*|/\\~^=]+){2,}[a-z]\b/g, (run) =>
-      run.replace(/[\s._\-*|/\\~^=]/g, ''),
-    )
-    .replace(/([a-z])\1{2,}/g, '$1$1')
-    .replace(/\s+/g, ' ')
-    .trim();
+  return (
+    mapped
+      // `+` ON THE SEPARATOR, not a single character. `f u c k` with two spaces
+      // between each letter defeated the single-separator version: the pattern
+      // consumed one space and then needed a letter, and found another space.
+      // The `{2,}` repetition requirement is what still separates a genuine
+      // letter-by-letter run from `co - operate`, which has one pair and survives.
+      .replace(/\b(?:[a-z][\s._\-*|/\\~^=]+){2,}[a-z]\b/g, (run) =>
+        run.replace(/[\s._\-*|/\\~^=]/g, ''),
+      )
+      .replace(/([a-z])\1{2,}/g, '$1$1')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
 }
 
 /**
@@ -166,14 +192,37 @@ export function normalizeForFilter(text: string): string {
  */
 const FLAGGED_TERMS: readonly string[] = Object.freeze([
   // Crude abuse aimed at a person. The category that actually appears.
-  'idiot', 'stupid', 'moron', 'loser', 'ugly', 'fat', 'freak',
-  'shut up', 'nobody likes you', 'kill yourself', 'kys',
+  'idiot',
+  'stupid',
+  'moron',
+  'loser',
+  'ugly',
+  'fat',
+  'freak',
+  'shut up',
+  'nobody likes you',
+  'kill yourself',
+  'kys',
   // Profanity.
-  'shit', 'shitty', 'fuck', 'fucking', 'fucked', 'bitch', 'bastard',
-  'asshole', 'dickhead', 'crap', 'damn',
+  'shit',
+  'shitty',
+  'fuck',
+  'fucking',
+  'fucked',
+  'bitch',
+  'bastard',
+  'asshole',
+  'dickhead',
+  'crap',
+  'damn',
   // Arabic, since this platform teaches in it and an English-only list would
   // be a filter that watches one of the two rooms.
-  'غبي', 'احمق', 'اخرس', 'كلب', 'حمار', 'تافه',
+  'غبي',
+  'احمق',
+  'اخرس',
+  'كلب',
+  'حمار',
+  'تافه',
 ]);
 
 /**
@@ -185,10 +234,29 @@ const FLAGGED_TERMS: readonly string[] = Object.freeze([
  * stops somebody "improving" the matcher into one that flags homework.
  */
 export const MUST_NEVER_MATCH: readonly string[] = Object.freeze([
-  'classic', 'class', 'assignment', 'assess', 'assessment', 'assume',
-  'Scunthorpe', 'cockpit', 'analysis', 'shiitake', 'bass', 'grass',
-  'therapist', 'mishit', 'crapaud', 'damning', 'Dickens', 'butter',
-  'constitution', 'document', 'titles', 'penalty', 'Uranus',
+  'classic',
+  'class',
+  'assignment',
+  'assess',
+  'assessment',
+  'assume',
+  'Scunthorpe',
+  'cockpit',
+  'analysis',
+  'shiitake',
+  'bass',
+  'grass',
+  'therapist',
+  'mishit',
+  'crapaud',
+  'damning',
+  'Dickens',
+  'butter',
+  'constitution',
+  'document',
+  'titles',
+  'penalty',
+  'Uranus',
 ]);
 
 /** Squashes every run of a repeated letter to a single one. */
@@ -314,9 +382,6 @@ export function nextModerationState(
  * Whether an action changes anything, so the service can skip a write and the
  * audit trail is not filled with no-ops.
  */
-export function isModerationNoop(
-  current: ModerationState,
-  action: ModerationAction,
-): boolean {
+export function isModerationNoop(current: ModerationState, action: ModerationAction): boolean {
   return nextModerationState(current, action) === current;
 }

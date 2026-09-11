@@ -55,9 +55,7 @@ function stripComments(source: string): string {
     .split('\n')
     .filter((line) => {
       const trimmed = line.trimStart();
-      return (
-        !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('--')
-      );
+      return !trimmed.startsWith('//') && !trimmed.startsWith('*') && !trimmed.startsWith('--');
     })
     .join('\n');
 }
@@ -181,9 +179,7 @@ describe("a learner's private workspace is not in the knowledge base", () => {
     for (const [file, source] of apiCode) {
       if (!file.startsWith(KNOWLEDGE_DIR)) continue;
       for (const table of PRIVATE_TABLES) {
-        expect(source, `${file} refers to ${table}`).not.toMatch(
-          new RegExp(`\\b${table}\\b`),
-        );
+        expect(source, `${file} refers to ${table}`).not.toMatch(new RegExp(`\\b${table}\\b`));
       }
     }
   });

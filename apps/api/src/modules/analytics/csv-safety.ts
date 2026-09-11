@@ -118,9 +118,7 @@ export function csvCell(value: unknown): string {
 
   const first = cleaned.charAt(0);
   const neutralized =
-    isTypedScalar(value) || !FORMULA_TRIGGERS.has(first)
-      ? cleaned
-      : `${NEUTRALIZER}${cleaned}`;
+    isTypedScalar(value) || !FORMULA_TRIGGERS.has(first) ? cleaned : `${NEUTRALIZER}${cleaned}`;
 
   return `"${neutralized.replace(/"/g, '""')}"`;
 }

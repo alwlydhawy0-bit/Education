@@ -16,26 +16,26 @@ token, so every link ever handed out stops working at once.
 
 ## Endpoints
 
-| Method   | Path                                    | Who                                  |
-| -------- | --------------------------------------- | ------------------------------------ |
-| `POST`   | `/projects`                             | a learner, in a class they are in    |
-| `GET`    | `/me/projects`                          | the caller's own                     |
-| `GET`    | `/projects/:id`                         | owner, classmate, class reviewer     |
-| `PUT`    | `/projects/:id`                         | the owner                            |
-| `PATCH`  | `/projects/:id`                         | the owner                            |
-| `DELETE` | `/projects/:id`                         | the owner                            |
-| `POST`   | `/projects/:id/artifacts`               | the owner                            |
-| `POST`   | `/projects/:id/feature`                 | a teacher of the class, or an org admin |
-| `GET`    | `/classes/:id/projects`                 | members and teachers of that class   |
-| `POST`   | `/me/portfolio`                         | the owner                            |
-| `GET`    | `/me/portfolio`                         | the owner                            |
-| `PUT`    | `/me/portfolio`                         | the owner                            |
-| `PATCH`  | `/me/portfolio`                         | the owner                            |
-| `POST`   | `/me/portfolio/items`                   | the owner                            |
-| `DELETE` | `/me/portfolio/items/:projectId`        | the owner                            |
-| `POST`   | `/me/portfolio/publish`                 | the owner                            |
-| `DELETE` | `/me/portfolio/publish`                 | the owner                            |
-| `GET`    | `/portfolios/share/:shareToken`         | **anybody — no session** |
+| Method   | Path                             | Who                                     |
+| -------- | -------------------------------- | --------------------------------------- |
+| `POST`   | `/projects`                      | a learner, in a class they are in       |
+| `GET`    | `/me/projects`                   | the caller's own                        |
+| `GET`    | `/projects/:id`                  | owner, classmate, class reviewer        |
+| `PUT`    | `/projects/:id`                  | the owner                               |
+| `PATCH`  | `/projects/:id`                  | the owner                               |
+| `DELETE` | `/projects/:id`                  | the owner                               |
+| `POST`   | `/projects/:id/artifacts`        | the owner                               |
+| `POST`   | `/projects/:id/feature`          | a teacher of the class, or an org admin |
+| `GET`    | `/classes/:id/projects`          | members and teachers of that class      |
+| `POST`   | `/me/portfolio`                  | the owner                               |
+| `GET`    | `/me/portfolio`                  | the owner                               |
+| `PUT`    | `/me/portfolio`                  | the owner                               |
+| `PATCH`  | `/me/portfolio`                  | the owner                               |
+| `POST`   | `/me/portfolio/items`            | the owner                               |
+| `DELETE` | `/me/portfolio/items/:projectId` | the owner                               |
+| `POST`   | `/me/portfolio/publish`          | the owner                               |
+| `DELETE` | `/me/portfolio/publish`          | the owner                               |
+| `GET`    | `/portfolios/share/:shareToken`  | **anybody — no session**                |
 
 All paths are under `/api/v1`.
 
@@ -77,7 +77,7 @@ owner's response is byte-identical to a stranger's.
 ```
 
 **No identifier appears, and none can.** Not the portfolio's, not a project's,
-not the owner's. `toPublicPortfolio` is a *constructor*, not a filter: it builds
+not the owner's. `toPublicPortfolio` is a _constructor_, not a filter: it builds
 a new object out of named pieces rather than removing fields from a row, so a
 column added to `student_projects` next year is invisible on the public page
 until somebody deliberately writes a line to expose it — and writing that line
@@ -89,8 +89,8 @@ that something was removed.
 
 **There is no author name.** An account display name is registration data a
 child gave their school, not something they composed for a page served to
-anybody with a link. The `title` and `bio` are what the learner wrote *for this
-page*: if they want their name on it they can put it there, and if they want to
+anybody with a link. The `title` and `bio` are what the learner wrote _for this
+page_: if they want their name on it they can put it there, and if they want to
 be "Y10 Physics" they can be that instead.
 
 **`artifact://` references are dropped**, not rendered. A stranger has no
@@ -117,15 +117,15 @@ A `share_token` is 256 bits and not worth guessing; a **`public_slug` is a
 guessable name**, so somebody walking `/portfolios/share/ahmed`, `/omar`,
 `/sara` is enumerating children's pages, and this limit is what makes that slow.
 Every miss is recorded as `portfolio.public_resolve_failed` with the address and
-the key's *shape* — never the key, because a valid token in a log is a working
+the key's _shape_ — never the key, because a valid token in a log is a working
 capability in a file more people can read than the page it opens.
 
 ## Visibility
 
-| `visibility` | Who can read it (when `status <> 'draft'`)                     |
-| ------------ | -------------------------------------------------------------- |
-| `private`    | the owner; the class teacher or org admin, for review           |
-| `class`      | the above, plus learners in the same class                      |
+| `visibility` | Who can read it (when `status <> 'draft'`)                                            |
+| ------------ | ------------------------------------------------------------------------------------- |
+| `private`    | the owner; the class teacher or org admin, for review                                 |
+| `class`      | the above, plus learners in the same class                                            |
 | `public`     | the above, plus anybody holding the link to a **published** portfolio it is listed in |
 
 A **draft is invisible to every adult.** Not "visible but not editable":
@@ -161,18 +161,18 @@ class they teach. A self-conferred distinction is not a distinction.
 Section 3 requires that unpublishing, or making a project private, revokes
 public access **immediately**. Four paths do it, and each is asserted end to end:
 
-| Action                              | What happens                                                |
-| ----------------------------------- | ----------------------------------------------------------- |
-| `DELETE /me/portfolio/publish`      | `is_published` false **and the share token is rotated** by `student_portfolio_guard`, so every link ever handed out — including ones this platform never saw — stops resolving. Republishing does not resurrect them. |
-| `PUT /projects/:id` → `private`     | The project stops satisfying `app_project_is_publicly_listed`, and drops off the page on the next request. |
-| `DELETE /projects/:id`              | The artifacts and the portfolio item cascade through composite foreign keys in the same statement. |
-| `DELETE /me/portfolio/items/:projectId` | The item row is what puts a project on the page; removing it takes it off. |
+| Action                                  | What happens                                                                                                                                                                                                          |
+| --------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DELETE /me/portfolio/publish`          | `is_published` false **and the share token is rotated** by `student_portfolio_guard`, so every link ever handed out — including ones this platform never saw — stops resolving. Republishing does not resurrect them. |
+| `PUT /projects/:id` → `private`         | The project stops satisfying `app_project_is_publicly_listed`, and drops off the page on the next request.                                                                                                            |
+| `DELETE /projects/:id`                  | The artifacts and the portfolio item cascade through composite foreign keys in the same statement.                                                                                                                    |
+| `DELETE /me/portfolio/items/:projectId` | The item row is what puts a project on the page; removing it takes it off.                                                                                                                                            |
 
 There is no cache to expire and no second step to forget.
 
 **Unpublishing is never refused** for any reason beyond not being the owner —
 not even for an already-unpublished portfolio. A child who wants their work off
-the internet must not meet a policy that argues with them. Publishing *is*
+the internet must not meet a policy that argues with them. Publishing _is_
 refused for a portfolio with no public projects (`403`), because otherwise the
 learner gets a live URL showing a name, a bio and a blank space, and believes
 they have shared their work.
@@ -228,13 +228,13 @@ sent. A caller who picks their own token picks a guessable one.
 
 ## Errors
 
-| Status | When                                                                 |
-| ------ | -------------------------------------------------------------------- |
-| `400`  | A schema refusal: an unknown field, a bad URL scheme, an oversized artifact, a `status` a learner may not name. |
+| Status | When                                                                                                                                                                                                     |
+| ------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `400`  | A schema refusal: an unknown field, a bad URL scheme, an oversized artifact, a `status` a learner may not name.                                                                                          |
 | `403`  | The caller plainly knows the object exists and the honest answer is that this is not theirs to do: featuring your own work, publishing an empty portfolio, creating a project in a class you only teach. |
-| `404`  | Everything else — another learner's project, a draft, another school's, a wrong or withdrawn share key, and an id that names nothing. These are **indistinguishable by design**. |
-| `409`  | A taken slug (with `suggestions`), a second portfolio, a project already in the portfolio. |
-| `429`  | The rate limit, sharpest on the public route. |
+| `404`  | Everything else — another learner's project, a draft, another school's, a wrong or withdrawn share key, and an id that names nothing. These are **indistinguishable by design**.                         |
+| `409`  | A taken slug (with `suggestions`), a second portfolio, a project already in the portfolio.                                                                                                               |
+| `429`  | The rate limit, sharpest on the public route.                                                                                                                                                            |
 
 ## Related
 

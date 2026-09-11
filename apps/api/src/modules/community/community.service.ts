@@ -47,9 +47,20 @@ export interface CommunityServiceDeps {
 }
 
 export interface CommunityService {
-  createThread(ctx: ActorContext, classId: string, input: CreateThreadRequest): Promise<ThreadRecord>;
-  listClassThreads(ctx: ActorContext, classId: string, query: ListThreadsQuery): Promise<ThreadRecord[]>;
-  readThread(ctx: ActorContext, id: string): Promise<{ thread: ThreadRecord; replies: ReplyRecord[] }>;
+  createThread(
+    ctx: ActorContext,
+    classId: string,
+    input: CreateThreadRequest,
+  ): Promise<ThreadRecord>;
+  listClassThreads(
+    ctx: ActorContext,
+    classId: string,
+    query: ListThreadsQuery,
+  ): Promise<ThreadRecord[]>;
+  readThread(
+    ctx: ActorContext,
+    id: string,
+  ): Promise<{ thread: ThreadRecord; replies: ReplyRecord[] }>;
   updateThread(ctx: ActorContext, id: string, input: UpdateThreadRequest): Promise<ThreadRecord>;
   deleteThread(ctx: ActorContext, id: string): Promise<void>;
 
@@ -235,10 +246,10 @@ export function createCommunityService(deps: CommunityServiceDeps): CommunitySer
   function checkBody(body: string): void {
     const rejection = checkMarkdown(body);
     if (rejection) {
-      throw validationFailed(
-        `Links using ${rejection.scheme}: are not allowed`,
-        { reason: rejection.reason, scheme: rejection.scheme },
-      );
+      throw validationFailed(`Links using ${rejection.scheme}: are not allowed`, {
+        reason: rejection.reason,
+        scheme: rejection.scheme,
+      });
     }
   }
 
@@ -332,7 +343,13 @@ export function createCommunityService(deps: CommunityServiceDeps): CommunitySer
           );
 
           if (screened.status === 'flagged') {
-            await repository.createFlag(tx, 'thread', thread.id, screened.reason, 'automated_filter');
+            await repository.createFlag(
+              tx,
+              'thread',
+              thread.id,
+              screened.reason,
+              'automated_filter',
+            );
             await emit(ctx, SecurityEventType.MODERATION_AUTO_FLAGGED, {
               entityType: 'thread',
               entityId: thread.id,
@@ -387,7 +404,9 @@ export function createCommunityService(deps: CommunityServiceDeps): CommunitySer
           // AN EDIT IS RE-SCREENED. Otherwise the filter is a one-time check a
           // learner walks past by posting something innocuous and editing it.
           const body = input.contentMarkdown ?? '';
-          const screened = body ? screen(body, input.title ?? '') : { status: 'approved' as const, reason: '' };
+          const screened = body
+            ? screen(body, input.title ?? '')
+            : { status: 'approved' as const, reason: '' };
 
           const updated = await repository.updateThread(tx, id, input);
           if (!updated) throw notFound();

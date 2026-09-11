@@ -1,10 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
-import {
-  buildTestApp,
-  sessionCookieFrom,
-  writeHeaders,
-  type TestApp,
-} from '../setup/app.ts';
+import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.ts';
 import {
   addClassMember,
   assignCourseToClass,

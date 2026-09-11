@@ -165,8 +165,7 @@ export function createAnalyticsService(deps: AnalyticsServiceDeps): AnalyticsSer
     return 'Forbidden';
   }
 
-  const asNumber = (value: string | null): number | null =>
-    value === null ? null : Number(value);
+  const asNumber = (value: string | null): number | null => (value === null ? null : Number(value));
 
   /**
    * Does this actor teach anything at all?

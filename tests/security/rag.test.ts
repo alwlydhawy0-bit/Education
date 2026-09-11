@@ -1,11 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import pg from 'pg';
-import {
-  buildTestApp,
-  sessionCookieFrom,
-  writeHeaders,
-  type TestApp,
-} from '../setup/app.ts';
+import { buildTestApp, sessionCookieFrom, writeHeaders, type TestApp } from '../setup/app.ts';
 import { TEST_SUPERUSER_URL } from '../setup/env.ts';
 import {
   addClassMember,
@@ -301,10 +296,12 @@ describe('A - the pipeline works for the people it is for', () => {
 
   it('honours topK', async () => {
     const w = await world();
-    await asSuperuser(
-      `UPDATE lessons SET content_body = $2, updated_at = now() WHERE id = $1`,
-      [w.lessonA, Array.from({ length: 12 }, (_u, i) => `Paragraph ${i}. ${MITOCHONDRIA}`).join(String.fromCharCode(10, 10))],
-    );
+    await asSuperuser(`UPDATE lessons SET content_body = $2, updated_at = now() WHERE id = $1`, [
+      w.lessonA,
+      Array.from({ length: 12 }, (_u, i) => `Paragraph ${i}. ${MITOCHONDRIA}`).join(
+        String.fromCharCode(10, 10),
+      ),
+    ]);
     await index(w.reviewerA, w.assigned);
     const { body } = await retrieve(w.learnerA, { query: 'mitochondria', topK: 2 });
     expect(body.chunks).toHaveLength(2);
@@ -318,7 +315,11 @@ describe('B - section 2E: cross-tenant vector similarity returns zero', () => {
     await index(w.reviewerB, w.courseB);
 
     const { body } = await retrieve(w.learnerB, { query: 'mitochondria energy' });
-    expect(body.chunks.every((c) => !c.content.includes('powerhouse of the cell') || c.courseId === w.courseB)).toBe(true);
+    expect(
+      body.chunks.every(
+        (c) => !c.content.includes('powerhouse of the cell') || c.courseId === w.courseB,
+      ),
+    ).toBe(true);
     expect(JSON.stringify(body)).not.toContain('School A');
     for (const chunk of body.chunks) expect(chunk.courseId).toBe(w.courseB);
   });
@@ -397,7 +398,9 @@ describe('C - section 2E: draft and archived content never reaches a learner', (
   it('stops returning chunks the moment the lesson is archived, with no re-index', async () => {
     const w = await world();
     await index(w.reviewerA, w.assigned);
-    expect((await retrieve(w.learnerA, { query: 'mitochondria' })).body.chunks.length).toBeGreaterThan(0);
+    expect(
+      (await retrieve(w.learnerA, { query: 'mitochondria' })).body.chunks.length,
+    ).toBeGreaterThan(0);
 
     await asSuperuser(
       `UPDATE lessons SET status = 'archived', published_at = NULL, archived_at = now()
@@ -414,7 +417,9 @@ describe('C - section 2E: draft and archived content never reaches a learner', (
     // answering with what the lesson used to say.
     const w = await world();
     await index(w.reviewerA, w.assigned);
-    expect((await retrieve(w.learnerA, { query: 'mitochondria' })).body.chunks.length).toBeGreaterThan(0);
+    expect(
+      (await retrieve(w.learnerA, { query: 'mitochondria' })).body.chunks.length,
+    ).toBeGreaterThan(0);
 
     await asSuperuser(
       `UPDATE lessons SET content_body = 'Something entirely different now.',
@@ -567,7 +572,12 @@ describe('F - the response discloses nothing beyond the passage', () => {
     const { body } = await retrieve(w.learnerA, { query: 'mitochondria' });
     const chunk = body.chunks[0] as unknown as Record<string, unknown>;
     expect(chunk).toBeDefined();
-    for (const forbidden of ['embedding', 'organizationId', 'sourceUpdatedAt', 'source_updated_at']) {
+    for (const forbidden of [
+      'embedding',
+      'organizationId',
+      'sourceUpdatedAt',
+      'source_updated_at',
+    ]) {
       expect(Object.keys(chunk ?? {})).not.toContain(forbidden);
     }
   });

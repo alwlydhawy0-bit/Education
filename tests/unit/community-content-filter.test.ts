@@ -37,16 +37,12 @@ const RLO = '‮';
 const flagged = (text: string): boolean => screenContent(text).flagged;
 
 describe('the filter catches the direct case', () => {
-  it.each([
-    'you are an idiot',
-    'this is shit',
-    'shut up',
-    'kill yourself',
-    'انت غبي',
-    'كلب',
-  ])('flags %s', (text) => {
-    expect(flagged(text)).toBe(true);
-  });
+  it.each(['you are an idiot', 'this is shit', 'shut up', 'kill yourself', 'انت غبي', 'كلب'])(
+    'flags %s',
+    (text) => {
+      expect(flagged(text)).toBe(true);
+    },
+  );
 
   it('names the term it matched, for the moderation record', () => {
     const verdict = screenContent('you are an idiot');

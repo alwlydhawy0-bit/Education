@@ -171,8 +171,19 @@ async function world(): Promise<World> {
   await linkGuardian(guardian.id, learner.id, 'verified');
 
   return {
-    orgA, orgB, klass, otherClass,
-    learner, classmate, outsider, teacher, otherTeacher, admin, moderator, guardian, stranger,
+    orgA,
+    orgB,
+    klass,
+    otherClass,
+    learner,
+    classmate,
+    outsider,
+    teacher,
+    otherTeacher,
+    admin,
+    moderator,
+    guardian,
+    stranger,
   };
 }
 
@@ -576,7 +587,9 @@ describe('hidden and flagged posts', () => {
     await hide(w, thread.id);
 
     expect((await get(`/api/v1/threads/${thread.id}`, w.classmate.cookie)).statusCode).toBe(404);
-    const feed = items<ThreadBody>(await get(`/api/v1/classes/${w.klass}/threads`, w.classmate.cookie));
+    const feed = items<ThreadBody>(
+      await get(`/api/v1/classes/${w.klass}/threads`, w.classmate.cookie),
+    );
     expect(feed.map((t) => t.id)).not.toContain(thread.id);
   });
 
@@ -862,8 +875,12 @@ describe('the reply tree', () => {
     const first = await makeReply(w.classmate, thread.id);
     const second = await makeReply(w.classmate, thread.id, { contentMarkdown: 'Or try this.' });
 
-    expect((await patch(`/api/v1/replies/${first.id}/accept`, w.learner.cookie)).statusCode).toBe(200);
-    expect((await patch(`/api/v1/replies/${second.id}/accept`, w.learner.cookie)).statusCode).toBe(200);
+    expect((await patch(`/api/v1/replies/${first.id}/accept`, w.learner.cookie)).statusCode).toBe(
+      200,
+    );
+    expect((await patch(`/api/v1/replies/${second.id}/accept`, w.learner.cookie)).statusCode).toBe(
+      200,
+    );
 
     const read = await get(`/api/v1/threads/${thread.id}`, w.learner.cookie);
     const accepted = read

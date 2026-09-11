@@ -1,12 +1,4 @@
-import {
-  BarChart3,
-  BookOpen,
-  FileText,
-  Home,
-  Layers,
-  Settings,
-  User,
-} from 'lucide-react';
+import { BarChart3, BookOpen, FileText, Home, Layers, Settings, User } from 'lucide-react';
 
 /**
  * The navigation, defined ONCE.

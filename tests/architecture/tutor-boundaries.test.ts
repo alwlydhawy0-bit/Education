@@ -177,7 +177,9 @@ describe('ownership is structural, not a lookup', () => {
 
 describe('the conversation scope is derived, never asserted', () => {
   it('derives course and organization from the lesson in a trigger', () => {
-    const guard = /CREATE FUNCTION ai_conversation_scope_guard[\s\S]*?\$\$;/.exec(MIGRATION_SQL)?.[0];
+    const guard = /CREATE FUNCTION ai_conversation_scope_guard[\s\S]*?\$\$;/.exec(
+      MIGRATION_SQL,
+    )?.[0];
     expect(guard).toBeDefined();
     expect(guard).toContain('NEW.course_id       := v_course');
     expect(guard).toContain('app_course_organization(v_course)');
@@ -201,7 +203,10 @@ describe('the conversation scope is derived, never asserted', () => {
 
   it('uses the SAME helpers the RLS policies use, rather than re-deriving the joins', () => {
     // One definition of "teaches this learner", so the two gates cannot drift.
-    for (const helper of ['app_actor_observes_learner_lesson', 'app_actor_moderates_conversation']) {
+    for (const helper of [
+      'app_actor_observes_learner_lesson',
+      'app_actor_moderates_conversation',
+    ]) {
       expect(MIGRATION, `${helper} is not used by the migration`).toContain(helper);
       expect(REPOSITORY, `${helper} is not used by the repository`).toContain(helper);
     }

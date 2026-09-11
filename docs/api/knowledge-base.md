@@ -22,10 +22,10 @@ curriculum.
 
 ## Endpoints
 
-| Method | Path                                | Who                                  |
-| ------ | ----------------------------------- | ------------------------------------ |
-| `POST` | `/curriculum/courses/:id/index`     | publish standing in the same school  |
-| `POST` | `/rag/retrieve`                     | any authenticated actor              |
+| Method | Path                            | Who                                 |
+| ------ | ------------------------------- | ----------------------------------- |
+| `POST` | `/curriculum/courses/:id/index` | publish standing in the same school |
+| `POST` | `/rag/retrieve`                 | any authenticated actor             |
 
 ### `POST /curriculum/courses/:id/index`
 
@@ -66,7 +66,7 @@ path a future task adds over it.
 **Re-indexing replaces; it never appends.** The course's rows for that model are
 deleted in the same transaction as the insert. Appending would make the index a
 growing record of everything a course has ever said, including the paragraph an
-author removed *because it was wrong* — which is exactly the paragraph you would
+author removed _because it was wrong_ — which is exactly the paragraph you would
 least like quoted back to a child a year later.
 
 ### `POST /rag/retrieve`
@@ -97,7 +97,7 @@ Retrieval runs in three steps, and the ORDER is the security property:
    `class_memberships` → `class_course_assignments` → `courses`, each required
    to be active or published. Nothing the client sent participates.
 2. **Intersect** any client filter with that set.
-3. **Only then search**, with `WHERE e.course_id = ANY($1)` *before*
+3. **Only then search**, with `WHERE e.course_id = ANY($1)` _before_
    `ORDER BY e.embedding <=> $2`.
 
 A version that ranked first and filtered afterwards would return the same rows.
@@ -145,12 +145,12 @@ why the exclusion is enforced in three places rather than assumed in one.
 
 ## Authorization, in both layers
 
-| Layer            | Mechanism                                                        |
-| ---------------- | ---------------------------------------------------------------- |
-| Policy engine    | `contentPolicy`, verb `index` — publish permission, own school, published course |
-| RLS `SELECT`     | `app_actor_sees_lesson(lesson_id)` — the same helper the curriculum itself uses |
+| Layer                 | Mechanism                                                                        |
+| --------------------- | -------------------------------------------------------------------------------- |
+| Policy engine         | `contentPolicy`, verb `index` — publish permission, own school, published course |
+| RLS `SELECT`          | `app_actor_sees_lesson(lesson_id)` — the same helper the curriculum itself uses  |
 | RLS `INSERT`/`DELETE` | author-or-publisher standing, `app_actor_sees_lesson`, and an organization match |
-| RLS `UPDATE`     | **none, and no grant either** |
+| RLS `UPDATE`          | **none, and no grant either**                                                    |
 
 The SELECT policy **delegates** rather than mirrors. Restating the enrolment
 rules on this table would create a second authorization surface that could drift
@@ -163,10 +163,10 @@ let a row's text drift from the lesson it claims to quote while its
 
 ## Rate limits
 
-| Policy             | Budget          |
-| ------------------ | --------------- |
-| `knowledgeIndex`   | 20 / hour       |
-| `knowledgeRetrieve`| 300 / 15 min    |
+| Policy              | Budget       |
+| ------------------- | ------------ |
+| `knowledgeIndex`    | 20 / hour    |
+| `knowledgeRetrieve` | 300 / 15 min |
 
 Indexing is expensive and rare; retrieval is cheap and constant. The retrieval
 budget is generous enough for a conversation and tight enough that enumerating a

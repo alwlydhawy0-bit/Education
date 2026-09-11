@@ -157,7 +157,10 @@ describe('the public query asks the key itself — the second gate', () => {
 
   it('the public query takes no caller-supplied parameter', () => {
     const source = code(REPOSITORY);
-    const fn = source.slice(source.indexOf('async publicPortfolio'), source.indexOf('async function readProject'));
+    const fn = source.slice(
+      source.indexOf('async publicPortfolio'),
+      source.indexOf('async function readProject'),
+    );
     // No `$1` anywhere: the key is in the transaction's GUC, so this function
     // cannot be made to return a different portfolio by passing an argument.
     expect(fn).not.toMatch(/\$\d/);
@@ -165,7 +168,10 @@ describe('the public query asks the key itself — the second gate', () => {
 
   it('the public query selects no identifier column', () => {
     const source = code(REPOSITORY);
-    const fn = source.slice(source.indexOf('async publicPortfolio'), source.indexOf('async function readProject'));
+    const fn = source.slice(
+      source.indexOf('async publicPortfolio'),
+      source.indexOf('async function readProject'),
+    );
     // Ids are kept out of the object entirely rather than dropped later, so
     // there is never a moment when one is in the same value as the payload.
     // Only the SELECT lists are inspected: `f.id` appears in a JOIN condition,
@@ -198,7 +204,10 @@ describe('ownership is structural, not remembered', () => {
 
   it('the featuring statement sets exactly status, featured_by and featured_at', () => {
     const source = code(REPOSITORY);
-    const fn = source.slice(source.indexOf('async featureProject'), source.indexOf('async deleteProject'));
+    const fn = source.slice(
+      source.indexOf('async featureProject'),
+      source.indexOf('async deleteProject'),
+    );
     const setClause = fn.slice(fn.indexOf('SET'), fn.indexOf('WHERE'));
     const assignments = (setClause.match(/(\w+)\s*=/g) ?? []).map((m) =>
       m.replace(/\s*=$/, '').trim(),

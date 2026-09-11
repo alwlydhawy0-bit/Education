@@ -60,9 +60,7 @@ export default function AppLayout({ children, user = DEMO_USER }) {
           cannot be reached — the most common bug in this exact layout, and one
           that is invisible on a desktop.
         */}
-        <main className="flex-1 overflow-y-auto px-4 pb-28 pt-2 sm:px-6 md:pb-6">
-          {children}
-        </main>
+        <main className="flex-1 overflow-y-auto px-4 pb-28 pt-2 sm:px-6 md:pb-6">{children}</main>
       </div>
 
       <BottomNav activeId={activeId} onNavigate={setActiveId} />

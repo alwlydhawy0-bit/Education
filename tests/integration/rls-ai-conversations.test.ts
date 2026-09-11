@@ -106,9 +106,20 @@ async function world(): Promise<World> {
   await assignCourseToClass({ classId: classB, courseId: b.courseId });
 
   return {
-    orgA, orgB, learnerA, learnerA2, learnerB, teacherA, teacherUnrelated,
-    adminA, moderatorA, moderatorB,
-    lessonA: a.lessonId, lessonB: b.lessonId, draftLessonA, classA,
+    orgA,
+    orgB,
+    learnerA,
+    learnerA2,
+    learnerB,
+    teacherA,
+    teacherUnrelated,
+    adminA,
+    moderatorA,
+    moderatorB,
+    lessonA: a.lessonId,
+    lessonB: b.lessonId,
+    draftLessonA,
+    classA,
   };
 }
 

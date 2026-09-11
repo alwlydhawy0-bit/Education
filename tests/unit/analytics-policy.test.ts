@@ -37,9 +37,7 @@ const ctx = (): AuthorizationContext =>
     relationships: { teachesStudents: [], guardianOf: [], sharesClassWith: [] },
   }) as unknown as AuthorizationContext;
 
-const school = (
-  overrides: Partial<AnalyticsReportResource> = {},
-): AnalyticsReportResource => ({
+const school = (overrides: Partial<AnalyticsReportResource> = {}): AnalyticsReportResource => ({
   kind: 'analytics_report',
   id: 'school:org',
   grain: 'school',
@@ -161,9 +159,9 @@ describe('read_school — the institution’s own report', () => {
   it('refuses an actor with no organization', () => {
     // The null-tenant case. `actorIsOrgAdmin` is resolved in SQL as the role
     // AND the tenant together, so a null organization cannot satisfy it.
-    expect(
-      decide('analytics_report:read_school', school({ organizationId: null })).effect,
-    ).toBe('deny');
+    expect(decide('analytics_report:read_school', school({ organizationId: null })).effect).toBe(
+      'deny',
+    );
   });
 });
 
@@ -232,7 +230,10 @@ describe('at_risk — seniority narrows rather than widens', () => {
      * rather than left to think the endpoint is broken.
      */
     const decision = refusal(
-      decide('analytics_report:at_risk', klass({ actorIsOrgAdmin: true, actorTeachesClass: false })),
+      decide(
+        'analytics_report:at_risk',
+        klass({ actorIsOrgAdmin: true, actorTeachesClass: false }),
+      ),
     );
     expect(decision.disclosure).toBe('reveal');
     expect(decision.reason).toContain('at_risk_is_for_teachers');
@@ -266,9 +267,9 @@ describe('at_risk — seniority narrows rather than widens', () => {
     // `actorTeachesClass` is null when the grain has no class. The branch tests
     // `=== true` rather than truthiness precisely so an unresolved value cannot
     // be mistaken for a held claim.
-    expect(
-      decide('analytics_report:at_risk', klass({ actorTeachesClass: null })).effect,
-    ).toBe('deny');
+    expect(decide('analytics_report:at_risk', klass({ actorTeachesClass: null })).effect).toBe(
+      'deny',
+    );
   });
 });
 
@@ -293,9 +294,7 @@ describe('export — the same data through a different door', () => {
     expect(decide('analytics_report:export', klass({ actorTeachesClass: true })).effect).toBe(
       'allow',
     );
-    const refused = refusal(
-      decide('analytics_report:export', school({ actorTeachesClass: true })),
-    );
+    const refused = refusal(decide('analytics_report:export', school({ actorTeachesClass: true })));
     expect(refused.disclosure).toBe('reveal');
     expect(refused.reason).toContain('not_an_administrator');
   });

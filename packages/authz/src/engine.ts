@@ -18,10 +18,7 @@ import { assessmentAttemptPolicy } from './policies/assessment-attempt.policy.ts
 import { experimentSessionPolicy } from './policies/experiment-session.policy.ts';
 import { notebookPolicy, studentArtifactPolicy } from './policies/workspace.policy.ts';
 import { aiConversationPolicy } from './policies/ai-conversation.policy.ts';
-import {
-  studentPortfolioPolicy,
-  studentProjectPolicy,
-} from './policies/portfolio.policy.ts';
+import { studentPortfolioPolicy, studentProjectPolicy } from './policies/portfolio.policy.ts';
 import {
   contentFlagPolicy,
   discussionReplyPolicy,

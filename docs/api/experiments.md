@@ -28,9 +28,9 @@ assessment attempt.
 
 ### Authoring — requires a content permission
 
-| Method | Path                                   | Permission       |
-| ------ | -------------------------------------- | ---------------- |
-| `PUT`  | `/api/v1/activities/:id/experiment`    | `content:author` |
+| Method | Path                                | Permission       |
+| ------ | ----------------------------------- | ---------------- |
+| `PUT`  | `/api/v1/activities/:id/experiment` | `content:author` |
 
 **There is no `POST /experiments`, and no publish route here.** A lab is an
 activity, and `POST /api/v1/lessons/:id/activities`,
@@ -46,9 +46,9 @@ author can neither publish nor diagnose.
 
 ### Reading
 
-| Method | Path                        | Who                                 |
-| ------ | --------------------------- | ----------------------------------- |
-| `GET`  | `/api/v1/experiments/:id`   | anyone who may see the activity     |
+| Method | Path                      | Who                             |
+| ------ | ------------------------- | ------------------------------- |
+| `GET`  | `/api/v1/experiments/:id` | anyone who may see the activity |
 
 **Two response shapes, not an optional field.** A learner receives
 `ExperimentResponse`, which has no property that could hold a rule.
@@ -60,12 +60,12 @@ somebody remembering to omit it.
 
 ### Working
 
-| Method | Path                                            | Who                                       |
-| ------ | ----------------------------------------------- | ----------------------------------------- |
-| `POST` | `/api/v1/experiments/:id/sessions`              | the learner, if they reach it via a class |
-| `PUT`  | `/api/v1/experiment-sessions/:id/state`         | the session's owner, while in progress    |
-| `POST` | `/api/v1/experiment-sessions/:id/submit`        | ”                                         |
-| `POST` | `/api/v1/experiment-sessions/:id/artifacts`     | ”                                         |
+| Method | Path                                        | Who                                       |
+| ------ | ------------------------------------------- | ----------------------------------------- |
+| `POST` | `/api/v1/experiments/:id/sessions`          | the learner, if they reach it via a class |
+| `PUT`  | `/api/v1/experiment-sessions/:id/state`     | the session's owner, while in progress    |
+| `POST` | `/api/v1/experiment-sessions/:id/submit`    | ”                                         |
+| `POST` | `/api/v1/experiment-sessions/:id/artifacts` | ”                                         |
 
 `POST .../sessions` **resumes rather than duplicates**: one live session per
 learner per lab is a partial unique index, so a second start returns the session
@@ -74,13 +74,13 @@ means a flaky network cannot cost somebody their work.
 
 ### Reading sessions
 
-| Method | Path                                                            | Who                                                                             |
-| ------ | --------------------------------------------------------------- | ------------------------------------------------------------------------------- |
-| `GET`  | `/api/v1/experiment-sessions/:id`                               | owner · verified guardian · teacher of the shared class · `admin` of the school |
-| `GET`  | `/api/v1/experiment-sessions/:id/artifacts`                     | ”                                                                                |
-| `GET`  | `/api/v1/me/experiment-sessions`                                | the learner                                                                      |
-| `GET`  | `/api/v1/classes/:id/students/:studentId/experiment-sessions`   | teacher of THAT class · `admin` of its school                                    |
-| `GET`  | `/api/v1/guardians/children/:childId/experiment-sessions`       | verified guardian                                                                |
+| Method | Path                                                          | Who                                                                             |
+| ------ | ------------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/experiment-sessions/:id`                             | owner · verified guardian · teacher of the shared class · `admin` of the school |
+| `GET`  | `/api/v1/experiment-sessions/:id/artifacts`                   | ”                                                                               |
+| `GET`  | `/api/v1/me/experiment-sessions`                              | the learner                                                                     |
+| `GET`  | `/api/v1/classes/:id/students/:studentId/experiment-sessions` | teacher of THAT class · `admin` of its school                                   |
+| `GET`  | `/api/v1/guardians/children/:childId/experiment-sessions`     | verified guardian                                                               |
 
 ## Writing is the learner's alone
 
@@ -140,11 +140,11 @@ enum.
 
 ## Payload limits, in the order they fire
 
-| Layer                | `currentState` | `initialConfig` | artifact `payload` |
-| -------------------- | -------------- | --------------- | ------------------ |
-| Zod contract → `400` | 192 KiB        | 64 KiB          | 128 KiB            |
-| Fastify `bodyLimit` → `413` | 256 KiB | 256 KiB         | 256 KiB            |
-| SQL `CHECK`          | 256 KiB        | 64 KiB          | 128 KiB            |
+| Layer                       | `currentState` | `initialConfig` | artifact `payload` |
+| --------------------------- | -------------- | --------------- | ------------------ |
+| Zod contract → `400`        | 192 KiB        | 64 KiB          | 128 KiB            |
+| Fastify `bodyLimit` → `413` | 256 KiB        | 256 KiB         | 256 KiB            |
+| SQL `CHECK`                 | 256 KiB        | 64 KiB          | 128 KiB            |
 
 The contract cap sits strictly below the transport limit **so that it can
 actually fire**; set equal, the transport refused first and the 400 naming the
@@ -171,8 +171,8 @@ a lab it was already allowed to attempt.
 
 ## Security events
 
-| Event                     | When                                                             |
-| ------------------------- | ---------------------------------------------------------------- |
+| Event                     | When                                                              |
+| ------------------------- | ----------------------------------------------------------------- |
 | `lab.session_started`     | a learner opens a new session                                     |
 | `lab.submitted`           | a session is marked. Carries the STATUS, never the state or rules |
 | `lab.state_write_refused` | the policy allowed a write and RLS then matched zero rows         |
@@ -191,16 +191,16 @@ two fires tells you which layer caught it.
 
 ## Where each rule is enforced
 
-| Property                                    | Policy engine | RLS | Trigger / CHECK |
-| ------------------------------------------- | :-----------: | :-: | :-------------: |
-| Only the learner writes their session       |       ✓       |  ✓  |        ✓        |
-| The outcome is computed, never accepted     |       —       |  —  |        ✓        |
-| The rules are hidden from learners          |       —       |  ✓  |        —        |
-| A published lab is frozen                   |       ✓       |  ✓  |        ✓        |
-| One live session per learner per lab        |       —       |  —  |        ✓        |
-| Instant state isolation                     |       ✓       |  ✓  |        —        |
-| Payload size and shape                      |       ✓       |  —  |        ✓        |
-| Artifacts are append-only                   |       —       |  ✓  |    (no grant)   |
+| Property                                | Policy engine | RLS | Trigger / CHECK |
+| --------------------------------------- | :-----------: | :-: | :-------------: |
+| Only the learner writes their session   |       ✓       |  ✓  |        ✓        |
+| The outcome is computed, never accepted |       —       |  —  |        ✓        |
+| The rules are hidden from learners      |       —       |  ✓  |        —        |
+| A published lab is frozen               |       ✓       |  ✓  |        ✓        |
+| One live session per learner per lab    |       —       |  —  |        ✓        |
+| Instant state isolation                 |       ✓       |  ✓  |        —        |
+| Payload size and shape                  |       ✓       |  —  |        ✓        |
+| Artifacts are append-only               |       —       |  ✓  |   (no grant)    |
 
 Each ✓ is asserted by its own suite: `tests/unit/experiment-policy.test.ts` for
 the policy column, `tests/integration/rls-experiments.test.ts` for the middle

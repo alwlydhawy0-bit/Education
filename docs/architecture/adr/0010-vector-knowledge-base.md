@@ -80,8 +80,8 @@ bootstrap step would have been a much larger decision than the one it solved.
 > for vector similarity later changes the ORDER BY, not the WHERE.
 
 That held. Migration 0026 and the knowledge module changed the `ORDER BY` and
-left the `WHERE` alone. An interface shaped around *a permitted scope* rather
-than *a search algorithm* absorbed a change of search algorithm without a
+left the `WHERE` alone. An interface shaped around _a permitted scope_ rather
+than _a search algorithm_ absorbed a change of search algorithm without a
 security review of its own — which is the return on having shaped it that way,
 collected two tasks later.
 

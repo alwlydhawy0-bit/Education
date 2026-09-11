@@ -27,13 +27,13 @@ there is no parameter for an attacker to put somebody else's id into.
 
 ### Notebooks
 
-| Method            | Path                        |
-| ----------------- | --------------------------- |
-| `POST`            | `/me/notebooks`             |
-| `GET`             | `/me/notebooks`             |
-| `GET`             | `/me/notebooks/:id`         |
-| `PUT` / `PATCH`   | `/me/notebooks/:id`         |
-| `DELETE`          | `/me/notebooks/:id`         |
+| Method          | Path                |
+| --------------- | ------------------- |
+| `POST`          | `/me/notebooks`     |
+| `GET`           | `/me/notebooks`     |
+| `GET`           | `/me/notebooks/:id` |
+| `PUT` / `PATCH` | `/me/notebooks/:id` |
+| `DELETE`        | `/me/notebooks/:id` |
 
 **Deleting a notebook does not delete the notes in it.** A composite foreign key
 sets their `notebook_id` to null and leaves the writing alone. Deleting a folder
@@ -42,14 +42,14 @@ is not something a learner should be able to do by accident.
 
 ### Notes
 
-| Method            | Path                          |
-| ----------------- | ----------------------------- |
-| `POST`            | `/me/notes`                   |
-| `GET`             | `/me/notes`                   |
-| `GET`             | `/me/notes/lesson/:lessonId`  |
-| `GET`             | `/me/notes/:id`               |
-| `PUT` / `PATCH`   | `/me/notes/:id`               |
-| `DELETE`          | `/me/notes/:id`               |
+| Method          | Path                         |
+| --------------- | ---------------------------- |
+| `POST`          | `/me/notes`                  |
+| `GET`           | `/me/notes`                  |
+| `GET`           | `/me/notes/lesson/:lessonId` |
+| `GET`           | `/me/notes/:id`              |
+| `PUT` / `PATCH` | `/me/notes/:id`              |
+| `DELETE`        | `/me/notes/:id`              |
 
 These are **aliases over the existing note service**, not a second
 implementation. `/api/v1/notes` already served the same resource through the same
@@ -63,13 +63,13 @@ unanchor a note on its next save.
 
 ### Artifacts
 
-| Method   | Path                  |
-| -------- | --------------------- |
-| `POST`   | `/me/artifacts`       |
-| `GET`    | `/me/artifacts`       |
-| `GET`    | `/me/artifacts/:id`   |
-| `DELETE` | `/me/artifacts/:id`   |
-| `GET`    | `/me/storage`         |
+| Method   | Path                |
+| -------- | ------------------- |
+| `POST`   | `/me/artifacts`     |
+| `GET`    | `/me/artifacts`     |
+| `GET`    | `/me/artifacts/:id` |
+| `DELETE` | `/me/artifacts/:id` |
+| `GET`    | `/me/storage`       |
 
 ## `POST /me/artifacts` registers metadata. It does not accept bytes.
 
@@ -106,12 +106,12 @@ A note hangs at **at most one** place in the tree — a course, a unit or a less
 — or nowhere. Three columns that must agree are three columns that one day will
 not; a lesson already determines its unit and its course.
 
-| Statement                          | Asked?                                   |
-| ---------------------------------- | ---------------------------------------- |
-| CREATE a note anchored somewhere    | **yes** — `app_actor_may_anchor_here`   |
-| READ an existing note               | no                                       |
-| EDIT its title, body or visibility  | no                                       |
-| MOVE its anchor                     | **yes**                                  |
+| Statement                          | Asked?                                |
+| ---------------------------------- | ------------------------------------- |
+| CREATE a note anchored somewhere   | **yes** — `app_actor_may_anchor_here` |
+| READ an existing note              | no                                    |
+| EDIT its title, body or visibility | no                                    |
+| MOVE its anchor                    | **yes**                               |
 
 A learner may not create a note against coursework they do not study — that
 would be a way to probe the catalog. A learner keeps, reads and **edits** every
@@ -155,11 +155,11 @@ are about whose data this is:
 
 ## Storage limits
 
-| Limit                | Value       | Enforced by                    |
-| -------------------- | ----------- | ------------------------------ |
-| One artifact         | 25 MiB      | Zod, then a SQL `CHECK`        |
-| One learner, total   | 256 MiB     | **a `BEFORE INSERT` trigger**  |
-| Registrations        | 120 / 15 min | `workspace.artifact` rate limit |
+| Limit              | Value        | Enforced by                     |
+| ------------------ | ------------ | ------------------------------- |
+| One artifact       | 25 MiB       | Zod, then a SQL `CHECK`         |
+| One learner, total | 256 MiB      | **a `BEFORE INSERT` trigger**   |
+| Registrations      | 120 / 15 min | `workspace.artifact` rate limit |
 
 **The quota is the database's rule, not the service's.** An application that
 reads `sum(byte_size)` and then inserts loses a race with a very cheap exploit —
@@ -189,8 +189,8 @@ type must come from magic bytes and must match what was declared.
 | ------------------------------ | :------: | :----------: | :---------: | :------: |
 | the owner                      |    ✓     |      ✓       |      ✓      |    ✓     |
 | a peer                         |    —     |      —       |      —      |    —     |
-| the teacher of their class     |    —     |      —       |   ✓ (opt-in) |    —     |
-| a verified guardian            |    —     |      —       |   ✓ (opt-in) |    —     |
+| the teacher of their class     |    —     |      —       | ✓ (opt-in)  |    —     |
+| a verified guardian            |    —     |      —       | ✓ (opt-in)  |    —     |
 | an administrator of the school |    —     |      —       |      —      |    —     |
 | a platform operator            |    —     |      —       |      —      |    —     |
 
@@ -213,11 +213,11 @@ things the child never opened — including notes they write into it tomorrow.
 
 ## Security events
 
-| Event                          | When                                              |
-| ------------------------------ | ------------------------------------------------- |
+| Event                           | When                                                                |
+| ------------------------------- | ------------------------------------------------------------------- |
 | `workspace.artifact_registered` | a file is registered. Type and size, never the filename or metadata |
-| `workspace.markdown_refused`   | a link scheme is refused. The scheme, and nothing else |
-| `authz.denied`                 | every denial, with ids and a reason               |
+| `workspace.markdown_refused`    | a link scheme is refused. The scheme, and nothing else              |
+| `authz.denied`                  | every denial, with ids and a reason                                 |
 
 **Reading or listing a workspace is not recorded.** A child reading their own
 notes is not a security event, and logging it would build exactly the
@@ -225,17 +225,17 @@ surveillance trail these policies exist to make unnecessary.
 
 ## Where each rule is enforced
 
-| Property                                       | Policy engine | RLS | Constraint / trigger |
-| ---------------------------------------------- | :-----------: | :-: | :------------------: |
-| Only the owner reads or writes                 |       ✓       |  ✓  |          —           |
-| A parent belongs to the same owner             |       —       |  —  |    ✓ (composite FK)  |
-| A note anchors only where the owner may study  |       —       |  ✓  |          ✓           |
-| Retention after enrolment ends                 |       ✓       |  ✓  |          —           |
-| The storage key is tenant-scoped               |       —       |  —  |          ✓           |
-| The per-learner quota                          |       —       |  —  |          ✓           |
-| Artifacts are immutable                        |       ✓       |  ✓  |     ✓ (no grant)     |
-| Markdown link schemes                          |       —       |  —  |   ✓ (service gate)   |
-| File type and size                             |       —       |  —  |    ✓ (contract + CHECK) |
+| Property                                      | Policy engine | RLS | Constraint / trigger |
+| --------------------------------------------- | :-----------: | :-: | :------------------: |
+| Only the owner reads or writes                |       ✓       |  ✓  |          —           |
+| A parent belongs to the same owner            |       —       |  —  |   ✓ (composite FK)   |
+| A note anchors only where the owner may study |       —       |  ✓  |          ✓           |
+| Retention after enrolment ends                |       ✓       |  ✓  |          —           |
+| The storage key is tenant-scoped              |       —       |  —  |          ✓           |
+| The per-learner quota                         |       —       |  —  |          ✓           |
+| Artifacts are immutable                       |       ✓       |  ✓  |     ✓ (no grant)     |
+| Markdown link schemes                         |       —       |  —  |   ✓ (service gate)   |
+| File type and size                            |       —       |  —  | ✓ (contract + CHECK) |
 
 Each ✓ is asserted by its own suite: `tests/unit/workspace-policy.test.ts` for
 the first column, `tests/integration/rls-workspace.test.ts` for the middle one

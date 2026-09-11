@@ -336,11 +336,9 @@ describe('B — the outcome is the server’s, never the client’s', () => {
     await post(`/api/v1/experiment-sessions/${session.id}/submit`, w.learner.cookie, {
       currentState: FAILING,
     });
-    const again = await post(
-      `/api/v1/experiment-sessions/${session.id}/submit`,
-      w.learner.cookie,
-      { currentState: PASSING },
-    );
+    const again = await post(`/api/v1/experiment-sessions/${session.id}/submit`, w.learner.cookie, {
+      currentState: PASSING,
+    });
     expect(again.statusCode).toBe(403);
   });
 
@@ -350,11 +348,9 @@ describe('B — the outcome is the server’s, never the client’s', () => {
     await post(`/api/v1/experiment-sessions/${session.id}/submit`, w.learner.cookie, {
       currentState: FAILING,
     });
-    const save = await put(
-      `/api/v1/experiment-sessions/${session.id}/state`,
-      w.learner.cookie,
-      { currentState: PASSING },
-    );
+    const save = await put(`/api/v1/experiment-sessions/${session.id}/state`, w.learner.cookie, {
+      currentState: PASSING,
+    });
     expect(save.statusCode).toBe(403);
   });
 });
@@ -371,11 +367,9 @@ describe('C — a session belongs to the learner who ran it', () => {
   it('refuses a peer writing into it', async () => {
     const w = await world();
     const { session } = await startSession(w, w.learner);
-    const response = await put(
-      `/api/v1/experiment-sessions/${session.id}/state`,
-      w.peer.cookie,
-      { currentState: PASSING },
-    );
+    const response = await put(`/api/v1/experiment-sessions/${session.id}/state`, w.peer.cookie, {
+      currentState: PASSING,
+    });
     expect(response.statusCode).toBe(404);
 
     const still = await get(`/api/v1/experiment-sessions/${session.id}`, w.learner.cookie);
@@ -513,11 +507,9 @@ describe('E — instant state isolation', () => {
       [w.learner.id],
     );
 
-    const refused = await put(
-      `/api/v1/experiment-sessions/${session.id}/state`,
-      w.learner.cookie,
-      { currentState: PASSING },
-    );
+    const refused = await put(`/api/v1/experiment-sessions/${session.id}/state`, w.learner.cookie, {
+      currentState: PASSING,
+    });
     expect(refused.statusCode).toBe(404);
   });
 
@@ -528,11 +520,9 @@ describe('E — instant state isolation', () => {
       `UPDATE class_course_assignments SET status = 'archived', ended_at = now() WHERE class_id = $1`,
       [w.classA1],
     );
-    const refused = await put(
-      `/api/v1/experiment-sessions/${session.id}/state`,
-      w.learner.cookie,
-      { currentState: PASSING },
-    );
+    const refused = await put(`/api/v1/experiment-sessions/${session.id}/state`, w.learner.cookie, {
+      currentState: PASSING,
+    });
     expect(refused.statusCode).toBe(404);
   });
 
@@ -683,8 +673,9 @@ describe('G — starting a lab', () => {
       w.learner.cookie,
     );
     expect(response.statusCode).toBe(404);
-    expect((await get(`/api/v1/experiments/${draft.experimentId}`, w.learner.cookie)).statusCode)
-      .toBe(404);
+    expect(
+      (await get(`/api/v1/experiments/${draft.experimentId}`, w.learner.cookie)).statusCode,
+    ).toBe(404);
   });
 });
 
@@ -835,9 +826,9 @@ describe('I — artifacts are append-only', () => {
     const w = await world();
     const { session } = await startSession(w, w.learner);
     for (const who of [w.guardian, w.teacher]) {
-      expect(
-        (await get(`/api/v1/experiment-sessions/${session.id}`, who.cookie)).statusCode,
-      ).toBe(200);
+      expect((await get(`/api/v1/experiment-sessions/${session.id}`, who.cookie)).statusCode).toBe(
+        200,
+      );
       const response = await post(
         `/api/v1/experiment-sessions/${session.id}/artifacts`,
         who.cookie,
@@ -944,11 +935,9 @@ describe('J — the audit trail records what happened, and nothing it should not
       `UPDATE class_memberships SET status = 'ended', ended_at = now() WHERE user_id = $1`,
       [w.learner.id],
     );
-    const refused = await put(
-      `/api/v1/experiment-sessions/${session.id}/state`,
-      w.learner.cookie,
-      { currentState: PASSING },
-    );
+    const refused = await put(`/api/v1/experiment-sessions/${session.id}/state`, w.learner.cookie, {
+      currentState: PASSING,
+    });
     expect(refused.statusCode).toBe(404);
 
     const raw = new pg.Client({ connectionString: TEST_SUPERUSER_URL });
@@ -957,9 +946,7 @@ describe('J — the audit trail records what happened, and nothing it should not
       const { rows } = await raw.query<{ detail: { reason?: string } }>(
         `SELECT detail FROM audit_log WHERE event_type = 'authz.denied'`,
       );
-      expect(rows.map((r) => r.detail.reason)).toContain(
-        'experiment_session.lab_not_accessible',
-      );
+      expect(rows.map((r) => r.detail.reason)).toContain('experiment_session.lab_not_accessible');
     } finally {
       await raw.end();
     }

@@ -2088,8 +2088,10 @@ describe('the curriculum knowledge base, with RLS disabled', () => {
   it('stops serving an EDITED lesson with RLS gone, so freshness is not a policy either', async () => {
     const w = await twoSchools();
     await indexCourse(w.reviewerA.cookie, w.courseA);
-    expect((await retrieve(w.learnerA.cookie, { query: 'mitochondrion respiration' })).body.chunks
-      .length).toBeGreaterThan(0);
+    expect(
+      (await retrieve(w.learnerA.cookie, { query: 'mitochondrion respiration' })).body.chunks
+        .length,
+    ).toBeGreaterThan(0);
 
     const raw = new pg.Client({ connectionString: NO_RLS_URL });
     await raw.connect();
@@ -2212,8 +2214,16 @@ describe('the AI tutor, with RLS disabled', () => {
     await assignCourseToClass({ classId: classB, courseId: b.courseId });
 
     return {
-      learnerA, learnerA2, learnerB, teacherA, teacherOther, moderatorA, moderatorB,
-      lessonA: a.lessonId, lessonB: b.lessonId, classA,
+      learnerA,
+      learnerA2,
+      learnerB,
+      teacherA,
+      teacherOther,
+      moderatorA,
+      moderatorB,
+      lessonA: a.lessonId,
+      lessonB: b.lessonId,
+      classA,
     };
   }
 
@@ -2237,7 +2247,11 @@ describe('the AI tutor, with RLS disabled', () => {
     });
 
   const read = (cookie: string, id: string) =>
-    app.inject({ method: 'GET', url: `/api/v1/ai/conversations/${id}/messages`, headers: { cookie } });
+    app.inject({
+      method: 'GET',
+      url: `/api/v1/ai/conversations/${id}/messages`,
+      headers: { cookie },
+    });
 
   it('CONFIRMS EVERY CONVERSATION IS VISIBLE TO THE CLIENT, so the rest means something', async () => {
     const w = await twoSchools();
@@ -3009,8 +3023,7 @@ describe('class discussion forums, with RLS disabled', () => {
         headers: { cookie: session.cookie },
       });
       const leaked =
-        response.statusCode === 200 &&
-        response.json<{ items: unknown[] }>().items.length > 0;
+        response.statusCode === 200 && response.json<{ items: unknown[] }>().items.length > 0;
       expect(leaked, `${who} saw the queue`).toBe(false);
       expect(response.body, `${who} saw the subject`).not.toContain(w.classmate.id);
     }
@@ -3233,7 +3246,11 @@ describe('institutional analytics, with RLS disabled', () => {
       '/api/v1/analytics/students/at-risk',
       '/api/v1/analytics/export?dataset=school_overview',
     ]) {
-      const response = await app.inject({ method: 'GET', url, headers: { cookie: w.learnerA.cookie } });
+      const response = await app.inject({
+        method: 'GET',
+        url,
+        headers: { cookie: w.learnerA.cookie },
+      });
       expect([403, 404], `${url} -> ${response.statusCode}`).toContain(response.statusCode);
     }
   });
@@ -3271,7 +3288,10 @@ describe('institutional analytics, with RLS disabled', () => {
     const raw = new pg.Client({ connectionString: NO_RLS_URL });
     await raw.connect();
     try {
-      await raw.query('UPDATE classes SET name = $1 WHERE id = $2', ["=HYPERLINK(\"http://x\")", w.classA]);
+      await raw.query('UPDATE classes SET name = $1 WHERE id = $2', [
+        '=HYPERLINK("http://x")',
+        w.classA,
+      ]);
     } finally {
       await raw.end();
     }

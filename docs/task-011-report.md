@@ -13,15 +13,15 @@ accepted.
 
 ## 1. IMPLEMENTED
 
-| Layer         | File                                                        |
-| ------------- | ----------------------------------------------------------- |
-| Extension     | `db/bootstrap.sql` — pgvector in an `extensions` schema      |
-| Schema        | `db/migrations/0026_curriculum_embeddings.sql` (293 lines)   |
-| Chunking      | `apps/api/src/modules/knowledge/chunking.ts`                 |
-| Embeddings    | `apps/api/src/platform/ai/embeddings.ts`                     |
-| Authorization | `packages/authz/src/policies/content.policy.ts` — verb `index` |
-| Contract      | `packages/contracts/src/knowledge.contract.ts`               |
-| API           | `apps/api/src/modules/knowledge/` — repository, service, routes |
+| Layer         | File                                                                                |
+| ------------- | ----------------------------------------------------------------------------------- |
+| Extension     | `db/bootstrap.sql` — pgvector in an `extensions` schema                             |
+| Schema        | `db/migrations/0026_curriculum_embeddings.sql` (293 lines)                          |
+| Chunking      | `apps/api/src/modules/knowledge/chunking.ts`                                        |
+| Embeddings    | `apps/api/src/platform/ai/embeddings.ts`                                            |
+| Authorization | `packages/authz/src/policies/content.policy.ts` — verb `index`                      |
+| Contract      | `packages/contracts/src/knowledge.contract.ts`                                      |
+| API           | `apps/api/src/modules/knowledge/` — repository, service, routes                     |
 | Docs          | `docs/api/knowledge-base.md`, `docs/architecture/adr/0010-vector-knowledge-base.md` |
 
 One table, one new action, two routes:
@@ -57,22 +57,22 @@ decision than the one it solved.
 
 ## 2. VERIFIED
 
-| Requirement                                                   | Status   | Evidence                                                                 |
-| ------------------------------------------------------------- | -------- | ------------------------------------------------------------------------ |
-| Embeddings inherit the curriculum's RLS and access controls    | VERIFIED | `rls-embeddings.test.ts` (25); SELECT policy delegates to `app_actor_sees_lesson`; F1 |
-| Never an unbounded vector search filtered post-hoc             | VERIFIED | Fitness rule on SQL text ordering; F1, F2 — and **F2 is caught by that rule alone** |
-| Pre-filter through class boundaries FIRST                      | VERIFIED | `coursesInScope` joins memberships and assignments; 8 layered-defence cases with RLS off |
-| Private notes and artifacts excluded from the index            | VERIFIED | Allow-list fitness rule over every `FROM`/`JOIN`; no pointer column on the table |
-| Cross-tenant similarity returns zero, not a 403                | VERIFIED | `rag.test.ts` group B; identical query text across two schools           |
-| Draft content never enters the store                           | VERIFIED | Published-only in SQL; direct table read as superuser; F7, F13           |
-| Archived lessons stop being served with no re-index            | VERIFIED | Mandatory join; layered case with `updated_at` pinned; F5                |
-| An edited lesson stops serving its old text                    | VERIFIED | `source_updated_at` equality; F4                                        |
-| Indexing takes publish standing, not author standing           | VERIFIED | `contentPolicy` verb `index`; the author case has its own test; F6       |
-| Re-index replaces, never appends                               | VERIFIED | Clear-then-insert in one transaction; F8                                |
-| Revocation is immediate                                        | VERIFIED | Membership, assignment and course status, each isolated with RLS off; F9, F11, F12 |
-| The audit trail never records the question                     | VERIFIED | `rag.test.ts` group G asserts no query string in any event               |
-| Retrieval relevance / answer quality                           | **UNVERIFIED** | The provider is not semantic — see §9 (RISK-RAG-01)               |
-| AI tutor, portfolios, community                                | **NOT BUILT** | Excluded by the task's own constraints                              |
+| Requirement                                                 | Status         | Evidence                                                                                 |
+| ----------------------------------------------------------- | -------------- | ---------------------------------------------------------------------------------------- |
+| Embeddings inherit the curriculum's RLS and access controls | VERIFIED       | `rls-embeddings.test.ts` (25); SELECT policy delegates to `app_actor_sees_lesson`; F1    |
+| Never an unbounded vector search filtered post-hoc          | VERIFIED       | Fitness rule on SQL text ordering; F1, F2 — and **F2 is caught by that rule alone**      |
+| Pre-filter through class boundaries FIRST                   | VERIFIED       | `coursesInScope` joins memberships and assignments; 8 layered-defence cases with RLS off |
+| Private notes and artifacts excluded from the index         | VERIFIED       | Allow-list fitness rule over every `FROM`/`JOIN`; no pointer column on the table         |
+| Cross-tenant similarity returns zero, not a 403             | VERIFIED       | `rag.test.ts` group B; identical query text across two schools                           |
+| Draft content never enters the store                        | VERIFIED       | Published-only in SQL; direct table read as superuser; F7, F13                           |
+| Archived lessons stop being served with no re-index         | VERIFIED       | Mandatory join; layered case with `updated_at` pinned; F5                                |
+| An edited lesson stops serving its old text                 | VERIFIED       | `source_updated_at` equality; F4                                                         |
+| Indexing takes publish standing, not author standing        | VERIFIED       | `contentPolicy` verb `index`; the author case has its own test; F6                       |
+| Re-index replaces, never appends                            | VERIFIED       | Clear-then-insert in one transaction; F8                                                 |
+| Revocation is immediate                                     | VERIFIED       | Membership, assignment and course status, each isolated with RLS off; F9, F11, F12       |
+| The audit trail never records the question                  | VERIFIED       | `rag.test.ts` group G asserts no query string in any event                               |
+| Retrieval relevance / answer quality                        | **UNVERIFIED** | The provider is not semantic — see §9 (RISK-RAG-01)                                      |
+| AI tutor, portfolios, community                             | **NOT BUILT**  | Excluded by the task's own constraints                                                   |
 
 ---
 
@@ -109,27 +109,27 @@ did not understand. The audit trail is read by more people than the lesson is.
 All exercised over real HTTP, in `tests/security/rag.test.ts` (28 cases,
 groups A–G) unless noted.
 
-| # | Attempt                                                        | Result | Where the refusal comes from |
-| - | -------------------------------------------------------------- | ------ | ---------------------------- |
-| 1 | School B learner queries text that only school A's chunks match | 200, empty | Pre-filter (app) + RLS |
-| 2 | School A learner, symmetric case                               | 200, empty | Pre-filter (app) + RLS |
-| 3 | Learner names another school's `courseId` explicitly           | 200, empty | Intersection — narrows, never widens |
-| 4 | Learner names an unassigned course in their OWN school          | 200, empty | Not in the enrolment graph |
-| 5 | Learner in no class at all                                     | 200, empty, `coursesInScope: 0` | Empty scope short-circuits |
-| 6 | Learner queries a draft lesson's distinctive text               | 200, empty | Never indexed; also never served |
-| 7 | Direct table read: is draft text present at all?                | absent | Ingestion filter (data-at-rest) |
-| 8 | Learner after leaving the class                                | 200, empty | `cm.status` (app) — isolated with RLS off |
-| 9 | Learner after the course is withdrawn from the class            | 200, empty | `a.status` (app) — isolated with RLS off |
-| 10 | Learner after the course is archived                          | 200, empty, scope 0 | `co.status` (app) — isolated with RLS off |
-| 11 | Learner after the lesson is archived                          | 200, empty | Mandatory join — isolated with `updated_at` pinned |
-| 12 | Retrieval after the lesson is EDITED                          | 200, empty | Freshness equality |
-| 13 | Learner attempts to index                                     | 404 | Write verb, non-editor: hidden |
-| 14 | Content author attempts to index                              | 403 | Separation of duties; reveal |
-| 15 | Reviewer indexes another school's course                      | 404 | Not an editor there |
-| 16 | Reviewer indexes a draft course                               | 403 | State axis; reveal |
-| 17 | Forged body `{organizationId: <other school>}`                | 400 | `.strict()` empty schema |
-| 18 | Non-existent course id                                        | 404 | Indistinguishable from hidden |
-| 19 | Anonymous caller, both routes                                 | 401 | Confirmed on a live boot |
+| #   | Attempt                                                         | Result                          | Where the refusal comes from                       |
+| --- | --------------------------------------------------------------- | ------------------------------- | -------------------------------------------------- |
+| 1   | School B learner queries text that only school A's chunks match | 200, empty                      | Pre-filter (app) + RLS                             |
+| 2   | School A learner, symmetric case                                | 200, empty                      | Pre-filter (app) + RLS                             |
+| 3   | Learner names another school's `courseId` explicitly            | 200, empty                      | Intersection — narrows, never widens               |
+| 4   | Learner names an unassigned course in their OWN school          | 200, empty                      | Not in the enrolment graph                         |
+| 5   | Learner in no class at all                                      | 200, empty, `coursesInScope: 0` | Empty scope short-circuits                         |
+| 6   | Learner queries a draft lesson's distinctive text               | 200, empty                      | Never indexed; also never served                   |
+| 7   | Direct table read: is draft text present at all?                | absent                          | Ingestion filter (data-at-rest)                    |
+| 8   | Learner after leaving the class                                 | 200, empty                      | `cm.status` (app) — isolated with RLS off          |
+| 9   | Learner after the course is withdrawn from the class            | 200, empty                      | `a.status` (app) — isolated with RLS off           |
+| 10  | Learner after the course is archived                            | 200, empty, scope 0             | `co.status` (app) — isolated with RLS off          |
+| 11  | Learner after the lesson is archived                            | 200, empty                      | Mandatory join — isolated with `updated_at` pinned |
+| 12  | Retrieval after the lesson is EDITED                            | 200, empty                      | Freshness equality                                 |
+| 13  | Learner attempts to index                                       | 404                             | Write verb, non-editor: hidden                     |
+| 14  | Content author attempts to index                                | 403                             | Separation of duties; reveal                       |
+| 15  | Reviewer indexes another school's course                        | 404                             | Not an editor there                                |
+| 16  | Reviewer indexes a draft course                                 | 403                             | State axis; reveal                                 |
+| 17  | Forged body `{organizationId: <other school>}`                  | 400                             | `.strict()` empty schema                           |
+| 18  | Non-existent course id                                          | 404                             | Indistinguishable from hidden                      |
+| 19  | Anonymous caller, both routes                                   | 401                             | Confirmed on a live boot                           |
 
 **Cases 1–5 and 8–11 were re-run against `edu_app_norls` (BYPASSRLS)** in
 `layered-defense.test.ts`, with a case first proving both schools' vectors are
@@ -202,14 +202,14 @@ of its own.
 
 Full serial gate, all six projects, from a clean tree:
 
-| Project      | Files | Tests |
-| ------------ | ----- | ----- |
-| unit         | 23    | 913   |
-| architecture | 8     | 206   |
-| web          | 3     | 53    |
-| integration  | 15    | 491   |
-| security     | 24    | 829   |
-| evaluation   | 2     | 38    |
+| Project      | Files  | Tests     |
+| ------------ | ------ | --------- |
+| unit         | 23     | 913       |
+| architecture | 8      | 206       |
+| web          | 3      | 53        |
+| integration  | 15     | 491       |
+| security     | 24     | 829       |
+| evaluation   | 2      | 38        |
 | **total**    | **75** | **2,530** |
 
 Typecheck and lint clean across all seven workspace projects.
@@ -219,21 +219,21 @@ Typecheck and lint clean across all seven workspace projects.
 Thirteen defects, each applied to the working tree, run against the suites that
 should notice, then reverted with `git checkout --`. **All thirteen caught.**
 
-| #   | Defect                                                    | Caught by |
-| --- | --------------------------------------------------------- | --------- |
-| F1  | Course pre-filter removed — unbounded search               | 17 tests across three suites |
-| F2  | Ranked subquery filtered from outside — the real post-hoc shape | **the fitness rule alone** |
-| F3  | Client `courseId` trusted instead of intersected           | the named cross-tenant case |
-| F4  | Freshness equality removed                                 | 3, incl. the fitness rule |
-| F5  | Lesson lifecycle check removed                             | 2 (fitness + `updated_at` pinned) |
-| F6  | Content author allowed to index                            | the separation-of-duties case |
-| F7  | Unpublished lessons indexed                                | 3, incl. the data-at-rest read |
-| F8  | Re-index appends instead of replacing                      | 2 |
-| F9  | Membership status ignored in the scope                     | the RLS-off membership case |
-| F10 | `UPDATE` granted on the embeddings table                   | the grant fitness rule |
-| F11 | Assignment status ignored in the scope                     | the RLS-off withdrawal case |
-| F12 | Course published-status ignored in the scope               | the scope-count case |
-| F13 | Every lesson indexed regardless of status                  | 3 |
+| #   | Defect                                                          | Caught by                         |
+| --- | --------------------------------------------------------------- | --------------------------------- |
+| F1  | Course pre-filter removed — unbounded search                    | 17 tests across three suites      |
+| F2  | Ranked subquery filtered from outside — the real post-hoc shape | **the fitness rule alone**        |
+| F3  | Client `courseId` trusted instead of intersected                | the named cross-tenant case       |
+| F4  | Freshness equality removed                                      | 3, incl. the fitness rule         |
+| F5  | Lesson lifecycle check removed                                  | 2 (fitness + `updated_at` pinned) |
+| F6  | Content author allowed to index                                 | the separation-of-duties case     |
+| F7  | Unpublished lessons indexed                                     | 3, incl. the data-at-rest read    |
+| F8  | Re-index appends instead of replacing                           | 2                                 |
+| F9  | Membership status ignored in the scope                          | the RLS-off membership case       |
+| F10 | `UPDATE` granted on the embeddings table                        | the grant fitness rule            |
+| F11 | Assignment status ignored in the scope                          | the RLS-off withdrawal case       |
+| F12 | Course published-status ignored in the scope                    | the scope-count case              |
+| F13 | Every lesson indexed regardless of status                       | 3                                 |
 
 **Four of these escaped on the first pass** (F2, F5, F9, F12) and produced
 VULN-049 plus five new permanent tests. The escapes were the useful part of the
@@ -310,13 +310,13 @@ equality both mask that clause — which is exactly what VULN-049 is about.
 
 ### Open risks
 
-| Id          | Risk |
-| ----------- | ---- |
+| Id          | Risk                                                                                                                                                         |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | RISK-RAG-01 | The embedding provider matches vocabulary, not meaning. Every test here is a test of the pipeline; none is evidence that retrieval returns relevant results. |
-| RISK-RAG-02 | Re-indexing is manual. Retrieval fails closed on stale content, but with no alert and no staleness metric. |
-| RISK-RAG-03 | Questions are deliberately not logged, so probing through `/rag/retrieve` leaves only ids and counts. Privacy chosen over forensics. |
-| RISK-RAG-04 | `coursesInScope` is one bit more than the question requires; a caller can watch it change to infer roster edits. |
-| RISK-RAG-05 | HNSW built with default parameters and no recall measurement. A missed neighbour is a worse answer, never a leak — but the recall is unknown. |
+| RISK-RAG-02 | Re-indexing is manual. Retrieval fails closed on stale content, but with no alert and no staleness metric.                                                   |
+| RISK-RAG-03 | Questions are deliberately not logged, so probing through `/rag/retrieve` leaves only ids and counts. Privacy chosen over forensics.                         |
+| RISK-RAG-04 | `coursesInScope` is one bit more than the question requires; a caller can watch it change to infer roster edits.                                             |
+| RISK-RAG-05 | HNSW built with default parameters and no recall measurement. A missed neighbour is a worse answer, never a leak — but the recall is unknown.                |
 
 Carried forward from earlier tasks and still open: the API is not deployed; the
 Vercel Root Directory is still `apps/api` and `apps/api/vercel.json` should be

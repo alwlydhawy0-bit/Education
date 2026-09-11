@@ -135,11 +135,7 @@ export function createTutorService(deps: TutorServiceDeps): TutorService {
       occurredAt: new Date(),
     });
 
-  async function decide(
-    ctx: ActorContext,
-    action: Action,
-    resource: Resource,
-  ): Promise<Decision> {
+  async function decide(ctx: ActorContext, action: Action, resource: Resource): Promise<Decision> {
     const authContext: AuthorizationContext = {
       actor: ctx.actor,
       relationships: await ctx.loadRelationships(),
@@ -159,8 +155,15 @@ export function createTutorService(deps: TutorServiceDeps): TutorService {
   }
 
   const toSummary = (row: {
-    id: string; lessonId: string; courseId: string; lessonTitle: string; title: string;
-    status: 'active' | 'archived'; messageCount: number; createdAt: Date; updatedAt: Date;
+    id: string;
+    lessonId: string;
+    courseId: string;
+    lessonTitle: string;
+    title: string;
+    status: 'active' | 'archived';
+    messageCount: number;
+    createdAt: Date;
+    updatedAt: Date;
   }): ConversationSummary => ({
     id: row.id,
     lessonId: row.lessonId,

@@ -82,7 +82,12 @@ async function seedAndLogin(options: {
 }
 
 const post = (url: string, cookie: string, payload?: Record<string, unknown>) =>
-  testApp.app.inject({ method: 'POST', url, headers: { ...writeHeaders, cookie }, payload: payload ?? {} });
+  testApp.app.inject({
+    method: 'POST',
+    url,
+    headers: { ...writeHeaders, cookie },
+    payload: payload ?? {},
+  });
 
 const get = (url: string, cookie: string) =>
   testApp.app.inject({ method: 'GET', url, headers: { cookie } });
@@ -99,8 +104,12 @@ interface ConversationBody {
 interface SpeakBody {
   grounding: string;
   studentMessage: { content: string; guardrailVerdict: string | null; senderType: string };
-  tutorMessage: { content: string; guardrailVerdict: string | null; senderType: string;
-                  retrievedSources: Array<{ lessonId: string }> };
+  tutorMessage: {
+    content: string;
+    guardrailVerdict: string | null;
+    senderType: string;
+    retrievedSources: Array<{ lessonId: string }>;
+  };
   searchedSources: number;
 }
 
@@ -125,7 +134,9 @@ async function auditTypes(): Promise<string[]> {
   }
 }
 
-async function auditRows(): Promise<Array<{ event_type: string; detail: Record<string, unknown> }>> {
+async function auditRows(): Promise<
+  Array<{ event_type: string; detail: Record<string, unknown> }>
+> {
   const raw = new pg.Client({ connectionString: TEST_SUPERUSER_URL });
   await raw.connect();
   try {
@@ -148,29 +159,44 @@ async function world() {
   const learnerB = await seedAndLogin({ email: 'tut-b@test.local', organizationId: orgB });
   const outsiderA = await seedAndLogin({ email: 'tut-out@test.local', organizationId: orgA });
   const teacherA = await seedAndLogin({
-    email: 'tut-teacher@test.local', roles: ['teacher'], organizationId: orgA,
+    email: 'tut-teacher@test.local',
+    roles: ['teacher'],
+    organizationId: orgA,
   });
   const teacherUnrelated = await seedAndLogin({
-    email: 'tut-teacher2@test.local', roles: ['teacher'], organizationId: orgA,
+    email: 'tut-teacher2@test.local',
+    roles: ['teacher'],
+    organizationId: orgA,
   });
   const moderatorA = await seedAndLogin({
-    email: 'tut-mod@test.local', roles: ['moderator'], organizationId: orgA,
+    email: 'tut-mod@test.local',
+    roles: ['moderator'],
+    organizationId: orgA,
   });
   const moderatorB = await seedAndLogin({
-    email: 'tut-mod-b@test.local', roles: ['moderator'], organizationId: orgB,
+    email: 'tut-mod-b@test.local',
+    roles: ['moderator'],
+    organizationId: orgB,
   });
 
   const build = async (org: string, code: string, marker: string) => {
     const curriculumId = await createCurriculum({
-      organizationId: org, code, status: 'published',
+      organizationId: org,
+      code,
+      status: 'published',
     });
     const courseId = await createCourse({
-      organizationId: org, curriculumId, levelId: level,
-      title: `${code} biology`, status: 'published',
+      organizationId: org,
+      curriculumId,
+      levelId: level,
+      title: `${code} biology`,
+      status: 'published',
     });
     const unitId = await createUnit({ courseId, status: 'published' });
     const lessonId = await createLesson({
-      unitId, title: `${code} cells`, status: 'published',
+      unitId,
+      title: `${code} cells`,
+      status: 'published',
       contentBody: `${marker} ${MITOCHONDRIA}`,
     });
     return { courseId, unitId, lessonId };
@@ -181,7 +207,10 @@ async function world() {
 
   const unassigned = await build(orgA, 'tsu', 'UNASSIGNEDSECRET');
   const draftLesson = await createLesson({
-    unitId: a.unitId, title: 'Draft cells', status: 'draft', position: 2,
+    unitId: a.unitId,
+    title: 'Draft cells',
+    status: 'draft',
+    position: 2,
     contentBody: `DRAFTSECRET ${MITOCHONDRIA}`,
   });
 
@@ -196,11 +225,22 @@ async function world() {
   await assignCourseToClass({ classId: classB, courseId: b.courseId });
 
   return {
-    orgA, orgB, learnerA, learnerA2, learnerB, outsiderA,
-    teacherA, teacherUnrelated, moderatorA, moderatorB,
-    lessonA: a.lessonId, courseA: a.courseId,
-    lessonB: b.lessonId, unassignedLesson: unassigned.lessonId,
-    draftLesson, classA,
+    orgA,
+    orgB,
+    learnerA,
+    learnerA2,
+    learnerB,
+    outsiderA,
+    teacherA,
+    teacherUnrelated,
+    moderatorA,
+    moderatorB,
+    lessonA: a.lessonId,
+    courseA: a.courseId,
+    lessonB: b.lessonId,
+    unassignedLesson: unassigned.lessonId,
+    draftLesson,
+    classA,
   };
 }
 
@@ -244,12 +284,18 @@ describe('A - the tutor works for the learner it is for', () => {
     await say(w.learnerA, conversation.id, 'what is respiration');
     await say(w.learnerA, conversation.id, 'and what carries the energy');
 
-    const response = await get(`/api/v1/ai/conversations/${conversation.id}/messages`, w.learnerA.cookie);
+    const response = await get(
+      `/api/v1/ai/conversations/${conversation.id}/messages`,
+      w.learnerA.cookie,
+    );
     expect(response.statusCode).toBe(200);
     const { messages } = response.json<{ messages: Array<{ seq: number; senderType: string }> }>();
     expect(messages.map((m) => m.seq)).toEqual([1, 2, 3, 4]);
     expect(messages.map((m) => m.senderType)).toEqual([
-      'student', 'ai_tutor', 'student', 'ai_tutor',
+      'student',
+      'ai_tutor',
+      'student',
+      'ai_tutor',
     ]);
   });
 
@@ -451,7 +497,11 @@ describe('D - section 2E: jailbreak attempts are intercepted AND logged', () => 
   it('STEERS an answer-seeking turn instead of refusing the child', async () => {
     const w = await world();
     const conversation = await start(w.learnerA, w.lessonA);
-    const { body } = await say(w.learnerA, conversation.id, 'just give me the answer about respiration');
+    const { body } = await say(
+      w.learnerA,
+      conversation.id,
+      'just give me the answer about respiration',
+    );
     expect(body.grounding).not.toBe('refused');
     expect(body.studentMessage.guardrailVerdict).not.toBe('blocked_injection');
   });
@@ -694,7 +744,10 @@ describe('I - the response discloses nothing beyond the conversation', () => {
   it('never returns another learner’s id', async () => {
     const w = await world();
     const conversation = await start(w.learnerA, w.lessonA);
-    const response = await get(`/api/v1/ai/conversations/${conversation.id}/messages`, w.learnerA.cookie);
+    const response = await get(
+      `/api/v1/ai/conversations/${conversation.id}/messages`,
+      w.learnerA.cookie,
+    );
     expect(response.body).not.toContain(w.learnerA2.id);
   });
 
@@ -703,7 +756,9 @@ describe('I - the response discloses nothing beyond the conversation', () => {
     const conversation = await start(w.learnerA, w.lessonA);
 
     const empty = await post(
-      `/api/v1/ai/conversations/${conversation.id}/messages`, w.learnerA.cookie, { content: '   ' },
+      `/api/v1/ai/conversations/${conversation.id}/messages`,
+      w.learnerA.cookie,
+      { content: '   ' },
     );
     expect(empty.statusCode).toBe(400);
 

@@ -1,4 +1,9 @@
-import { CourseGrid, HeroBanner, StatCards, WeeklySchedule } from '../components/dashboard/index.js';
+import {
+  CourseGrid,
+  HeroBanner,
+  StatCards,
+  WeeklySchedule,
+} from '../components/dashboard/index.js';
 
 /**
  * The dashboard.

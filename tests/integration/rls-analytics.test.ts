@@ -109,7 +109,6 @@ async function gradedAttempt(options: {
   return id;
 }
 
-
 /**
  * Two schools studying THE SAME SHARED COURSE.
  *
@@ -255,14 +254,18 @@ describe('the school is the boundary', () => {
     await refresh([w.orgA, w.orgB]);
 
     expect(
-      await rows(w.adminA, 'SELECT * FROM analytics_daily_school_metrics WHERE organization_id = $1', [
-        w.orgB,
-      ]),
+      await rows(
+        w.adminA,
+        'SELECT * FROM analytics_daily_school_metrics WHERE organization_id = $1',
+        [w.orgB],
+      ),
     ).toHaveLength(0);
     expect(
-      await rows(w.adminA, 'SELECT * FROM analytics_course_performance WHERE organization_id = $1', [
-        w.orgB,
-      ]),
+      await rows(
+        w.adminA,
+        'SELECT * FROM analytics_course_performance WHERE organization_id = $1',
+        [w.orgB],
+      ),
     ).toHaveLength(0);
   });
 
@@ -362,7 +365,10 @@ describe('nobody writes a metric', () => {
       ),
     ).toBe(false);
     expect(
-      await attempt(w.adminA, 'UPDATE analytics_daily_school_metrics SET total_active_students = 999'),
+      await attempt(
+        w.adminA,
+        'UPDATE analytics_daily_school_metrics SET total_active_students = 999',
+      ),
     ).toBe(false);
     expect(await attempt(w.adminA, 'DELETE FROM analytics_course_performance')).toBe(false);
   });

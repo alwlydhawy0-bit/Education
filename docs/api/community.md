@@ -21,22 +21,22 @@ database, so no route can go round it.
 
 ## Endpoints
 
-| Method   | Path                            | Who                                          |
-| -------- | ------------------------------- | -------------------------------------------- |
-| `POST`   | `/classes/:classId/threads`     | a member or teacher of that class            |
-| `GET`    | `/classes/:classId/threads`     | a member or teacher of that class            |
-| `GET`    | `/threads/:id`                  | the room; the author at any status; staff    |
-| `PUT`    | `/threads/:id`                  | the author, while unlocked and not hidden    |
-| `PATCH`  | `/threads/:id`                  | the author, while unlocked and not hidden    |
-| `DELETE` | `/threads/:id`                  | the author, while unlocked and not hidden    |
-| `POST`   | `/threads/:id/replies`          | the room, while the thread is unlocked       |
-| `PUT`    | `/replies/:id`                  | the author, while unlocked and not hidden    |
-| `PATCH`  | `/replies/:id`                  | the author, while unlocked and not hidden    |
-| `DELETE` | `/replies/:id`                  | the author, while unlocked and not hidden    |
-| `PATCH`  | `/replies/:id/accept`           | **the person who asked**, or staff           |
-| `POST`   | `/discussions/flag`             | anybody in the room                          |
-| `GET`    | `/moderation/flags`             | staff for that class; a reporter, their own  |
-| `PATCH`  | `/moderation/action`            | staff for that class                         |
+| Method   | Path                        | Who                                         |
+| -------- | --------------------------- | ------------------------------------------- |
+| `POST`   | `/classes/:classId/threads` | a member or teacher of that class           |
+| `GET`    | `/classes/:classId/threads` | a member or teacher of that class           |
+| `GET`    | `/threads/:id`              | the room; the author at any status; staff   |
+| `PUT`    | `/threads/:id`              | the author, while unlocked and not hidden   |
+| `PATCH`  | `/threads/:id`              | the author, while unlocked and not hidden   |
+| `DELETE` | `/threads/:id`              | the author, while unlocked and not hidden   |
+| `POST`   | `/threads/:id/replies`      | the room, while the thread is unlocked      |
+| `PUT`    | `/replies/:id`              | the author, while unlocked and not hidden   |
+| `PATCH`  | `/replies/:id`              | the author, while unlocked and not hidden   |
+| `DELETE` | `/replies/:id`              | the author, while unlocked and not hidden   |
+| `PATCH`  | `/replies/:id/accept`       | **the person who asked**, or staff          |
+| `POST`   | `/discussions/flag`         | anybody in the room                         |
+| `GET`    | `/moderation/flags`         | staff for that class; a reporter, their own |
+| `PATCH`  | `/moderation/action`        | staff for that class                        |
 
 All paths are under `/api/v1`. **Every route requires a session** — unlike Task
 013 there is no public route here, because a class forum has no readership
@@ -44,8 +44,8 @@ outside the class.
 
 ## The class is the boundary
 
-`app_actor_in_class_forum(class_id)` is one resolved fact meaning *a member or
-teacher of this active class*, and it is the only way into a forum. On the
+`app_actor_in_class_forum(class_id)` is one resolved fact meaning _a member or
+teacher of this active class_, and it is the only way into a forum. On the
 resource it appears as `actorInForum`; in the database it is a `SECURITY
 DEFINER` function the RLS policies call.
 
@@ -247,30 +247,30 @@ named. It discloses exactly what a forum already discloses.
 **Nothing in this module joins `users`.** That is the third time this platform
 has learned the same lesson — VULN-054 was a join to `lessons` and VULN-055 a
 join to `users` for a portfolio author's name, which took down every public page
-because `users` has RLS and the public path has no actor. *A join added to fetch
-a display value is an access predicate whether or not anybody meant it as one.*
+because `users` has RLS and the public path has no actor. _A join added to fetch
+a display value is an access predicate whether or not anybody meant it as one._
 `tests/architecture/community-boundaries.test.ts` fails on `JOIN users` in this
 module.
 
 ## Rate limits
 
-| Policy              | Limit           | What it is for                                     |
-| ------------------- | --------------- | -------------------------------------------------- |
-| `forum.post`        | 60 / 15 min     | Automated flooding of a class feed                  |
-| `moderation.report` | 20 / 15 min     | Burying a queue so genuine reports go unread        |
-| `moderation.action` | 200 / 15 min    | A stuck client replaying moderation writes          |
+| Policy              | Limit        | What it is for                               |
+| ------------------- | ------------ | -------------------------------------------- |
+| `forum.post`        | 60 / 15 min  | Automated flooding of a class feed           |
+| `moderation.report` | 20 / 15 min  | Burying a queue so genuine reports go unread |
+| `moderation.action` | 200 / 15 min | A stuck client replaying moderation writes   |
 
 None is aimed at ordinary use. A class arguing about a physics question does not
 approach sixty posts in a quarter of an hour.
 
 ## Request limits
 
-| Field              | Limit                                     |
-| ------------------ | ----------------------------------------- |
-| `title`            | 1–200 characters, trimmed                 |
-| `contentMarkdown`  | 1–20,000 characters, trimmed              |
-| `reason`           | 1–1,000 characters, trimmed               |
-| reply nesting      | 8 levels                                  |
+| Field             | Limit                        |
+| ----------------- | ---------------------------- |
+| `title`           | 1–200 characters, trimmed    |
+| `contentMarkdown` | 1–20,000 characters, trimmed |
+| `reason`          | 1–1,000 characters, trimmed  |
+| reply nesting     | 8 levels                     |
 
 **Every schema is `.strict()`.** A field that arrives without being declared is
 a 400, not a silent ignore — which is how `is_locked: false` in a request body
@@ -282,17 +282,17 @@ through this route; a body would be a place for a caller to put a column.
 
 ## Two gates, and what each one is
 
-| The rule                                   | Application                              | Database                                    |
-| ------------------------------------------ | ---------------------------------------- | ------------------------------------------- |
-| Only the room reads a thread               | `discussion_thread.in_this_class`        | `discussion_threads_select`                 |
-| Only the author edits their post           | `discussion_thread.not_author`           | `discussion_threads_update`                 |
-| No reply into a locked thread              | `discussion_reply.thread_locked`         | `discussion_replies_insert` `WITH CHECK`    |
-| Hidden posts out of a learner's queries    | per-row `admit` in the service           | `discussion_threads_select`                 |
-| Only staff moderate                        | `discussion_thread.not_a_moderator`      | `discussion_threads_moderate`               |
-| A moderator moves only four columns        | —                                        | `discussion_thread_moderation_guard`        |
-| Only staff close a flag                    | `content_flag.not_a_moderator`           | `content_flags_review`                      |
-| A reply's parent is in the same thread     | —                                        | composite foreign key                       |
-| A reply's class comes from its thread      | —                                        | `discussion_reply_guard`                    |
+| The rule                                | Application                         | Database                                 |
+| --------------------------------------- | ----------------------------------- | ---------------------------------------- |
+| Only the room reads a thread            | `discussion_thread.in_this_class`   | `discussion_threads_select`              |
+| Only the author edits their post        | `discussion_thread.not_author`      | `discussion_threads_update`              |
+| No reply into a locked thread           | `discussion_reply.thread_locked`    | `discussion_replies_insert` `WITH CHECK` |
+| Hidden posts out of a learner's queries | per-row `admit` in the service      | `discussion_threads_select`              |
+| Only staff moderate                     | `discussion_thread.not_a_moderator` | `discussion_threads_moderate`            |
+| A moderator moves only four columns     | —                                   | `discussion_thread_moderation_guard`     |
+| Only staff close a flag                 | `content_flag.not_a_moderator`      | `content_flags_review`                   |
+| A reply's parent is in the same thread  | —                                   | composite foreign key                    |
+| A reply's class comes from its thread   | —                                   | `discussion_reply_guard`                 |
 
 Each row where both columns are filled is a rule that survives the deletion of
 either gate, and both directions are tested:
@@ -307,14 +307,14 @@ trigger, neither of which any route can go round.
 
 ## Errors
 
-| Status | When                                                                 |
-| ------ | -------------------------------------------------------------------- |
-| 400    | A malformed body, an undeclared field, or a reply nested too deep     |
-| 401    | No session                                                            |
-| 403    | A refusal the caller is entitled to understand — a locked thread, a hidden post, a self-accept |
+| Status | When                                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------------------- |
+| 400    | A malformed body, an undeclared field, or a reply nested too deep                                       |
+| 401    | No session                                                                                              |
+| 403    | A refusal the caller is entitled to understand — a locked thread, a hidden post, a self-accept          |
 | 404    | A refusal that must not confirm the object exists — another class, another school, somebody else's post |
-| 409    | A second accepted answer, or a duplicate report                       |
-| 429    | A rate limit                                                          |
+| 409    | A second accepted answer, or a duplicate report                                                         |
+| 429    | A rate limit                                                                                            |
 
 **403 and 404 are not two spellings of "no".** A 403 says the object is real and
 names the reason; a 404 says nothing at all. Which one a refusal produces is the
@@ -325,11 +325,11 @@ thread is told that, and a child probing another class's ids learns nothing.
 
 ## Tests
 
-| File                                              | What it proves                                  |
-| ------------------------------------------------- | ----------------------------------------------- |
-| `tests/unit/community-content-filter.test.ts`      | 76 evasions and 23 innocent words, no server     |
-| `tests/unit/community-policy.test.ts`              | The decision grid, effect and disclosure         |
-| `tests/architecture/community-boundaries.test.ts`  | The properties a passing suite would not notice breaking |
-| `tests/integration/rls-community.test.ts`          | The database alone, no application code          |
-| `tests/security/community.test.ts`                 | End to end, both gates, IDOR-A … IDOR-W          |
-| `tests/security/layered-defense.test.ts`           | The application alone, RLS bypassed              |
+| File                                              | What it proves                                           |
+| ------------------------------------------------- | -------------------------------------------------------- |
+| `tests/unit/community-content-filter.test.ts`     | 76 evasions and 23 innocent words, no server             |
+| `tests/unit/community-policy.test.ts`             | The decision grid, effect and disclosure                 |
+| `tests/architecture/community-boundaries.test.ts` | The properties a passing suite would not notice breaking |
+| `tests/integration/rls-community.test.ts`         | The database alone, no application code                  |
+| `tests/security/community.test.ts`                | End to end, both gates, IDOR-A … IDOR-W                  |
+| `tests/security/layered-defense.test.ts`          | The application alone, RLS bypassed                      |

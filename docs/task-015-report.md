@@ -1,7 +1,6 @@
 # Task 015 — School-Wide Analytics & Institutional Reporting Engine
 
-Branch `claude/platform-foundation-architecture-dop21k`. Migrations 0032 and
-0033. One new domain, `analytics`.
+Branch `claude/platform-foundation-architecture-dop21k`. Migrations 0032 and 0033. One new domain, `analytics`.
 
 ---
 
@@ -50,13 +49,13 @@ the RLS that makes the tenant boundary real.
 
 ## 2. VERIFIED
 
-| Gate                           | Result                        |
-| ------------------------------ | ----------------------------- |
-| `pnpm typecheck`               | clean, exit 0                 |
-| `pnpm lint`                    | clean, exit 0                 |
-| `pnpm test` (all six projects) | 96 files, 3,406 tests, green  |
-| Defect injection round 14      | see §7                        |
-| Live boot check                | see below                     |
+| Gate                           | Result                       |
+| ------------------------------ | ---------------------------- |
+| `pnpm typecheck`               | clean, exit 0                |
+| `pnpm lint`                    | clean, exit 0                |
+| `pnpm test` (all six projects) | 96 files, 3,406 tests, green |
+| Defect injection round 14      | see §7                       |
+| Live boot check                | see below                    |
 
 **The live boot check, in full.** Migrations 0032–0033 applied to the
 development database; the API booted as a real process; a session was promoted
@@ -168,33 +167,33 @@ exempted on their TYPE so a negative metric does not become spreadsheet text.
 Every row traces to a marker in `tests/security/analytics.test.ts`. All run over
 the real HTTP stack with both gates active.
 
-| ID | Attempt | Result |
-| -- | ------- | ------ |
-| IDOR-A | A student reaches any of the four endpoints | 403/404 (×4) |
-| IDOR-B | A guardian reaches any of the four | 403/404 (×4) |
-| IDOR-C | No session | 401 (×4) |
-| IDOR-D | School B's administrator reads their own overview | 200, non-empty |
-| IDOR-E | `?organizationId=<other school>` on any endpoint | **400** — no such field |
-| IDOR-F | An administrator names another school's class | 404 |
-| IDOR-G | School B's rows in school A's own list | absent |
-| IDOR-H | An invented class id vs. another school's real one | identical status |
-| IDOR-I | A teacher reads the executive dashboard | **403**, naming who holds it |
-| IDOR-J | The same teacher reads their own class | 200, exactly one row |
-| IDOR-K | A teacher reads a colleague's class in the same school | 404 |
-| IDOR-L | A teacher exports the executive dataset | 403 |
-| IDOR-M | The class teacher reads their at-risk learners | 200, the right learner |
-| IDOR-N | The administrator reads the named at-risk list | **403** |
-| IDOR-O | A teacher of another class, threshold 100 | 200, empty |
-| IDOR-P | Answers or per-assessment scores in the at-risk payload | absent |
-| IDOR-Q | Exporting the at-risk dataset | 400 — not in the enum |
-| IDOR-R | A class named `=cmd\|' /C calc'!A0` in an export | neutralized |
-| IDOR-S | Export headers | attachment, nosniff, no-store |
-| IDOR-T | Internal identifiers in an export | absent |
-| IDOR-U | A teacher's course export | one data row |
-| IDOR-V | An unknown dataset name, including a traversal | 400 (×4) |
-| IDOR-W | The JSON format | authorized identically to CSV |
-| IDOR-X | **A global admin role grant** | still only their own school |
-| IDOR-Y | An administrator with no organization | no rows from anywhere |
+| ID     | Attempt                                                 | Result                        |
+| ------ | ------------------------------------------------------- | ----------------------------- |
+| IDOR-A | A student reaches any of the four endpoints             | 403/404 (×4)                  |
+| IDOR-B | A guardian reaches any of the four                      | 403/404 (×4)                  |
+| IDOR-C | No session                                              | 401 (×4)                      |
+| IDOR-D | School B's administrator reads their own overview       | 200, non-empty                |
+| IDOR-E | `?organizationId=<other school>` on any endpoint        | **400** — no such field       |
+| IDOR-F | An administrator names another school's class           | 404                           |
+| IDOR-G | School B's rows in school A's own list                  | absent                        |
+| IDOR-H | An invented class id vs. another school's real one      | identical status              |
+| IDOR-I | A teacher reads the executive dashboard                 | **403**, naming who holds it  |
+| IDOR-J | The same teacher reads their own class                  | 200, exactly one row          |
+| IDOR-K | A teacher reads a colleague's class in the same school  | 404                           |
+| IDOR-L | A teacher exports the executive dataset                 | 403                           |
+| IDOR-M | The class teacher reads their at-risk learners          | 200, the right learner        |
+| IDOR-N | The administrator reads the named at-risk list          | **403**                       |
+| IDOR-O | A teacher of another class, threshold 100               | 200, empty                    |
+| IDOR-P | Answers or per-assessment scores in the at-risk payload | absent                        |
+| IDOR-Q | Exporting the at-risk dataset                           | 400 — not in the enum         |
+| IDOR-R | A class named `=cmd\|' /C calc'!A0` in an export        | neutralized                   |
+| IDOR-S | Export headers                                          | attachment, nosniff, no-store |
+| IDOR-T | Internal identifiers in an export                       | absent                        |
+| IDOR-U | A teacher's course export                               | one data row                  |
+| IDOR-V | An unknown dataset name, including a traversal          | 400 (×4)                      |
+| IDOR-W | The JSON format                                         | authorized identically to CSV |
+| IDOR-X | **A global admin role grant**                           | still only their own school   |
+| IDOR-Y | An administrator with no organization                   | no rows from anywhere         |
 
 **The same boundaries, twice more.** Twenty-seven of these run again in
 `tests/integration/rls-analytics.test.ts` with the application deleted, and
@@ -207,21 +206,21 @@ eight run again in the layered-defence block with RLS switched off.
 **This is the first domain whose tables are derived and the first whose subject
 is an institution.** Both change the shape of the usual pattern.
 
-*The decision is taken before the aggregate is computed.* Elsewhere a service
+_The decision is taken before the aggregate is computed._ Elsewhere a service
 reads a row, builds a resource from it and decides — right when the resource IS
 the row. Here it would mean computing a school's numbers and then deciding
 whether the caller may have them, leaving those numbers in memory in a process
 serving somebody with no right to them. The resource is built first, from the
 actor's own facts.
 
-*The refresh has no actor, so its vantage point is declared.* 0021's
+_The refresh has no actor, so its vantage point is declared._ 0021's
 `app_objective_mastery` is actor-dependent — it withholds an unreleased result
 from the learner and their guardian. A stored aggregate has no reader whose
 entitlements could apply, so the refresh recomputes the same tally without the
 withholding clause: the staff view, stated rather than inherited, and safe only
 because the RLS admits no learner at any grain.
 
-*The tenant is one fact, resolved in SQL.* `app_actor_is_org_admin()` answers
+_The tenant is one fact, resolved in SQL._ `app_actor_is_org_admin()` answers
 only "holds the role, anywhere" — the established shape from 0014, safe because
 every caller pairs it with a tenant equality. The repository makes that pairing
 when it builds the resource, so the policy is never handed a bare "is an admin"
@@ -289,35 +288,35 @@ evaluation. Nothing skipped, nothing quarantined.
 
 **This task's suites**
 
-| Suite | Tests | What it removes |
-| ----- | ----- | --------------- |
-| `tests/unit/analytics-csv-safety.test.ts` | 54 | the server |
-| `tests/unit/analytics-policy.test.ts` | 27 | the server |
-| `tests/architecture/analytics-boundaries.test.ts` | 29 | behaviour — asserts on source text |
-| `tests/integration/rls-analytics.test.ts` | 27 | the application layer |
-| `tests/security/analytics.test.ts` | 35 | nothing — both gates, real HTTP |
-| `tests/security/layered-defense.test.ts` (analytics) | 8 | RLS |
+| Suite                                                | Tests | What it removes                    |
+| ---------------------------------------------------- | ----- | ---------------------------------- |
+| `tests/unit/analytics-csv-safety.test.ts`            | 54    | the server                         |
+| `tests/unit/analytics-policy.test.ts`                | 27    | the server                         |
+| `tests/architecture/analytics-boundaries.test.ts`    | 29    | behaviour — asserts on source text |
+| `tests/integration/rls-analytics.test.ts`            | 27    | the application layer              |
+| `tests/security/analytics.test.ts`                   | 35    | nothing — both gates, real HTTP    |
+| `tests/security/layered-defense.test.ts` (analytics) | 8     | RLS                                |
 
 **Defect injection round 14 — 16 injected, 16 caught.**
 
-| # | Defect | Caught by |
-| - | ------ | --------- |
-| F1 | The daily query drops its own tenant predicate | arch, **then layered** |
-| F2 | The course query drops its tenant predicate | arch, layered |
-| F3 | `classResource` loses the class-to-school conjunct | sec, layered |
-| F4 | The null-organization guard is dropped | sec |
-| F5 | An administrator is allowed the named at-risk list | unit, arch, sec, layered |
-| F6 | A teacher is admitted to the executive dashboard | unit |
-| F7 | A class-grained refusal reveals rather than hides | unit, sec, layered |
-| F8 | `actorTeachesClass` tested for truthiness, so null counts | unit |
-| F9 | The whitespace formula triggers are dropped | unit, arch |
-| F10 | The cell is quoted before it is neutralized | unit, arch, sec, layered |
-| F11 | Every string is exempted from neutralization | unit, arch, sec, layered |
-| F12 | `at_risk` becomes an exportable dataset | arch, sec |
-| F13 | The query schemas stop being strict | sec, layered |
-| F14 | The unnamed course list stops being authorized | sec, layered |
-| F15 | The export is decided at the school grain regardless of dataset | sec |
-| F16 | The mastery scale reverts to scoring `attempted` as zero | rls, sec |
+| #   | Defect                                                          | Caught by                |
+| --- | --------------------------------------------------------------- | ------------------------ |
+| F1  | The daily query drops its own tenant predicate                  | arch, **then layered**   |
+| F2  | The course query drops its tenant predicate                     | arch, layered            |
+| F3  | `classResource` loses the class-to-school conjunct              | sec, layered             |
+| F4  | The null-organization guard is dropped                          | sec                      |
+| F5  | An administrator is allowed the named at-risk list              | unit, arch, sec, layered |
+| F6  | A teacher is admitted to the executive dashboard                | unit                     |
+| F7  | A class-grained refusal reveals rather than hides               | unit, sec, layered       |
+| F8  | `actorTeachesClass` tested for truthiness, so null counts       | unit                     |
+| F9  | The whitespace formula triggers are dropped                     | unit, arch               |
+| F10 | The cell is quoted before it is neutralized                     | unit, arch, sec, layered |
+| F11 | Every string is exempted from neutralization                    | unit, arch, sec, layered |
+| F12 | `at_risk` becomes an exportable dataset                         | arch, sec                |
+| F13 | The query schemas stop being strict                             | sec, layered             |
+| F14 | The unnamed course list stops being authorized                  | sec, layered             |
+| F15 | The export is decided at the school grain regardless of dataset | sec                      |
+| F16 | The mastery scale reverts to scoring `attempted` as zero        | rls, sec                 |
 
 **Two results taught something, and both are recorded in the code.**
 
@@ -330,9 +329,9 @@ tenant predicate was present or not.
 
 The fix asserts the observable CONSEQUENCE instead. The daily table is one row
 per school per day, so two schools merged means two rows for today; uniqueness of
-the date is what the boundary holding looks like from outside. *When a response
+the date is what the boundary holding looks like from outside. _When a response
 is deliberately stripped of the field a leak would name, the leak has to be
-detected by its cardinality.* F1 re-verified as caught by arch **and** layered.
+detected by its cardinality._ F1 re-verified as caught by arch **and** layered.
 
 **F6 is inert on the real path, and that is itself a defence worth naming.**
 Admitting a teacher to the executive dashboard changed nothing over HTTP,
@@ -347,8 +346,6 @@ the clean tree was green, which it was — but the same check caught a stopped
 PostgreSQL in round 13 and would have reported sixteen meaningless catches
 without it.
 
-
-
 ---
 
 ## 8. NOT IMPLEMENTED
@@ -357,7 +354,7 @@ without it.
 
 - **Production Hardening.** No deployment configuration beyond what existed.
 - **Load Testing.** No benchmark, no synthetic volume, no measured throughput.
-  The lock behaviour is asserted; the *cost* of a refresh at scale is not.
+  The lock behaviour is asserted; the _cost_ of a refresh at scale is not.
 - **CI/CD Deployment Pipelines.** Untouched.
 
 **Not asked for, and not built.**
@@ -384,22 +381,22 @@ without it.
 
 **VULN-059 — the mastery index ranked an unassessed learner below a failing
 one.** Migration 0032 put 0021's five mastery states on an ordinal 0..3 line.
-But `attempted` means *evidence exists and none of it is graded* while
-`developing` means *an assessment was sat and not passed* — so the scale gave
+But `attempted` means _evidence exists and none of it is graded_ while
+`developing` means _an assessment was sat and not passed_ — so the scale gave
 the unassessed learner 0.00 and the failing one 33.33. **A class that had done
 the reading and not yet reached the quiz reported total failure to its head
 teacher, and the school's index went UP the moment they sat the quiz and failed
 it.** Migration 0033 excludes `attempted` alongside `no_evidence` and scores the
 graded states 0 / 50 / 100.
 
-*The lesson is about reasoning rather than code.* The 0032 header argued
+_The lesson is about reasoning rather than code._ The 0032 header argued
 carefully and correctly about why `no_evidence` must be excluded — "a learner who
 has not yet reached an objective has not failed it" — and every word of that
 applies to `attempted` too. **A well-reasoned justification for one case is not a
 justification for the cases next to it**, and the comment explaining the first
 exclusion read as though the neighbouring state had been considered.
 
-*No security test would have found it.* Every boundary held perfectly around a
+_No security test would have found it._ Every boundary held perfectly around a
 number that was wrong.
 
 **VULN-060 — an analytics endpoint answered 200 to a learner.**
@@ -410,7 +407,7 @@ endpoint that answers 200 to a learner is one whose safety rests entirely on the
 filter beneath it staying correct forever.** Fixed by authorizing the unnamed
 shape too.
 
-*And immediately, a second defect from the first fix*: every teacher's course
+_And immediately, a second defect from the first fix_: every teacher's course
 export became a 404, because the export built its resource with
 `actorTeachesClass` left null. **Two doors onto the same data must be authorized
 by the same facts, or one of them is wrong — and it is always the one nobody

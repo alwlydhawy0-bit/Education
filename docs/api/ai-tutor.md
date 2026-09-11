@@ -14,14 +14,14 @@ the learner may **write** to it, and nobody at all may edit it afterwards.
 
 ## Endpoints
 
-| Method  | Path                                     | Who                        |
-| ------- | ---------------------------------------- | -------------------------- |
-| `POST`  | `/ai/conversations`                      | a learner studying the lesson |
-| `GET`   | `/ai/conversations`                      | the caller's own            |
-| `GET`   | `/ai/conversations/:id/messages`         | owner, teacher, admin, moderator |
-| `POST`  | `/ai/conversations/:id/messages`         | the owner, while still studying |
-| `PATCH` | `/ai/conversations/:id`                  | the owner                   |
-| `POST`  | `/ai/conversations/:id/archive`          | the owner                   |
+| Method  | Path                             | Who                              |
+| ------- | -------------------------------- | -------------------------------- |
+| `POST`  | `/ai/conversations`              | a learner studying the lesson    |
+| `GET`   | `/ai/conversations`              | the caller's own                 |
+| `GET`   | `/ai/conversations/:id/messages` | owner, teacher, admin, moderator |
+| `POST`  | `/ai/conversations/:id/messages` | the owner, while still studying  |
+| `PATCH` | `/ai/conversations/:id`          | the owner                        |
+| `POST`  | `/ai/conversations/:id/archive`  | the owner                        |
 
 There is **no `DELETE`**. Archiving withdraws a conversation from the learner's
 active list and leaves it readable; `DELETE` would promise something this
@@ -69,12 +69,12 @@ Always **200** when the conversation is the caller's. A blocked turn, an
 out-of-scope question and a provider outage are states of a conversation, not
 errors of a request, and `grounding` says which:
 
-| `grounding`       | meaning |
-| ----------------- | ------- |
+| `grounding`       | meaning                                                       |
+| ----------------- | ------------------------------------------------------------- |
 | `course_material` | grounded, with at least one citation that survived validation |
-| `out_of_scope`    | the learner's own material does not cover this |
-| `refused`         | the guardrail layer blocked the turn |
-| `unavailable`     | the provider failed |
+| `out_of_scope`    | the learner's own material does not cover this                |
+| `refused`         | the guardrail layer blocked the turn                          |
+| `unavailable`     | the provider failed                                           |
 
 Turning a refusal into a 4xx would make the status code a classifier a learner
 could probe, and would leave a child facing a broken-looking screen when the
@@ -108,7 +108,7 @@ away from another.** RLS, the policy engine and the scope-filtered retrieval do
 that, and they run first. If every guardrail returned "allow", no learner would
 gain access to a single row they could not already read.
 
-A pattern list *looks* like a security boundary and is not one: it is a filter
+A pattern list _looks_ like a security boundary and is not one: it is a filter
 over an infinite input space, written by somebody who has to guess and read by
 an attacker who can iterate. What the layer genuinely buys:
 
@@ -154,7 +154,7 @@ Three things follow:
   would put the attempt back into every later turn's context.
 
 Ten turns are replayed, most-recent-first then re-ordered oldest-first. Taking
-the *first* ten would freeze the conversation at its opening.
+the _first_ ten would freeze the conversation at its opening.
 
 ## Who may read a transcript
 
@@ -163,16 +163,16 @@ boundary". This is read as a **ceiling, not a grant** — because of what the da
 is: not a score the platform computed about a child, but the unfiltered record of
 a child trying to understand something and failing.
 
-| Actor | May read | Why |
-| ----- | -------- | --- |
-| The learner | always | it is theirs |
-| A teacher who teaches them, on this lesson | yes | the same boundary that already held their coursework |
-| Any other teacher in the school | **no** | teaching authority is per class, not per school |
-| An organization administrator | yes | they already administer every class in it |
-| A safety moderator | yes | the role the platform reserved for exactly this |
-| A guardian | **no** | see below |
-| A platform operator | **no** | they read records the platform authored, not ones the child did |
-| Anyone in another school | **no** | the organization is the outer bound |
+| Actor                                      | May read | Why                                                             |
+| ------------------------------------------ | -------- | --------------------------------------------------------------- |
+| The learner                                | always   | it is theirs                                                    |
+| A teacher who teaches them, on this lesson | yes      | the same boundary that already held their coursework            |
+| Any other teacher in the school            | **no**   | teaching authority is per class, not per school                 |
+| An organization administrator              | yes      | they already administer every class in it                       |
+| A safety moderator                         | yes      | the role the platform reserved for exactly this                 |
+| A guardian                                 | **no**   | see below                                                       |
+| A platform operator                        | **no**   | they read records the platform authored, not ones the child did |
+| Anyone in another school                   | **no**   | the organization is the outer bound                             |
 
 **No adult may write. At all.** Reading a transcript is oversight; editing one is
 tampering, and a moderator who could archive a conversation could hide it from
@@ -208,7 +208,7 @@ the ability to keep talking, not the record of having talked.
 
 The refusal is **403, not 404**: the learner is holding the conversation, so
 concealing the reason would leave them staring at a silent failure with no way to
-understand that their class had changed. Creating a *new* conversation against a
+understand that their class had changed. Creating a _new_ conversation against a
 lesson they cannot reach is 404, because there the id names something they have
 been granted nothing about.
 
@@ -229,15 +229,15 @@ every correction ever made to the original.
 
 ## Rate limits and token caps
 
-| Policy               | Budget      |
-| -------------------- | ----------- |
-| `tutorMessage`       | 40 / hour   |
-| `tutorConversation`  | 30 / hour   |
+| Policy              | Budget    |
+| ------------------- | --------- |
+| `tutorMessage`      | 40 / hour |
+| `tutorConversation` | 30 / hour |
 
 Both **keyed per actor**, not per IP: a classroom of thirty behind one school NAT
 must not share a quota, and one learner scripting a loop must not spend the
 school's provider budget from behind it. A turn is tighter than the single-turn
-assistant's 60/hour because it carries sources *and* replayed history, so the
+assistant's 60/hour because it carries sources _and_ replayed history, so the
 same number of requests buys the provider considerably more text.
 
 Bounding conversation creation matters as much as bounding turns: without it a
@@ -252,12 +252,12 @@ teaches.
 
 ## Audit trail
 
-| Event | Carries |
-| ----- | ------- |
-| `ai_tutor.turn_blocked` | the rule ids that fired |
-| `ai_tutor.out_of_scope` | conversation and course ids, and the scope size |
-| `ai_tutor.transcript_read` | which authority an adult used |
-| `authz.denied` | action, resource kind and id, and the policy's reason |
+| Event                      | Carries                                               |
+| -------------------------- | ----------------------------------------------------- |
+| `ai_tutor.turn_blocked`    | the rule ids that fired                               |
+| `ai_tutor.out_of_scope`    | conversation and course ids, and the scope size       |
+| `ai_tutor.transcript_read` | which authority an adult used                         |
+| `authz.denied`             | action, resource kind and id, and the policy's reason |
 
 **No event carries a message, a question, or a fragment of either.** What a child
 typed is the most sensitive data in this domain, and the audit trail is read by
@@ -267,7 +267,7 @@ id — `override.ignore_instructions` — and never the text that matched it.
 ## What is deliberately not built
 
 **Streaming.** Section 2D asks for it and this returns a single JSON response.
-Every safety property here is decided *after* the model stops speaking:
+Every safety property here is decided _after_ the model stops speaking:
 citations are validated against the retrieved set, and grounding is decided by
 whether any survived. A token stream emits text before either can run, so a
 streamed tutor would show a child a fluent, confident, ungrounded answer and only

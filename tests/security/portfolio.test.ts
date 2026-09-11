@@ -799,8 +799,9 @@ describe('the public share link', () => {
     const w = await world();
     const { project, portfolio } = await publishedPortfolio(w);
     expect(
-      (await get(`/api/v1/portfolios/share/${portfolio.shareToken}`)).json<{ projects: unknown[] }>()
-        .projects,
+      (await get(`/api/v1/portfolios/share/${portfolio.shareToken}`)).json<{
+        projects: unknown[];
+      }>().projects,
     ).toHaveLength(1);
 
     await put(`/api/v1/projects/${project.id}`, w.learner.cookie, { visibility: 'private' });

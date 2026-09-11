@@ -89,9 +89,8 @@ export function checkMarkdown(body: string): MarkdownRejection | null {
   // Name the scheme for the error message. Scanned separately from the
   // detection above so a rejection is never reported without one.
   const found =
-    FORBIDDEN_SCHEMES.find((scheme) =>
-      new RegExp(schemePattern(scheme), 'i').test(body),
-    ) ?? 'javascript';
+    FORBIDDEN_SCHEMES.find((scheme) => new RegExp(schemePattern(scheme), 'i').test(body)) ??
+    'javascript';
 
   return { reason: 'forbidden_link_scheme', scheme: found };
 }

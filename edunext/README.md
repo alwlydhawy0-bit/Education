@@ -15,33 +15,33 @@ npm run preview  # معاينة حزمة الإنتاج
 
 ## Stack
 
-| Layer   | Choice                    |
-| ------- | ------------------------- |
-| Build   | Vite 8                    |
-| UI      | React 19                  |
+| Layer   | Choice                                        |
+| ------- | --------------------------------------------- |
+| Build   | Vite 8                                        |
+| UI      | React 19                                      |
 | Styling | Tailwind CSS **3.4** + PostCSS + Autoprefixer |
-| Icons   | `lucide-react`            |
-| Fonts   | Readex Pro → Cairo → sans-serif |
+| Icons   | `lucide-react`                                |
+| Fonts   | Readex Pro → Cairo → sans-serif               |
 
 ## Design tokens
 
 Defined once in `tailwind.config.js`. Do not hard-code these values in a
 component — if a token is missing, add it there.
 
-| Token             | Value     | Used for                          |
-| ----------------- | --------- | --------------------------------- |
-| `canvas`          | `#FBF9F5` | page background (warm beige)      |
-| `surface`         | `#FFFFFF` | cards and panels                  |
-| `surface-alt`     | `#F5F0E6` | recessed / ivory panels           |
-| `primary`         | `#6D28D9` | actions, active state, progress   |
-| `primary-hover`   | `#5B21B6` | hover on primary                  |
-| `primary-light`   | `#F3E8FF` | tinted icon wells, soft buttons   |
-| `accent-lavender` | `#DDD6FE` | highlights, gradient stops        |
-| `accent-subtle`   | `#E8E1D5` | hairline borders                  |
-| `text-main`       | `#1E1B4B` | body copy (deep purple-navy)      |
-| `text-muted`      | `#6B7280` | secondary copy                    |
-| `rounded-card`    | `16px`    | every card                        |
-| `shadow-soft`     | `0 4px 20px -2px rgba(30,27,75,.04)` | every card |
+| Token             | Value                                | Used for                        |
+| ----------------- | ------------------------------------ | ------------------------------- |
+| `canvas`          | `#FBF9F5`                            | page background (warm beige)    |
+| `surface`         | `#FFFFFF`                            | cards and panels                |
+| `surface-alt`     | `#F5F0E6`                            | recessed / ivory panels         |
+| `primary`         | `#6D28D9`                            | actions, active state, progress |
+| `primary-hover`   | `#5B21B6`                            | hover on primary                |
+| `primary-light`   | `#F3E8FF`                            | tinted icon wells, soft buttons |
+| `accent-lavender` | `#DDD6FE`                            | highlights, gradient stops      |
+| `accent-subtle`   | `#E8E1D5`                            | hairline borders                |
+| `text-main`       | `#1E1B4B`                            | body copy (deep purple-navy)    |
+| `text-muted`      | `#6B7280`                            | secondary copy                  |
+| `rounded-card`    | `16px`                               | every card                      |
+| `shadow-soft`     | `0 4px 20px -2px rgba(30,27,75,.04)` | every card                      |
 
 `.card-surface` in `src/index.css` bundles the card shape (radius + hairline
 border + soft shadow) so it is written once rather than copied.
@@ -53,21 +53,21 @@ paint** is already correct rather than snapping once CSS arrives.
 
 **Use logical utilities, always:**
 
-| Use            | Not          |
-| -------------- | ------------ |
-| `ms-*` `me-*`  | `ml-*` `mr-*` |
-| `ps-*` `pe-*`  | `pl-*` `pr-*` |
-| `start-*` `end-*` | `left-*` `right-*` |
-| `text-start` `text-end` | `text-left` `text-right` |
+| Use                       | Not                       |
+| ------------------------- | ------------------------- |
+| `ms-*` `me-*`             | `ml-*` `mr-*`             |
+| `ps-*` `pe-*`             | `pl-*` `pr-*`             |
+| `start-*` `end-*`         | `left-*` `right-*`        |
+| `text-start` `text-end`   | `text-left` `text-right`  |
 | `border-s-*` `border-e-*` | `border-l-*` `border-r-*` |
 
-Physical utilities are not *wrong* so much as **silently mirrored-wrong**: they
+Physical utilities are not _wrong_ so much as **silently mirrored-wrong**: they
 look right in an LTR preview and break the moment direction flips.
 
 **Two more rules that are easy to miss:**
 
-1. **Source order is visual order.** In `AppLayout` the sidebar is the *first*
-   child and therefore lands on the *right*. Nothing positions it there.
+1. **Source order is visual order.** In `AppLayout` the sidebar is the _first_
+   child and therefore lands on the _right_. Nothing positions it there.
 2. **Forward is leftwards.** The call-to-action uses `ArrowLeft`, which is the
    "continue" arrow in RTL — not a mistake to be corrected, and not something to
    fake by mirroring `ArrowRight` with a transform.

@@ -268,7 +268,9 @@ describe('A — the workspace works for the person it belongs to', () => {
     expect(renamed.statusCode).toBe(200);
     expect(renamed.json<NotebookBody>().title).toBe('Physics — term 2');
 
-    expect((await del(`/api/v1/me/notebooks/${created.id}`, w.learner.cookie)).statusCode).toBe(204);
+    expect((await del(`/api/v1/me/notebooks/${created.id}`, w.learner.cookie)).statusCode).toBe(
+      204,
+    );
     expect(items(await get('/api/v1/me/notebooks', w.learner.cookie))).toEqual([]);
   });
 
@@ -327,7 +329,8 @@ describe('B — §2D: a student cannot reach another student’s notebook', () =
 
     expect((await get(`/api/v1/me/notebooks/${theirs.id}`, w.peer.cookie)).statusCode).toBe(404);
     expect(
-      (await put(`/api/v1/me/notebooks/${theirs.id}`, w.peer.cookie, { title: 'Taken' })).statusCode,
+      (await put(`/api/v1/me/notebooks/${theirs.id}`, w.peer.cookie, { title: 'Taken' }))
+        .statusCode,
     ).toBe(404);
     expect((await del(`/api/v1/me/notebooks/${theirs.id}`, w.peer.cookie)).statusCode).toBe(404);
 

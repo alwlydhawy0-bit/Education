@@ -126,7 +126,11 @@ describe('toPublicPortfolio — no identifier leaves the boundary', () => {
      * requires editing a test — the moment a reviewer gets to object.
      */
     const view = toPublicPortfolio(portfolio, [
-      project({ artifacts: [{ artifactType: 'code_file', filePathOrUrl: 'https://x.test/a.zip', byteSize: 12 }] }),
+      project({
+        artifacts: [
+          { artifactType: 'code_file', filePathOrUrl: 'https://x.test/a.zip', byteSize: 12 },
+        ],
+      }),
     ]);
 
     // No author name. See `PublicPortfolioView`: an account display name is
@@ -143,7 +147,11 @@ describe('toPublicPortfolio — no identifier leaves the boundary', () => {
       'repositoryUrl',
       'title',
     ]);
-    expect(Object.keys(view.projects[0]!.artifacts[0]!).sort()).toEqual(['byteSize', 'kind', 'url']);
+    expect(Object.keys(view.projects[0]!.artifacts[0]!).sort()).toEqual([
+      'byteSize',
+      'kind',
+      'url',
+    ]);
   });
 
   it('renumbers position from 1 so deletion gaps disclose nothing', () => {
@@ -160,7 +168,10 @@ describe('toPublicPortfolio — no identifier leaves the boundary', () => {
   });
 
   it('does not mutate or reorder the caller’s array', () => {
-    const projects = [project({ displayOrder: 3, title: 'C' }), project({ displayOrder: 1, title: 'A' })];
+    const projects = [
+      project({ displayOrder: 3, title: 'C' }),
+      project({ displayOrder: 1, title: 'A' }),
+    ];
     toPublicPortfolio(portfolio, projects);
     expect(projects.map((p) => p.title)).toEqual(['C', 'A']);
   });
@@ -181,8 +192,16 @@ describe('toPublicPortfolio — no identifier leaves the boundary', () => {
     const view = toPublicPortfolio(portfolio, [
       project({
         artifacts: [
-          { artifactType: 'report_pdf', filePathOrUrl: `artifact://${SECRETS.itemId}`, byteSize: 10 },
-          { artifactType: 'media_asset', filePathOrUrl: 'https://cdn.example.org/clip.mp4', byteSize: 20 },
+          {
+            artifactType: 'report_pdf',
+            filePathOrUrl: `artifact://${SECRETS.itemId}`,
+            byteSize: 10,
+          },
+          {
+            artifactType: 'media_asset',
+            filePathOrUrl: 'https://cdn.example.org/clip.mp4',
+            byteSize: 20,
+          },
         ],
       }),
     ]);

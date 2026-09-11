@@ -152,9 +152,9 @@ describe('every declared verb has an answer', () => {
 describe('discussionThreadPolicy — the room', () => {
   it('admits a classmate to an approved thread and nobody else', () => {
     expect(onThread(READER, 'discussion_thread:read', thread()).effect).toBe('allow');
-    expect(
-      onThread(READER, 'discussion_thread:read', thread({ actorInForum: false })).effect,
-    ).toBe('deny');
+    expect(onThread(READER, 'discussion_thread:read', thread({ actorInForum: false })).effect).toBe(
+      'deny',
+    );
   });
 
   it('REFUSES a reader outside the room even when they wrote nothing wrong', () => {
@@ -381,16 +381,19 @@ describe('discussionReplyPolicy — accepting an answer', () => {
   });
 
   it('allows staff, so a question whose asker left can still be resolved', () => {
-    expect(
-      onReply(STAFF, 'discussion_reply:accept', reply({ actorModerates: true })).effect,
-    ).toBe('allow');
+    expect(onReply(STAFF, 'discussion_reply:accept', reply({ actorModerates: true })).effect).toBe(
+      'allow',
+    );
   });
 
   it('REFUSES the questioner who has left the class', () => {
     // `actorOwnsThread` alone is not enough: the room is still the boundary.
     expect(
-      onReply(READER, 'discussion_reply:accept', reply({ actorOwnsThread: true, actorInForum: false }))
-        .effect,
+      onReply(
+        READER,
+        'discussion_reply:accept',
+        reply({ actorOwnsThread: true, actorInForum: false }),
+      ).effect,
     ).toBe('deny');
   });
 });
@@ -438,9 +441,9 @@ describe('contentFlagPolicy — the shortest policy with the most at stake', () 
     for (const actor of [AUTHOR, READER, 'anybody']) {
       expect(onFlag(actor, 'content_flag:read', automated).effect, actor).toBe('deny');
     }
-    expect(onFlag(STAFF, 'content_flag:read', flag({ reporterId: null, actorModerates: true })).effect).toBe(
-      'allow',
-    );
+    expect(
+      onFlag(STAFF, 'content_flag:read', flag({ reporterId: null, actorModerates: true })).effect,
+    ).toBe('allow');
   });
 
   it('CANNOT BE ASKED ABOUT THE REPORTED AUTHOR AT ALL', () => {

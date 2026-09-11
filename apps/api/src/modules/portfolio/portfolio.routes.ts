@@ -15,10 +15,7 @@ import {
 } from '@edu/contracts';
 import { requireActor } from '../../platform/http/authentication.ts';
 import { RATE_LIMIT_POLICIES, routeLimit } from '../../platform/security/rate-limit.ts';
-import type {
-  PortfolioRecord,
-  ProjectRecord,
-} from './portfolio.repository.ts';
+import type { PortfolioRecord, ProjectRecord } from './portfolio.repository.ts';
 import type { ActorContext, PortfolioService } from './portfolio.service.ts';
 
 const idParams = z.object({ id: idSchema }).strict();

@@ -18,7 +18,11 @@ import {
 import { requireActor } from '../../platform/http/authentication.ts';
 import { RATE_LIMIT_POLICIES, routeLimit } from '../../platform/security/rate-limit.ts';
 import type { ActorContext, ExperimentService } from './experiment.service.ts';
-import type { ArtifactRecord, ExperimentRecord, LabSessionRecord } from './experiment.repository.ts';
+import type {
+  ArtifactRecord,
+  ExperimentRecord,
+  LabSessionRecord,
+} from './experiment.repository.ts';
 
 const idParams = z.object({ id: idSchema }).strict();
 const classStudentParams = z.object({ id: idSchema, studentId: idSchema }).strict();
@@ -72,7 +76,10 @@ const toArtifact = (a: ArtifactRecord): unknown =>
     createdAt: a.createdAt.toISOString(),
   });
 
-export function registerExperimentRoutes(app: FastifyInstance, experiment: ExperimentService): void {
+export function registerExperimentRoutes(
+  app: FastifyInstance,
+  experiment: ExperimentService,
+): void {
   function contextOf(request: FastifyRequest): ActorContext {
     const actor = request.actor;
     if (!actor) throw new Error('unreachable: requireActor guarantees an actor');
@@ -137,11 +144,7 @@ export function registerExperimentRoutes(app: FastifyInstance, experiment: Exper
       const body = toExperiment(found) as Record<string, unknown>;
       return reply
         .status(200)
-        .send(
-          rules === null
-            ? body
-            : authoredExperimentResponseSchema.parse({ ...body, rules }),
-        );
+        .send(rules === null ? body : authoredExperimentResponseSchema.parse({ ...body, rules }));
     },
   });
 

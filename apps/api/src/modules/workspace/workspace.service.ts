@@ -217,9 +217,7 @@ export function createWorkspaceService(deps: WorkspaceServiceDeps): WorkspaceSer
       // Scoped to the caller by construction: the repository takes the actor's
       // own id and RLS independently confirms it. There is no per-object
       // decision because there is no object the caller could name.
-      return db.withActor(ctx.actor.id, (tx) =>
-        repository.listNotebooks(tx, ctx.actor.id, query),
-      );
+      return db.withActor(ctx.actor.id, (tx) => repository.listNotebooks(tx, ctx.actor.id, query));
     },
 
     async readNotebook(ctx, id) {

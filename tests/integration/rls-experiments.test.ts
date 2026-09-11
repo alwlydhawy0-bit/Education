@@ -209,25 +209,19 @@ describe('the answer key is not reachable by anyone sitting the lab', () => {
 describe('who may see a lab at all', () => {
   it('shows the published lab to the enrolled learner', async () => {
     const w = await world();
-    const seen = await db.withActor(w.learner.id, (tx) =>
-      tx.query('SELECT id FROM experiments'),
-    );
+    const seen = await db.withActor(w.learner.id, (tx) => tx.query('SELECT id FROM experiments'));
     expect(seen.rows.map((r) => r['id'])).toEqual([w.lab.experimentId]);
   });
 
   it('hides it from a learner in no class', async () => {
     const w = await world();
-    const seen = await db.withActor(w.outsider.id, (tx) =>
-      tx.query('SELECT id FROM experiments'),
-    );
+    const seen = await db.withActor(w.outsider.id, (tx) => tx.query('SELECT id FROM experiments'));
     expect(seen.rows).toEqual([]);
   });
 
   it('hides it from a teacher at another school', async () => {
     const w = await world();
-    const seen = await db.withActor(w.stranger.id, (tx) =>
-      tx.query('SELECT id FROM experiments'),
-    );
+    const seen = await db.withActor(w.stranger.id, (tx) => tx.query('SELECT id FROM experiments'));
     expect(seen.rows).toEqual([]);
   });
 
@@ -251,11 +245,10 @@ describe('sessions belong to the learner who sat them', () => {
   it('lets the enrolled learner start one, and refuses everyone else', async () => {
     const w = await world();
     const start = (actor: string, owner: string) =>
-      attempt(
-        actor,
-        `INSERT INTO experiment_sessions (experiment_id, user_id) VALUES ($1, $2)`,
-        [w.lab.experimentId, owner],
-      );
+      attempt(actor, `INSERT INTO experiment_sessions (experiment_id, user_id) VALUES ($1, $2)`, [
+        w.lab.experimentId,
+        owner,
+      ]);
 
     expect(await start(w.learner.id, w.learner.id)).toBe(true);
     expect(await start(w.outsider.id, w.outsider.id)).toBe(false);
@@ -704,7 +697,11 @@ describe('an author writes a lab through the application role', () => {
 
   it('refuses a learner inserting validation rules for an existing lab', async () => {
     const w = await world();
-    const draft = await createExperiment({ lessonId: w.lesson, status: 'draft', withoutRules: true });
+    const draft = await createExperiment({
+      lessonId: w.lesson,
+      status: 'draft',
+      withoutRules: true,
+    });
     expect(
       await attempt(
         w.learner.id,

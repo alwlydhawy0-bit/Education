@@ -19,12 +19,12 @@ neutralized against spreadsheet formula injection.
 
 ## Endpoints
 
-| Method | Path                                  | Who                                       |
-| ------ | ------------------------------------- | ----------------------------------------- |
-| `GET`  | `/analytics/school/overview`          | administrators of the caller's own school |
-| `GET`  | `/analytics/courses/performance`      | that school's administrators, or a class's teacher |
-| `GET`  | `/analytics/students/at-risk`         | **the teacher only** — not administrators |
-| `GET`  | `/analytics/export`                   | as the corresponding read                 |
+| Method | Path                             | Who                                                |
+| ------ | -------------------------------- | -------------------------------------------------- |
+| `GET`  | `/analytics/school/overview`     | administrators of the caller's own school          |
+| `GET`  | `/analytics/courses/performance` | that school's administrators, or a class's teacher |
+| `GET`  | `/analytics/students/at-risk`    | **the teacher only** — not administrators          |
+| `GET`  | `/analytics/export`              | as the corresponding read                          |
 
 All paths are under `/api/v1`. **Every route requires a session.** There is no
 public analytics route and no unauthenticated aggregate of any kind.
@@ -36,7 +36,7 @@ content chain — attempt → assessment → activity → lesson → unit → co
 read `courses.organization_id`.
 
 **That is wrong here, and wrong in a way that produces a plausible-looking number
-rather than an error.** `courses.organization_id` is nullable *on purpose*: null
+rather than an error.** `courses.organization_id` is nullable _on purpose_: null
 means shared curriculum, authored centrally and studied by many schools. The
 content chain therefore answers NULL for exactly the courses most schools use,
 and for a course a school does own it answers that school even when the learner
@@ -55,8 +55,8 @@ Content-chain derivation would have returned nothing for either.
 
 ## No request anywhere carries an organization
 
-Section 2B asks that the tenant be *"derived directly from the authenticated
-user's auth context"*. The way to fail that is to accept an `organizationId`
+Section 2B asks that the tenant be _"derived directly from the authenticated
+user's auth context"_. The way to fail that is to accept an `organizationId`
 parameter and check it — which works until somebody adds a branch, an endpoint,
 or a "just for support staff" flag.
 
@@ -71,15 +71,15 @@ the classes they teach; the query already knows.
 
 ## Two gates, and each one tested with the other removed
 
-| The rule                                    | Application                              | Database                                    |
-| ------------------------------------------- | ---------------------------------------- | ------------------------------------------- |
-| Only this school's administrator reads the executive report | `analytics_report.not_an_administrator` | `analytics_daily_school_metrics_select`     |
-| A teacher reads only the classes they teach | `analytics_report.not_this_class`        | `analytics_course_performance_select`       |
-| Learners and guardians read nothing         | both branches fall through to a deny     | neither policy admits them                  |
-| Every query is bounded to one school        | the repository's own tenant predicate    | the same predicate in RLS                   |
-| Named at-risk children go only to a teacher | `analytics_report.at_risk_is_for_teachers` | `app_analytics_at_risk` authorizes itself |
-| A row's school matches its class            | —                                        | composite foreign key                       |
-| Nobody writes a metric                      | no write verb in the vocabulary          | no write grant, no write policy             |
+| The rule                                                    | Application                                | Database                                  |
+| ----------------------------------------------------------- | ------------------------------------------ | ----------------------------------------- |
+| Only this school's administrator reads the executive report | `analytics_report.not_an_administrator`    | `analytics_daily_school_metrics_select`   |
+| A teacher reads only the classes they teach                 | `analytics_report.not_this_class`          | `analytics_course_performance_select`     |
+| Learners and guardians read nothing                         | both branches fall through to a deny       | neither policy admits them                |
+| Every query is bounded to one school                        | the repository's own tenant predicate      | the same predicate in RLS                 |
+| Named at-risk children go only to a teacher                 | `analytics_report.at_risk_is_for_teachers` | `app_analytics_at_risk` authorizes itself |
+| A row's school matches its class                            | —                                          | composite foreign key                     |
+| Nobody writes a metric                                      | no write verb in the vocabulary            | no write grant, no write policy           |
 
 Both directions are tested. `tests/integration/rls-analytics.test.ts` runs the
 database with no application code in the path; the analytics block of
@@ -98,8 +98,8 @@ argument.
 
 ## The FERPA line
 
-Section 2B: *"high-level admin reports must summarize trends without leaking raw
-individual student responses outside assigned teacher-student boundaries."*
+Section 2B: _"high-level admin reports must summarize trends without leaking raw
+individual student responses outside assigned teacher-student boundaries."_
 
 `GET /analytics/students/at-risk` is the one endpoint that returns rows about
 named children, so it is the one where that sentence has to be a rule rather
@@ -108,7 +108,7 @@ than an intention. The rule is drawn in two places at once.
 **Who it answers for.** Only classes the caller actively teaches. **An
 organization administrator gets nothing** — not a reduced list, not pseudonyms.
 A head teacher running a school does not need a browsable list of struggling
-minors to do it; their legitimate view is the *count* in
+minors to do it; their legitimate view is the _count_ in
 `analytics_course_performance`, which tells them where to put resources.
 Somebody who genuinely needs a name can ask the teacher, and that conversation
 leaves a trace an endpoint does not.
@@ -123,29 +123,29 @@ the request is a 400 rather than a policy decision — the door is not there. A
 CSV of struggling minors is precisely the artefact that gets forwarded, left on
 a laptop, and read by people the school never authorized.
 
-*Seniority narrows rather than widens here, which inverts the usual shape of a
-permission hierarchy.* A head of department who administers the school **and**
+_Seniority narrows rather than widens here, which inverts the usual shape of a
+permission hierarchy._ A head of department who administers the school **and**
 still teaches gets the list for their own classes — because they teach, not
 because they administer.
 
 ## The mastery scale
 
-0021 produces a mastery *state*, which is a word. A dashboard wants a number,
+0021 produces a mastery _state_, which is a word. A dashboard wants a number,
 and turning one into the other is a modelling choice written down once:
 
-| State          | Score | Meaning                                  |
-| -------------- | ----- | ---------------------------------------- |
-| `no_evidence`  | —     | Nothing has happened. Excluded.          |
+| State          | Score | Meaning                                              |
+| -------------- | ----- | ---------------------------------------------------- |
+| `no_evidence`  | —     | Nothing has happened. Excluded.                      |
 | `attempted`    | —     | Something happened; none of it graded. **Excluded.** |
-| `developing`   | 0     | Graded, passed nothing.                  |
-| `demonstrated` | 50    | Graded, passed one assessment.           |
-| `mastered`     | 100   | Graded, passed more than one.            |
+| `developing`   | 0     | Graded, passed nothing.                              |
+| `demonstrated` | 50    | Graded, passed one assessment.                       |
+| `mastered`     | 100   | Graded, passed more than one.                        |
 
 **`attempted` is excluded, and migration 0033 exists because it was not.** The
 original scale put the five states on an ordinal 0..3 line, scoring `attempted`
 at 0.00 and `developing` at 33.33 — so **a learner nobody had assessed yet
 ranked below one who sat an assessment and failed it**, and a school's index went
-*up* the moment its class sat a quiz and failed. A class that had done the
+_up_ the moment its class sat a quiz and failed. A class that had done the
 reading and not yet reached the assessment reported total failure to its head
 teacher.
 
@@ -155,7 +155,7 @@ school with nothing assessed shows `null` rather than a number — is the right 
 round. `average_mastery_score` is nullable all the way through the stack: column,
 DTO and CSV cell.
 
-**This number must never be shown to a learner.** It is computed from the *staff*
+**This number must never be shown to a learner.** It is computed from the _staff_
 vantage point, which includes results a teacher has not released — see below.
 
 ## The refresh
@@ -247,11 +247,11 @@ CR-prefixed `=cmd` reaches the formula parser while walking past a check that
 looks at index 0 for the four printable characters. Both are triggers here.
 
 **Numbers, booleans and dates are exempt, and the exemption is on the TYPE.** A
-negative number starts with a formula trigger, and a prefixed cell is *text* to a
+negative number starts with a formula trigger, and a prefixed cell is _text_ to a
 spreadsheet — so the naive rule drops every negative metric out of the ranges a
 head teacher sums and averages, which is most of what anybody opens an export to
 do. A number reaching the sanitizer came from `count(*)`, not from anything a
-person typed. A string that merely *looks* numeric, arriving as a class name, is
+person typed. A string that merely _looks_ numeric, arriving as a class name, is
 still neutralized.
 
 Other export properties:
@@ -283,16 +283,16 @@ what a low ceiling makes slow and loud.
 
 ## Audit
 
-| Event                    | When                                    |
-| ------------------------ | --------------------------------------- |
-| `analytics.report_read`  | Any institutional report is read        |
-| `analytics.exported`     | A report leaves as a file               |
-| `authz.denied`           | Any refusal, with the rule name and no numbers |
+| Event                   | When                                           |
+| ----------------------- | ---------------------------------------------- |
+| `analytics.report_read` | Any institutional report is read               |
+| `analytics.exported`    | A report leaves as a file                      |
+| `authz.denied`          | Any refusal, with the rule name and no numbers |
 
 **This is the only READ this platform logs.** Every other read event was
 rejected as noise in Task 003 and that judgement still holds — logging that a
 learner opened a lesson tells nobody anything. An institutional report is the
-only read whose *subject* is other people, hundreds of them, and the only one
+only read whose _subject_ is other people, hundreds of them, and the only one
 where "who has been looking at this, and how often" is a question a school may
 have to answer to a regulator or a parent. The volume is bounded by the number
 of adults with the role.
@@ -309,13 +309,13 @@ different access rules.
 
 ## Errors
 
-| Status | When                                                                |
-| ------ | ------------------------------------------------------------------- |
-| 400    | An undeclared field (including `organizationId`), a bad range, an unknown dataset |
-| 401    | No session                                                          |
+| Status | When                                                                                                                                       |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------ |
+| 400    | An undeclared field (including `organizationId`), a bad range, an unknown dataset                                                          |
+| 401    | No session                                                                                                                                 |
 | 403    | A refusal the caller is entitled to understand — a teacher reaching for the executive report, an administrator reaching for the named list |
-| 404    | A refusal that must not confirm a class exists — another school's class, an invented id |
-| 429    | A rate limit                                                        |
+| 404    | A refusal that must not confirm a class exists — another school's class, an invented id                                                    |
+| 429    | A rate limit                                                                                                                               |
 
 **403 and 404 are chosen case by case.** A member of staff asking about the
 school they work in is told plainly that the report belongs to administrators —
@@ -326,14 +326,14 @@ disclosure as often as the effect.
 
 ## Tests
 
-| File                                              | What it proves                                    |
-| ------------------------------------------------- | ------------------------------------------------- |
-| `tests/unit/analytics-csv-safety.test.ts`          | 12 injection payloads and 11 ordinary values, no server |
-| `tests/unit/analytics-policy.test.ts`              | The decision grid, effect and disclosure          |
-| `tests/architecture/analytics-boundaries.test.ts`  | The properties a passing suite would not notice breaking |
-| `tests/integration/rls-analytics.test.ts`          | The database alone — plus the numbers and `pg_locks` |
-| `tests/security/analytics.test.ts`                 | End to end, both gates, IDOR-A … IDOR-Y           |
-| `tests/security/layered-defense.test.ts`           | The application alone, RLS bypassed               |
+| File                                              | What it proves                                           |
+| ------------------------------------------------- | -------------------------------------------------------- |
+| `tests/unit/analytics-csv-safety.test.ts`         | 12 injection payloads and 11 ordinary values, no server  |
+| `tests/unit/analytics-policy.test.ts`             | The decision grid, effect and disclosure                 |
+| `tests/architecture/analytics-boundaries.test.ts` | The properties a passing suite would not notice breaking |
+| `tests/integration/rls-analytics.test.ts`         | The database alone — plus the numbers and `pg_locks`     |
+| `tests/security/analytics.test.ts`                | End to end, both gates, IDOR-A … IDOR-Y                  |
+| `tests/security/layered-defense.test.ts`          | The application alone, RLS bypassed                      |
 
 ## What this task did not build
 

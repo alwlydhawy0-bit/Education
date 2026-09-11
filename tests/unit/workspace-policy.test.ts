@@ -148,7 +148,11 @@ describe('the artifact decision table', () => {
   it('refuses a guardian even though a guardian may read a SHARED note', () => {
     // The asymmetry that is easiest to mistake for a bug. Sharing a note is a
     // decision about that note's text; a file does not ride along on it.
-    const d = engine.decide(ctx(guardian, { guardianOf: [OWNER] }), 'student_artifact:read', artifact());
+    const d = engine.decide(
+      ctx(guardian, { guardianOf: [OWNER] }),
+      'student_artifact:read',
+      artifact(),
+    );
     expect(d.effect).toBe('deny');
   });
 });
@@ -239,9 +243,7 @@ describe('the markdown gate leaves schoolwork alone', () => {
 
 describe('the note contract bounds where a note may hang', () => {
   it('accepts at most one anchor', () => {
-    expect(
-      createNoteRequestSchema.safeParse({ title: 'n', lessonId: LESSON }).success,
-    ).toBe(true);
+    expect(createNoteRequestSchema.safeParse({ title: 'n', lessonId: LESSON }).success).toBe(true);
     expect(
       createNoteRequestSchema.safeParse({ title: 'n', lessonId: LESSON, courseId: COURSE }).success,
     ).toBe(false);
@@ -263,9 +265,7 @@ describe('the note contract bounds where a note may hang', () => {
   });
 
   it('has no ownerId field to forge', () => {
-    expect(
-      createNoteRequestSchema.safeParse({ title: 'n', ownerId: OTHER }).success,
-    ).toBe(false);
+    expect(createNoteRequestSchema.safeParse({ title: 'n', ownerId: OTHER }).success).toBe(false);
   });
 });
 

@@ -480,12 +480,7 @@ export function createExperimentService(deps: ExperimentServiceDeps): Experiment
           sessionId,
         );
         try {
-          return await repository.appendArtifact(
-            tx,
-            sessionId,
-            input.artifactType,
-            input.payload,
-          );
+          return await repository.appendArtifact(tx, sessionId, input.artifactType, input.payload);
         } catch (error) {
           if (error instanceof SessionNotWritableError) {
             await emit(ctx, SecurityEventType.LAB_STATE_WRITE_REFUSED, {

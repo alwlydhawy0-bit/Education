@@ -1,7 +1,6 @@
 # Task 014 — Community, Discussion Forums & Moderation Engine
 
-Branch `claude/platform-foundation-architecture-dop21k`. Migrations 0029, 0030,
-0031. One new domain, `community`.
+Branch `claude/platform-foundation-architecture-dop21k`. Migrations 0029, 0030, 0031. One new domain, `community`.
 
 ---
 
@@ -58,13 +57,13 @@ violated dependency rule 3.
 
 ## 2. VERIFIED
 
-| Gate                          | Result                      |
-| ----------------------------- | --------------------------- |
-| `pnpm typecheck`              | clean, exit 0               |
-| `pnpm lint`                   | clean, exit 0               |
-| `pnpm test` (all six projects)| 91 files, 3,223 tests, pass |
-| Defect injection round 13     | 14 injected, 14 caught      |
-| Live boot check               | see below                   |
+| Gate                           | Result                      |
+| ------------------------------ | --------------------------- |
+| `pnpm typecheck`               | clean, exit 0               |
+| `pnpm lint`                    | clean, exit 0               |
+| `pnpm test` (all six projects) | 91 files, 3,223 tests, pass |
+| Defect injection round 13      | 14 injected, 14 caught      |
+| Live boot check                | see below                   |
 
 **The live boot check, in full.** Migrations 0029–0031 applied to the
 development database; the API booted as a real process; a learner registered,
@@ -160,31 +159,31 @@ the learner never chose.
 Every row traces to a marker in `tests/security/community.test.ts`. All run over
 the real HTTP stack with both gates active.
 
-| ID | Attempt | Result |
-| -- | ------- | ------ |
-| IDOR-A | A learner in another class of the same school reads a thread | 404 |
-| IDOR-B | A learner in another school reads it | 404 |
-| IDOR-C | A learner posts into a class they are not in | 404 |
-| IDOR-D | A learner in another school posts | 404 |
-| IDOR-E | A learner replies to a thread in a class they are not in | 404 |
-| IDOR-F | A class feed for a class the caller is not in | 200, empty |
-| IDOR-G | A made-up thread id | 404, identical to somebody else's |
-| IDOR-H | A classmate edits or deletes another's thread | 404 |
-| IDOR-I | A classmate edits or deletes another's reply | 404 |
-| IDOR-J | A reply into a locked thread | 403, "locked" |
-| IDOR-K | The author edits their own locked thread | 403 |
-| IDOR-L | A learner performs any moderation verb | 404 (×4) |
-| IDOR-M | The AUTHOR moderates their own thread | 404 |
-| IDOR-N | A teacher of another class moderates here | 404 |
-| IDOR-O | A moderator rewrites a child's post | refused by the guard |
-| IDOR-P | A hidden thread in a classmate's feed and read | absent, 404 |
-| IDOR-Q | Filter evasions a naive substring check would pass | flagged |
-| IDOR-R | A reply parented in another class's thread | refused by the composite FK |
-| IDOR-S | The ANSWERER accepts their own answer | 403 |
-| IDOR-T | Somebody who neither asked nor answered accepts | 404 |
-| IDOR-U | The reported author sees who reported them | never |
-| IDOR-V | A teacher of another class reads the queue | empty |
-| IDOR-W | Another school reads the queue | empty |
+| ID     | Attempt                                                      | Result                            |
+| ------ | ------------------------------------------------------------ | --------------------------------- |
+| IDOR-A | A learner in another class of the same school reads a thread | 404                               |
+| IDOR-B | A learner in another school reads it                         | 404                               |
+| IDOR-C | A learner posts into a class they are not in                 | 404                               |
+| IDOR-D | A learner in another school posts                            | 404                               |
+| IDOR-E | A learner replies to a thread in a class they are not in     | 404                               |
+| IDOR-F | A class feed for a class the caller is not in                | 200, empty                        |
+| IDOR-G | A made-up thread id                                          | 404, identical to somebody else's |
+| IDOR-H | A classmate edits or deletes another's thread                | 404                               |
+| IDOR-I | A classmate edits or deletes another's reply                 | 404                               |
+| IDOR-J | A reply into a locked thread                                 | 403, "locked"                     |
+| IDOR-K | The author edits their own locked thread                     | 403                               |
+| IDOR-L | A learner performs any moderation verb                       | 404 (×4)                          |
+| IDOR-M | The AUTHOR moderates their own thread                        | 404                               |
+| IDOR-N | A teacher of another class moderates here                    | 404                               |
+| IDOR-O | A moderator rewrites a child's post                          | refused by the guard              |
+| IDOR-P | A hidden thread in a classmate's feed and read               | absent, 404                       |
+| IDOR-Q | Filter evasions a naive substring check would pass           | flagged                           |
+| IDOR-R | A reply parented in another class's thread                   | refused by the composite FK       |
+| IDOR-S | The ANSWERER accepts their own answer                        | 403                               |
+| IDOR-T | Somebody who neither asked nor answered accepts              | 404                               |
+| IDOR-U | The reported author sees who reported them                   | never                             |
+| IDOR-V | A teacher of another class reads the queue                   | empty                             |
+| IDOR-W | Another school reads the queue                               | empty                             |
 
 **The same boundaries, twice more.** Thirty-eight of these run again in
 `tests/integration/rls-community.test.ts` with the application deleted, and
@@ -289,33 +288,33 @@ pnpm test        91 files, 3,223 tests, all passing
 
 **This task's suites**
 
-| Suite | Tests | What it removes |
-| ----- | ----- | --------------- |
-| `tests/unit/community-content-filter.test.ts` | 80 | the server |
-| `tests/unit/community-policy.test.ts` | 59 | the server |
-| `tests/architecture/community-boundaries.test.ts` | 34 | behaviour — asserts on source text |
-| `tests/integration/rls-community.test.ts` | 38 | the application layer |
-| `tests/security/community.test.ts` | 65 | nothing — both gates, real HTTP |
-| `tests/security/layered-defense.test.ts` (community) | 12 | RLS |
+| Suite                                                | Tests | What it removes                    |
+| ---------------------------------------------------- | ----- | ---------------------------------- |
+| `tests/unit/community-content-filter.test.ts`        | 80    | the server                         |
+| `tests/unit/community-policy.test.ts`                | 59    | the server                         |
+| `tests/architecture/community-boundaries.test.ts`    | 34    | behaviour — asserts on source text |
+| `tests/integration/rls-community.test.ts`            | 38    | the application layer              |
+| `tests/security/community.test.ts`                   | 65    | nothing — both gates, real HTTP    |
+| `tests/security/layered-defense.test.ts` (community) | 12    | RLS                                |
 
 **Defect injection round 13 — 14 injected, 14 caught.**
 
-| # | Defect | Caught by |
-| - | ------ | --------- |
-| F1 | Separator-run collapse dropped (`f u c k` escapes) | unit, sec |
-| F2 | Repeat collapse dropped (`assshole` escapes) | **ESCAPED, then unit** |
-| F3 | The aggressive second reading dropped | unit, sec |
-| F4 | Invisible characters no longer stripped | unit |
-| F5 | Word boundaries dropped (`classic` flags) | unit, arch |
-| F6 | Reply-create stops asking about the lock | unit, sec, layered |
-| F7 | Thread read stops checking moderation status | unit, layered |
-| F8 | Self-accept guard removed | unit, sec |
-| F9 | A reporter may close their own flag | unit |
-| F10 | Lock check moved below the allow | unit, arch, sec |
-| F11 | `createFlag` regains `RETURNING` | arch, sec |
-| F12 | An author's edit gains `is_locked` | arch, sec |
-| F13 | Display name from a join to `users` | arch, sec |
-| F14 | Reply edits no longer re-screened | **arch only**, then arch + sec |
+| #   | Defect                                             | Caught by                      |
+| --- | -------------------------------------------------- | ------------------------------ |
+| F1  | Separator-run collapse dropped (`f u c k` escapes) | unit, sec                      |
+| F2  | Repeat collapse dropped (`assshole` escapes)       | **ESCAPED, then unit**         |
+| F3  | The aggressive second reading dropped              | unit, sec                      |
+| F4  | Invisible characters no longer stripped            | unit                           |
+| F5  | Word boundaries dropped (`classic` flags)          | unit, arch                     |
+| F6  | Reply-create stops asking about the lock           | unit, sec, layered             |
+| F7  | Thread read stops checking moderation status       | unit, layered                  |
+| F8  | Self-accept guard removed                          | unit, sec                      |
+| F9  | A reporter may close their own flag                | unit                           |
+| F10 | Lock check moved below the allow                   | unit, arch, sec                |
+| F11 | `createFlag` regains `RETURNING`                   | arch, sec                      |
+| F12 | An author's edit gains `is_locked`                 | arch, sec                      |
+| F13 | Display name from a join to `users`                | arch, sec                      |
+| F14 | Reply edits no longer re-screened                  | **arch only**, then arch + sec |
 
 **Two of these fourteen taught something, and both are recorded in the code.**
 
@@ -381,8 +380,8 @@ with one ordinary click of the report button.** Found by the adversarial probe
 against the migration, before any application code existed. Fixed with
 `SECURITY DEFINER` and the definer-role policies it then needs.
 
-*The lesson: a grant you withheld on purpose is a grant your own triggers also
-do not have.*
+_The lesson: a grant you withheld on purpose is a grant your own triggers also
+do not have._
 
 **VULN-058 — the automated filter could not file.** Two layers. The insert
 policy admitted only `raised_by = 'member'`, so the screener could never write.
@@ -396,8 +395,8 @@ The tempting fix — widening the read policy so an author can see flags against
 them — was deliberately not made: the flag carries the matched term, so it would
 have turned the queue into a word-list oracle.
 
-*The lesson: some defects live in the seam between the database and the
-application, and are invisible to both a probe and a unit test.*
+_The lesson: some defects live in the seam between the database and the
+application, and are invisible to both a probe and a unit test._
 
 **Two test errors of mine, fixed rather than blamed on the code.** A reply born
 claiming `is_accepted_answer` is written with the claim dropped rather than

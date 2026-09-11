@@ -1,61 +1,60 @@
-import { useState } from 'react';
-import { AppLayout } from './components/layout/index.js';
-import Auth from './pages/Auth.jsx';
-import Dashboard from './pages/Dashboard.jsx';
+import { BrowserRouter } from 'react-router-dom';
+import { AuthProvider } from './auth/AuthProvider.jsx';
+import AppRoutes from './routes/index.jsx';
 
 /**
- * The application root.
+ * The application root: two providers and a route table.
  *
  * ---------------------------------------------------------------------------
- * STILL NO ROUTER, AND THAT IS A DECISION RATHER THAN AN OMISSION
+ * THE ROUTER IS HERE NOW, AND THE EARLIER ARGUMENT AGAINST IT NO LONGER HOLDS
  * ---------------------------------------------------------------------------
  *
- * This file used to say that a router would arrive with the second screen. The
- * second screen has arrived, so the claim is worth re-examining rather than
- * simply acted on.
+ * This file previously gated the whole product behind a boolean, and argued the
+ * case at length: authentication was a GATE rather than a destination, there was
+ * one URL, and a router would have expressed a single boolean as a redirect, a
+ * guard and two route definitions.
  *
- * Authentication is a GATE, not a destination. There is exactly one URL — `/` —
- * and what it shows depends on whether the visitor is signed in. That is the
- * whole rule, and a router would express it as a redirect, a guard component
- * and two route definitions: more moving parts describing the same single
- * boolean.
- *
- * It would also cost something concrete on this deployment. A router puts real
- * paths in the address bar, and a static host answers a request for `/auth`
- * with a 404 unless it is told to rewrite every path to `index.html`. Adding
- * routes without adding that rewrite produces an app that works perfectly until
- * someone refreshes the page or opens a link — the classic SPA deep-link 404.
- *
- * So the gate stays a boolean. The seam is here: when a third screen needs its
- * own URL, the router goes in this file, `Auth` and `Dashboard` become routes,
- * and neither of them has to change — they already take the one prop each that
- * a route would give them.
+ * Every premise of that has changed. There are six destinations; `/login` is a
+ * real place the product links to; and a guest is meant to browse, which means
+ * the catalogue and each course need URLs a person can open, share and refresh.
+ * A boolean cannot express any of that. The earlier reasoning was right for the
+ * product as it stood and is recorded here rather than quietly deleted, because
+ * "we added a router" is a much less useful note than "here is what changed
+ * that made it worth adding".
  *
  * ---------------------------------------------------------------------------
- * THIS IS NOT A SECURITY BOUNDARY
+ * WHAT THE ROUTER COSTS ON A STATIC HOST, AND WHERE THAT IS PAID
  * ---------------------------------------------------------------------------
  *
- * `authenticated` decides what is RENDERED, and nothing else. Client state is
- * editable by whoever holds the browser, so it protects no data: the dashboard
- * is safe only because every request behind it is authorised by the server,
- * which is where the real boundary is and the only place it can be. Treating a
- * React state variable as an access control is how a frontend ends up shipping
- * data it then tries to hide.
+ * Real paths mean a request for `/courses` goes to the host before React ever
+ * runs, and a static host answers with 404 unless it is told to serve
+ * `index.html` for everything. That is the classic SPA deep-link failure: the
+ * app works perfectly until someone refreshes a page or opens a shared link.
+ *
+ * It is paid for in `vercel.json`'s `rewrites`, with a fitness test in
+ * `tests/architecture/deployment-config.test.ts` holding it there — because the
+ * failure is invisible in development (Vite's dev server rewrites by default)
+ * and only appears in production.
+ *
+ * ---------------------------------------------------------------------------
+ * PROVIDER ORDER
+ * ---------------------------------------------------------------------------
+ *
+ * `BrowserRouter` wraps `AuthProvider`, not the other way round: nothing in the
+ * auth layer needs routing today, but `useGuardedAction` — which lives beside
+ * it — calls `useNavigate`, and a hook cannot reach a provider that sits inside
+ * it. Getting this backwards produces a runtime error far from its cause.
  *
  * The RTL direction is NOT set here. It lives on <html> in index.html so the
  * first paint is already correct, with `html { direction: rtl }` in index.css
  * as the backstop.
  */
 export default function App() {
-  const [authenticated, setAuthenticated] = useState(false);
-
-  if (!authenticated) {
-    return <Auth onAuthenticated={() => setAuthenticated(true)} />;
-  }
-
   return (
-    <AppLayout>
-      <Dashboard />
-    </AppLayout>
+    <BrowserRouter>
+      <AuthProvider>
+        <AppRoutes />
+      </AuthProvider>
+    </BrowserRouter>
   );
 }

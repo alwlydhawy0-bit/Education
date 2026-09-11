@@ -3,5 +3,6 @@
   "framework": null,
   "installCommand": "cd edunext && npm ci",
   "buildCommand": "cd edunext && npm run build",
-  "outputDirectory": "edunext/dist"
+  "outputDirectory": "edunext/dist",
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }

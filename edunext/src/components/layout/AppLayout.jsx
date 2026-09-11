@@ -1,39 +1,45 @@
-import { useState } from 'react';
+import { Outlet, useLocation } from 'react-router-dom';
 import BottomNav from './BottomNav.jsx';
 import Header from './Header.jsx';
 import Sidebar from './Sidebar.jsx';
 
 /**
- * The page frame, and the one place that knows which destination is active.
+ * The page frame for every routed screen.
  *
- * WHY THE ACTIVE ID LIVES HERE. Two navigations render it — the sidebar on a
- * desktop, the bottom bar on a phone — and they must never disagree. Holding
- * the value in the single ancestor they share makes disagreement
- * unrepresentable rather than merely unlikely.
+ * ---------------------------------------------------------------------------
+ * THE ROUTER ARRIVED, AND THIS FILE PREDICTED WHAT WOULD HAPPEN
+ * ---------------------------------------------------------------------------
  *
- * It is deliberately NOT a router yet. `react-router` earns its place when
- * there is a second page to route to; adding it now would be a dependency
- * chosen on speculation. When it arrives, this `useState` becomes `useLocation`
- * and `onNavigate` becomes `navigate` — neither child changes, because neither
- * child knows where the value comes from.
+ * It used to hold `activeId` in a `useState` and hand `onNavigate` to both
+ * navigations, with a note saying that when a router landed, "this `useState`
+ * becomes `useLocation` and `onNavigate` becomes `navigate` — neither child
+ * changes, because neither child knows where the value comes from."
+ *
+ * That is roughly what happened, with one correction worth recording: the
+ * children DID change, because the right answer was better than the predicted
+ * one. Rather than passing a location down, each navigation now uses `NavLink`,
+ * which derives its own active state and sets `aria-current` itself. The
+ * "single ancestor holds the value so the two cannot disagree" argument is
+ * satisfied more strongly than before — there is no value to disagree about,
+ * only the URL, which is one thing by construction.
+ *
+ * This component no longer takes a `user` prop either. The header reads the
+ * visitor from `useAuth`, because who is looking is not a property of the
+ * layout — a guest and a member get the SAME frame, and only the contents of
+ * the header and the sidebar's foot differ.
+ *
+ * `<Outlet />` is where the routed page renders.
  */
-const DEMO_USER = {
-  name: 'ريهام',
-  role: 'طالبة',
-  unreadCount: 1,
-  avatarUrl: null,
-};
-
-export default function AppLayout({ children, user = DEMO_USER }) {
-  const [activeId, setActiveId] = useState('dashboard');
+export default function AppLayout() {
+  const { pathname } = useLocation();
 
   /*
    * `h-[100dvh] overflow-hidden` on the shell — not `min-h-screen`.
    *
    * With `min-h-screen` the shell grows to the DOCUMENT height, so the sidebar
-   * stretches past the fold and the settings row pinned to its foot ends up
-   * hundreds of pixels below the viewport, reachable only by scrolling the whole
-   * page. Caught by looking at a screenshot, not by reading the code.
+   * stretches past the fold and the row pinned to its foot ends up hundreds of
+   * pixels below the viewport, reachable only by scrolling the whole page.
+   * Caught by looking at a screenshot, not by reading the code.
    *
    * `dvh` rather than `vh` because mobile browser chrome makes `100vh` taller
    * than the visible area — the classic "the bottom bar is under the address
@@ -47,10 +53,10 @@ export default function AppLayout({ children, user = DEMO_USER }) {
         is the difference between markup that reads correctly and markup that
         works by accident.
       */}
-      <Sidebar activeId={activeId} onNavigate={setActiveId} />
+      <Sidebar />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <Header user={user} onNavigate={setActiveId} />
+        <Header />
 
         {/*
           The content column is what scrolls; the sidebar and header stay put.
@@ -59,11 +65,21 @@ export default function AppLayout({ children, user = DEMO_USER }) {
           the last card on every phone screen sits underneath the navigation and
           cannot be reached — the most common bug in this exact layout, and one
           that is invisible on a desktop.
+
+          `key={pathname}` RESETS THE SCROLL POSITION BETWEEN PAGES. This column
+          is the scroll container, not the window, so a router navigation leaves
+          it exactly where the previous page was — open a course from halfway
+          down the catalogue and the new page opens halfway down too, which
+          reads as a broken page rather than as a preserved position. Remounting
+          on the path is the cheapest correct fix; `window.scrollTo` would do
+          nothing here, because the window never scrolled.
         */}
-        <main className="flex-1 overflow-y-auto px-4 pb-28 pt-2 sm:px-6 md:pb-6">{children}</main>
+        <main key={pathname} className="flex-1 overflow-y-auto px-4 pb-28 pt-2 sm:px-6 md:pb-6">
+          <Outlet />
+        </main>
       </div>
 
-      <BottomNav activeId={activeId} onNavigate={setActiveId} />
+      <BottomNav />
     </div>
   );
 }

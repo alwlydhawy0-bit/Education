@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { BookOpen } from 'lucide-react';
+import { Navigate, useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../auth/useAuth.js';
 import { EmailStep, OtpStep } from '../components/auth/index.js';
 
 /**
@@ -67,7 +69,26 @@ const auth = {
     }),
 };
 
-export default function Auth({ onAuthenticated }) {
+export default function Auth() {
+  const { isAuthenticated, signIn } = useAuth();
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  /*
+   * WHERE THIS SCREEN SENDS THE VISITOR AFTERWARDS.
+   *
+   * `from` is set by whatever sent them here — the header's sign-in button, or
+   * `useGuardedAction` when a guest pressed a members-only control. Returning
+   * them to that exact page is the difference between a freemium funnel that
+   * converts and one that loses the person at the moment they showed intent.
+   *
+   * `intent` is the short phrase explaining WHY they were asked, shown below
+   * the heading. Without it the login screen appears as an unexplained demand
+   * for credentials immediately after a button press that looked harmless.
+   */
+  const from = location.state?.from?.pathname ?? location.state?.from ?? '/';
+  const intent = location.state?.intent ?? null;
+
   const [step, setStep] = useState('email');
   const [email, setEmail] = useState('');
   const [error, setError] = useState(null);
@@ -94,13 +115,28 @@ export default function Auth({ onAuthenticated }) {
     setError(null);
     try {
       await auth.verifyCode(code);
-      onAuthenticated();
+      signIn();
+      // `replace` so Back from the destination does not re-enter the flow that
+      // has just completed.
+      navigate(from, { replace: true });
     } catch (cause) {
       setError(cause.message);
     } finally {
       setPending(false);
     }
   };
+
+  /*
+   * A signed-in visitor has no business on the login screen — they would sign
+   * in twice. `replace` keeps it out of history so Back does not land here.
+   *
+   * THIS SITS BELOW EVERY HOOK, not at the top of the component where it would
+   * read more naturally. An early `return` above a `useState` changes how many
+   * hooks run between renders, which is the one rule React cannot tolerate —
+   * the first draft had it above, and oxlint's `react/rules-of-hooks` caught
+   * it before the browser did.
+   */
+  if (isAuthenticated) return <Navigate to={from} replace />;
 
   return (
     /*
@@ -160,6 +196,17 @@ export default function Auth({ onAuthenticated }) {
           the text at exactly one width nobody tested.
         */}
         <div className="px-6 pb-8 pt-36 sm:px-9 sm:pb-10 sm:pt-40">
+          {/*
+            The reason, when there is one. It sits above the step so it is read
+            before the form, and it is absent rather than empty for a visitor
+            who simply chose to sign in — an explanation nobody needs is noise.
+          */}
+          {intent ? (
+            <p className="mb-5 rounded-2xl bg-primary-light px-4 py-3 text-xs leading-relaxed text-primary">
+              سجّلي الدخول {intent}
+            </p>
+          ) : null}
+
           <div key={step} className="motion-safe:animate-step-in">
             {step === 'email' ? (
               <EmailStep

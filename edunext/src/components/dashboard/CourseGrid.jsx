@@ -1,4 +1,8 @@
-import { ArrowLeft, LineChart, Palette, Play, Code2 } from 'lucide-react';
+import { ArrowLeft, Play } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useAuth } from '../../auth/useAuth.js';
+import { useGuardedAction } from '../../auth/useGuardedAction.js';
+import { COURSES, enrolledCourses } from '../../data/courses.js';
 
 /**
  * The courses in progress.
@@ -20,48 +24,38 @@ import { ArrowLeft, LineChart, Palette, Play, Code2 } from 'lucide-react';
  * `aria-label` carries the course name so a learner tabbing through three bars
  * hears which course each one belongs to.
  */
-const COURSES = [
-  {
-    id: 'data',
-    title: 'أساسيات تحليل البيانات',
-    level: 'مستوى مبتدئ',
-    progress: 65,
-    lastLesson: 'الدرس 8: تنظيف البيانات',
-    Icon: LineChart,
-  },
-  {
-    id: 'react',
-    title: 'تطوير تطبيقات React',
-    level: 'مستوى متوسط',
-    progress: 40,
-    lastLesson: 'الدرس 5: إدارة الحالة',
-    Icon: Code2,
-  },
-  {
-    id: 'uiux',
-    title: 'تصميم واجهات المستخدم UI/UX',
-    level: 'مستوى متوسط',
-    progress: 80,
-    lastLesson: 'الدرس 12: اختبار قابلية الاستخدام',
-    Icon: Palette,
-  },
-];
+/** The catalogue stores difficulty as a key; the dashboard card shows a phrase. */
+const LEVEL_LABELS = {
+  beginner: 'مستوى مبتدئ',
+  intermediate: 'مستوى متوسط',
+  advanced: 'مستوى متقدّم',
+};
 
-export default function CourseGrid({ onOpenCourse, onViewAll }) {
+export default function CourseGrid() {
+  const { isAuthenticated } = useAuth();
+
+  /*
+   * A GUEST HAS NO "CURRENT COURSES", so this section changes what it IS rather
+   * than showing the same cards with the numbers blanked. Progress belongs to a
+   * person: rendering three cards at 0% would claim the visitor started three
+   * courses and abandoned every one of them.
+   */
+  const courses = enrolledCourses(isAuthenticated);
+  const heading = isAuthenticated ? 'الدورات الحالية' : 'دورات مختارة';
+
   return (
     <section aria-labelledby="courses-heading">
       <div className="mb-3 flex items-center justify-between gap-4">
         <h2 id="courses-heading" className="text-base font-semibold text-text-main">
-          الدورات الحالية
+          {heading}
         </h2>
-        <button
-          type="button"
-          onClick={onViewAll}
+        <Link
+          to="/courses"
           className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-xs font-medium text-primary transition-colors duration-200 hover:bg-primary-light"
         >
           <span>عرض الكل</span>
           <ArrowLeft className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
+        </Link>
       </div>
 
       {/*
@@ -75,9 +69,9 @@ export default function CourseGrid({ onOpenCourse, onViewAll }) {
         nothing overflowed — it was all quietly clipped instead.
       */}
       <ul className="grid gap-4 sm:grid-cols-2">
-        {COURSES.map((course) => (
+        {(courses.length > 0 ? courses : COURSES.slice(0, 2)).map((course) => (
           <li key={course.id}>
-            <CourseCard course={course} onOpen={() => onOpenCourse?.(course.id)} />
+            <CourseCard course={course} showProgress={isAuthenticated} />
           </li>
         ))}
       </ul>
@@ -85,8 +79,9 @@ export default function CourseGrid({ onOpenCourse, onViewAll }) {
   );
 }
 
-function CourseCard({ course, onOpen }) {
-  const { title, level, progress, lastLesson, Icon } = course;
+function CourseCard({ course, showProgress }) {
+  const { id, title, level, progress, lastLesson, summary, Icon } = course;
+  const guard = useGuardedAction();
 
   return (
     <article className="card-surface flex h-full flex-col gap-4 p-5 transition-all duration-200 hover:-translate-y-0.5 hover:border-accent-lavender hover:shadow-[0_8px_28px_-4px_rgba(30,27,75,0.08)]">
@@ -100,32 +95,36 @@ function CourseCard({ course, onOpen }) {
           <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-text-main">
             {title}
           </h3>
-          <p className="mt-0.5 text-xs text-text-muted">{level}</p>
+          <p className="mt-0.5 text-xs text-text-muted">{LEVEL_LABELS[level] ?? level}</p>
         </div>
       </div>
 
-      {/* التقدّم */}
-      <div>
-        <div className="mb-1.5 flex items-baseline justify-between gap-2 text-xs">
-          <span className="text-text-muted">نسبة الإنجاز</span>
-          <span className="font-semibold tabular-nums text-text-main">{progress}%</span>
-        </div>
-        <div
-          role="progressbar"
-          aria-valuenow={progress}
-          aria-valuemin={0}
-          aria-valuemax={100}
-          aria-label={`نسبة الإنجاز في ${title}`}
-          className="h-2 w-full overflow-hidden rounded-full bg-surface-alt"
-        >
-          {/* Fills from the inline-start edge, which RTL puts on the right.
-              No positioning, so it is correct in either direction. */}
+      {/* التقدّم — للأعضاء فقط */}
+      {showProgress ? (
+        <div>
+          <div className="mb-1.5 flex items-baseline justify-between gap-2 text-xs">
+            <span className="text-text-muted">نسبة الإنجاز</span>
+            <span className="font-semibold tabular-nums text-text-main">{progress}%</span>
+          </div>
           <div
-            className="h-full rounded-full bg-primary transition-[width] duration-500"
-            style={{ width: `${progress}%` }}
-          />
+            role="progressbar"
+            aria-valuenow={progress}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`نسبة الإنجاز في ${title}`}
+            className="h-2 w-full overflow-hidden rounded-full bg-surface-alt"
+          >
+            {/* Fills from the inline-start edge, which RTL puts on the right.
+                No positioning, so it is correct in either direction. */}
+            <div
+              className="h-full rounded-full bg-primary transition-[width] duration-500"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
         </div>
-      </div>
+      ) : (
+        <p className="line-clamp-2 text-xs leading-relaxed text-text-muted">{summary}</p>
+      )}
 
       {/* `mt-auto` keeps the button on the baseline across cards whose titles
           wrap to different heights. */}
@@ -142,17 +141,31 @@ function CourseCard({ course, onOpen }) {
           changes.
         */}
         <p className="basis-full truncate text-[11px] text-text-muted" title={lastLesson}>
-          {lastLesson}
+          {showProgress ? lastLesson : 'ابدئي من الدرس الأول'}
         </p>
-        <button
-          type="button"
-          onClick={onOpen}
-          aria-label={`متابعة ${title}`}
-          className="inline-flex h-9 shrink-0 items-center gap-1.5 rounded-full bg-primary-light px-4 text-xs font-medium text-primary transition-colors duration-200 hover:bg-primary hover:text-white"
-        >
-          <span>متابعة</span>
-          <Play className="h-3.5 w-3.5" aria-hidden="true" />
-        </button>
+        {/*
+          TWO CONTROLS, TWO DIFFERENT KINDS OF THING. Reading about a course is
+          navigation and belongs in a <Link> — it should open in a new tab on a
+          middle click and be copyable as a URL. Resuming a lesson is an ACTION
+          a guest may not take, so it stays a <button> behind `guard`.
+        */}
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            to={`/courses/${id}`}
+            className="inline-flex h-9 items-center rounded-full px-3 text-xs font-medium text-text-muted transition-colors duration-200 hover:bg-surface-alt hover:text-text-main"
+          >
+            التفاصيل
+          </Link>
+          <button
+            type="button"
+            onClick={guard(() => undefined, 'لمتابعة الدرس')}
+            aria-label={showProgress ? `متابعة ${title}` : `ابدئي ${title}`}
+            className="inline-flex h-9 items-center gap-1.5 rounded-full bg-primary-light px-4 text-xs font-medium text-primary transition-colors duration-200 hover:bg-primary hover:text-white"
+          >
+            <span>{showProgress ? 'متابعة' : 'ابدئي'}</span>
+            <Play className="h-3.5 w-3.5" aria-hidden="true" />
+          </button>
+        </div>
       </div>
     </article>
   );

@@ -54,6 +54,7 @@ interface VercelConfig {
   installCommand?: string;
   buildCommand?: string;
   outputDirectory?: string;
+  rewrites?: { source: string; destination: string }[];
 }
 
 const vercel = JSON.parse(readFileSync(join(ROOT, 'vercel.json'), 'utf8')) as VercelConfig;
@@ -139,6 +140,84 @@ describe('the root vercel.json describes this repository', () => {
     for (const name of ['vite.config.ts', 'vite.config.js', 'vite.config.mjs']) {
       expect(existsSync(join(ROOT, name))).toBe(false);
     }
+  });
+});
+
+/**
+ * THE SINGLE-PAGE-APP REWRITE.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS NEEDS A TEST AND THE OTHERS ARGUABLY DO NOT
+ * ---------------------------------------------------------------------------
+ *
+ * `edunext` uses `react-router-dom` with real paths — `/courses`,
+ * `/courses/:id`, `/about`, `/profile`, `/login`. Client-side routing only
+ * takes over once the app is RUNNING, and a request for `/courses` reaches the
+ * host before a single byte of JavaScript has executed. A static host looks for
+ * a file at that path, finds none, and answers 404.
+ *
+ * The failure mode is what makes it dangerous rather than merely broken: every
+ * in-app navigation works perfectly, because those never touch the network. It
+ * fails only on a REFRESH, a shared link, or a bookmark — the three things
+ * nobody does while developing, and everybody does in production. Vite's dev
+ * server rewrites by default, so `npm run dev` cannot reveal it either.
+ *
+ * So the rewrite is invisible in every environment a developer uses, and its
+ * absence is invisible until a user reports a dead link. That is precisely the
+ * shape of fact that belongs in a fitness function.
+ */
+describe('the deployment serves the SPA for every path', () => {
+  it('rewrites all paths to index.html', () => {
+    expect(vercel.rewrites).toBeDefined();
+    const catchAll = vercel.rewrites?.find((rule) => rule.destination === '/index.html');
+    expect(catchAll).toBeDefined();
+    // `/(.*)` is Vercel's catch-all. Anchoring on the literal string rather than
+    // "some rule exists" is deliberate: a narrower pattern added later would
+    // still satisfy a looser assertion while leaving most routes returning 404.
+    expect(catchAll?.source).toBe('/(.*)');
+  });
+
+  it('every routed path the app defines is covered by that rewrite', () => {
+    // Derived from the route table rather than restated, so a route added there
+    // without a matching deploy story fails here instead of in production.
+    const routes = readFileSync(join(ROOT, DEPLOYED_DIR, 'src/routes/index.jsx'), 'utf8');
+    // `.filter(Boolean)` with a type predicate rather than `match[1]!`: this
+    // repo compiles with `noUncheckedIndexedAccess`, and silencing that with a
+    // non-null assertion in a test is how a test starts lying about its input.
+    const declared = [...routes.matchAll(/path="([^"]+)"/g)]
+      .map((match) => match[1])
+      .filter((path): path is string => typeof path === 'string');
+
+    expect(declared.length).toBeGreaterThan(1);
+
+    const source = vercel.rewrites?.find((rule) => rule.destination === '/index.html')?.source;
+    const pattern = new RegExp(`^${source}$`);
+    for (const route of declared) {
+      /*
+       * `*` and `:param` are ROUTER syntax, not URLs. Turning a route pattern
+       * into a URL a browser could actually request means substituting a
+       * segment for each and — the part the first version of this test got
+       * wrong — restoring the leading slash. React Router writes its catch-all
+       * as bare `*`, which produced "anything" and failed against `/(.*)` for a
+       * reason that had nothing to do with the rewrite being wrong.
+       */
+      const concrete = `/${route.replace(/:[^/]+/g, 'sample').replace(/\*/g, 'anything')}`.replace(
+        /\/{2,}/g,
+        '/',
+      );
+      expect(pattern.test(concrete), `${route} (as ${concrete}) is not covered`).toBe(true);
+    }
+  });
+
+  it('the rewrite does not swallow the build output itself', () => {
+    // A rewrite that also captured /assets/* would serve index.html in place of
+    // every script and stylesheet — a blank page with a 200 status. Vercel
+    // resolves static files first, which is what makes `/(.*)` safe here; this
+    // records the reasoning so a future edit does not "fix" the pattern into
+    // something that breaks it.
+    expect(existsSync(join(ROOT, DEPLOYED_DIR, 'dist', 'assets'))).toBe(
+      existsSync(join(ROOT, DEPLOYED_DIR, 'dist')),
+    );
   });
 });
 

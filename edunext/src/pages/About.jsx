@@ -127,13 +127,19 @@ export default function About() {
         <ol className="grid gap-4 md:grid-cols-3">
           {ROADMAP.map(({ phase, state, items }) => (
             <li key={phase} className="card-surface flex flex-col gap-3 p-5">
+              {/*
+                The active badge sits on `primary-light`, not `accent-lavender`:
+                that token is a decorative tint for borders and rules, and the
+                dark theme puts the primary violet on it at 3.36:1. On
+                `primary-light` the same text holds 5.24:1 dark, 6.02:1 light.
+              */}
               <span
                 className={[
                   'inline-flex w-fit rounded-full px-3 py-1 text-[11px] font-medium',
                   state === 'done'
                     ? 'bg-primary text-on-primary'
                     : state === 'active'
-                      ? 'bg-accent-lavender text-primary'
+                      ? 'bg-primary-light text-primary'
                       : 'bg-surface-alt text-text-muted',
                 ].join(' ')}
               >

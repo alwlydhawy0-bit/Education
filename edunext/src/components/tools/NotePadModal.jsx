@@ -15,6 +15,8 @@ import {
   X,
 } from 'lucide-react';
 import { renderMarkdown } from './markdown.jsx';
+import DocumentTab from './DocumentTab.jsx';
+import { loadDocument } from './document-store.js';
 import SketchPad from './SketchPad.jsx';
 import { downloadFile, loadNote, safeFilename, saveNote } from './notes-storage.js';
 
@@ -63,6 +65,7 @@ const AUTOSAVE_DELAY_MS = 600;
 const TABS = [
   { id: 'notes', label: 'الملاحظات' },
   { id: 'sketch', label: 'الرسم والمعادلات' },
+  { id: 'document', label: 'رفع ملف / مستند' },
 ];
 
 /**
@@ -87,6 +90,22 @@ export default function NotePadModal({ courseId, courseTitle, open, onClose }) {
 
 function NotePad({ courseId, courseTitle, onClose }) {
   const [stored] = useState(() => loadNote(courseId));
+  /*
+   * The document is loaded once on mount, same as the note. `DocumentTab` owns
+   * writing it and hands the new value back up, so this component holds the one
+   * copy the export and the tab label both read — two sources would drift the
+   * moment one of them forgot to refresh.
+   */
+  /*
+   * NAMED `studyDoc`, NOT `document`. The first draft used `document`, which
+   * shadows the global inside this component — and the focus effect below calls
+   * `document.activeElement` and `document.body`. Those would have resolved to
+   * this state value, quietly breaking the focus trap and the focus restore
+   * while every visible feature kept working. oxlint's exhaustive-deps rule
+   * surfaced it by listing `document.activeElement` as a missing dependency,
+   * which is a strange complaint until you see what it is really telling you.
+   */
+  const [studyDoc, setStudyDoc] = useState(() => loadDocument(courseId));
   const [tab, setTab] = useState('notes');
   const [markdown, setMarkdown] = useState(stored.markdown);
   const [drawing, setDrawing] = useState(stored.drawing);
@@ -252,7 +271,20 @@ function NotePad({ courseId, courseTitle, onClose }) {
   const exportNotes = () => {
     const sketch = sketchRef.current?.toDataURL?.() ?? drawing;
     const header = `# ملاحظات: ${courseTitle}\n\n`;
-    const blob = new Blob([header + markdown], { type: 'text/markdown;charset=utf-8' });
+    /*
+     * Highlights are part of the notes for a course, so they export with them.
+     * A learner who marked up a document and then exported "their notes" and
+     * got only the typed half would reasonably call that a bug.
+     */
+    const highlights =
+      studyDoc?.annotations?.length > 0
+        ? `\n\n## تظليلات من: ${studyDoc.name}\n\n${studyDoc.annotations
+            .map((a) => `> ${a.quote}${a.note ? `\n\n${a.note}` : ''}`)
+            .join('\n\n')}\n`
+        : '';
+    const blob = new Blob([header + markdown + highlights], {
+      type: 'text/markdown;charset=utf-8',
+    });
     downloadFile(safeFilename(`ملاحظات - ${courseTitle}`, 'md'), blob);
 
     /*
@@ -349,7 +381,7 @@ function NotePad({ courseId, courseTitle, onClose }) {
                 />
               )}
             </>
-          ) : (
+          ) : tab === 'sketch' ? (
             <SketchPad
               ref={sketchRef}
               value={drawing}
@@ -358,6 +390,8 @@ function NotePad({ courseId, courseTitle, onClose }) {
                 setDrawing(next);
               }}
             />
+          ) : (
+            <DocumentTab courseId={courseId} document={studyDoc} onChange={setStudyDoc} />
           )}
         </div>
 
@@ -402,7 +436,7 @@ function Tabs({ tab, onChange }) {
       role="tablist"
       aria-label="أقسام دفتر الملاحظات"
       onKeyDown={onKeyDown}
-      className="flex gap-1 border-b border-accent-subtle px-4 sm:px-5"
+      className="flex flex-wrap gap-1 border-b border-accent-subtle px-4 sm:px-5"
     >
       {TABS.map((item) => {
         const selected = item.id === tab;
@@ -500,7 +534,7 @@ function Toolbar({ onFormat, preview, onTogglePreview }) {
 function SaveStatus({ status }) {
   if (status.kind === 'error') {
     return (
-      <p className="flex items-center gap-1.5 text-[11px] text-red-600" role="alert">
+      <p className="flex items-center gap-1.5 text-[11px] text-danger" role="alert">
         <TriangleAlert className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         {status.reason === 'quota'
           ? 'تعذّر الحفظ: المساحة ممتلئة. احذفي الرسم أو صدّري الملاحظات.'

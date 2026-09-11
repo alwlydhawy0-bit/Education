@@ -107,6 +107,14 @@ export default {
           main: 'rgb(var(--color-text-main) / <alpha-value>)',
           muted: 'rgb(var(--color-text-muted) / <alpha-value>)',
         },
+
+        // Error state. `danger` is the text/icon colour and clears 4.5:1 on
+        // both grounds; `danger-border` is the hairline, which only has to
+        // clear the 3:1 non-text threshold and so stays light in both themes.
+        danger: {
+          DEFAULT: 'rgb(var(--color-danger) / <alpha-value>)',
+          border: 'rgb(var(--color-danger-border) / <alpha-value>)',
+        },
       },
 
       borderRadius: {

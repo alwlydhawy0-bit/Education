@@ -313,7 +313,7 @@ export default function OtpStep({
               'tabular-nums transition-colors duration-200 disabled:opacity-60',
               'sm:h-14 sm:text-xl',
               error
-                ? 'border-red-400 bg-surface'
+                ? 'border-danger-border bg-surface'
                 : digit
                   ? 'border-primary bg-primary-light'
                   : 'border-accent-subtle bg-surface focus:border-primary',
@@ -323,7 +323,7 @@ export default function OtpStep({
       </div>
 
       {error ? (
-        <p id="auth-otp-error" role="alert" className="mt-3 text-center text-xs text-red-600">
+        <p id="auth-otp-error" role="alert" className="mt-3 text-center text-xs text-danger">
           {error}
         </p>
       ) : null}

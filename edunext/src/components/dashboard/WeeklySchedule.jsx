@@ -102,12 +102,26 @@ export default function WeeklySchedule({ today = new Date().getDay() }) {
                 <span aria-hidden="true" className="w-full text-[10px] font-medium leading-none">
                   {day.short}
                 </span>
-                {/* A dot per session — a count nobody has to read. */}
+                {/*
+                  A dot per session — a count nobody has to read.
+
+                  The dots are the ONLY visual signal of how busy a day is (the
+                  `sr-only` line below serves assistive tech, not a sighted
+                  low-vision reader), so they are held to the 3:1 non-text
+                  contrast floor. At `/40` they measured 2.01:1 light and 2.08:1
+                  dark against the day cell; `/70` gives 3.68:1 and 3.63:1 and
+                  still reads as muted next to a full-opacity dot.
+
+                  Today's cell is filled with `primary`, so its dots have to be
+                  `on-primary` — the token that flips to a dark violet when the
+                  dark theme lightens the accent. A literal white dot, which is
+                  what this was, disappears on that cell in dark mode.
+                */}
                 <span className="flex h-1.5 items-center gap-0.5" aria-hidden="true">
                   {Array.from({ length: count }).map((_, index) => (
                     <span
                       key={index}
-                      className={`h-1.5 w-1.5 rounded-full ${isToday ? 'bg-white/70' : 'bg-primary/40'}`}
+                      className={`h-1.5 w-1.5 rounded-full ${isToday ? 'bg-on-primary/70' : 'bg-primary/70'}`}
                     />
                   ))}
                 </span>

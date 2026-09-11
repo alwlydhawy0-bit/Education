@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BookMarked, Info, RotateCcw, Send, Sparkles, X } from 'lucide-react';
+import { BookMarked, FileText, Info, RotateCcw, Send, Sparkles, X } from 'lucide-react';
 import { renderMarkdown } from '../tools/markdown.jsx';
+import { loadDocument } from '../tools/document-store.js';
+import QuizCard from './QuizCard.jsx';
 import { PRESETS, askAssistant } from './assistant.js';
+import { generateQuiz, predictedQuestions, summarise } from './quiz.js';
 
 /**
  * The course assistant: a floating trigger and a slide-over conversation.
@@ -70,7 +73,58 @@ export default function AIAssistantWidget({ course }) {
   );
 }
 
+/**
+ * The document actions, available only when a document exists.
+ *
+ * `run` returns a message payload rather than text, because "generate a quiz"
+ * produces STRUCTURED data — a list of questions with answers and explanations
+ * — and flattening that to Markdown just to re-parse it into cards would be a
+ * lossy round trip through a format that was never meant to carry it.
+ */
+const DOC_ACTIONS = [
+  {
+    id: 'quiz',
+    label: 'إنشاء اختبار تجريبي من الملف',
+    run: (studyDoc) => {
+      const questions = generateQuiz(studyDoc);
+      return questions.length > 0
+        ? { kind: 'quiz', questions, text: `اختبار من **${studyDoc.name}**:` }
+        : {
+            kind: 'text',
+            text: 'لم أتمكّن من توليد أسئلة من هذا المستند — النص فيه قصير أو غير كافٍ.',
+          };
+    },
+  },
+  {
+    id: 'summary',
+    label: 'تلخيص النقاط المهمة للاختبار',
+    run: (studyDoc) => ({
+      kind: 'text',
+      text: summarise(studyDoc) ?? 'لا يوجد نص كافٍ في المستند لتلخيصه.',
+    }),
+  },
+  {
+    id: 'predict',
+    label: 'استخراج الأسئلة المتوقعة',
+    run: (studyDoc) => ({
+      kind: 'text',
+      text: predictedQuestions(studyDoc) ?? 'لا يوجد نص كافٍ في المستند.',
+    }),
+  },
+];
+
 function AssistantPanel({ course, onClose }) {
+  /*
+   * THE DOCUMENT IS READ FROM STORAGE, NOT PASSED DOWN.
+   *
+   * The notebook and this panel are both modals on the same page and can never
+   * be open at once, so there is no moment where a prop would be fresher than
+   * what is on disk — and the notebook writes on every change. Reading it here
+   * keeps the two features independent: neither imports the other's component,
+   * and the assistant works the same whether the document was uploaded a second
+   * ago or last week.
+   */
+  const [studyDoc] = useState(() => loadDocument(course.id));
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
   const [thinking, setThinking] = useState(false);
@@ -129,6 +183,32 @@ function AssistantPanel({ course, onClose }) {
     const distanceFromBottom = log.scrollHeight - log.scrollTop - log.clientHeight;
     if (distanceFromBottom < 120) log.scrollTop = log.scrollHeight;
   }, [messages, thinking]);
+
+  const runDocAction = useCallback(
+    (action) => {
+      if (!studyDoc || thinking) return;
+      setMessages((current) => [
+        ...current,
+        { id: `u-${Date.now()}`, role: 'user', text: action.label },
+      ]);
+      setThinking(true);
+      /*
+       * The same deliberate pause the chat answers use. Returning instantly
+       * would be a lie of a different kind — it would teach the learner that
+       * this work is free, and the real endpoint will not be.
+       */
+      const timer = setTimeout(() => {
+        const payload = action.run(studyDoc);
+        setMessages((current) => [
+          ...current,
+          { id: `a-${Date.now()}`, role: 'assistant', citations: [], ...payload },
+        ]);
+        setThinking(false);
+      }, 900);
+      abortRef.current = { abort: () => clearTimeout(timer) };
+    },
+    [studyDoc, thinking],
+  );
 
   const ask = useCallback(
     async (question) => {
@@ -201,6 +281,14 @@ function AssistantPanel({ course, onClose }) {
             <p className="mt-0.5 truncate text-xs text-text-muted" title={course.title}>
               يجيب من محتوى: {course.title}
             </p>
+            {studyDoc ? (
+              <p className="mt-1 flex items-center gap-1 text-[11px] text-primary">
+                <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />
+                <span className="truncate" title={studyDoc.name}>
+                  مرفق: {studyDoc.name}
+                </span>
+              </p>
+            ) : null}
           </div>
           <button
             type="button"
@@ -266,6 +354,8 @@ function AssistantPanel({ course, onClose }) {
           draft={draft}
           onDraft={setDraft}
           onSend={ask}
+          onDocAction={runDocAction}
+          hasDocument={studyDoc !== null}
           thinking={thinking}
           showPresets={messages.length === 0}
         />
@@ -315,11 +405,24 @@ function Message({ message }) {
         className={[
           'rounded-2xl rounded-ss-md border px-4 py-3 text-sm text-text-main',
           message.failed
-            ? 'border-red-400/60 bg-surface-alt/50'
+            ? 'border-danger-border/60 bg-surface-alt/50'
             : 'border-accent-subtle bg-surface-alt/50',
         ].join(' ')}
       >
         {renderMarkdown(message.text)}
+
+        {message.kind === 'quiz' ? (
+          <ol className="mt-3 space-y-2.5">
+            {message.questions.map((question, index) => (
+              <QuizCard
+                key={question.id}
+                question={question}
+                index={index}
+                total={message.questions.length}
+              />
+            ))}
+          </ol>
+        ) : null}
 
         {message.citations?.length > 0 ? (
           <ul className="mt-3 flex flex-wrap gap-1.5 border-t border-accent-subtle pt-3">
@@ -379,7 +482,16 @@ function TypingIndicator() {
   );
 }
 
-function Composer({ draft, onDraft, onSend, thinking, showPresets, ref }) {
+function Composer({
+  draft,
+  onDraft,
+  onSend,
+  onDocAction,
+  hasDocument,
+  thinking,
+  showPresets,
+  ref,
+}) {
   const onKeyDown = (event) => {
     /*
      * Enter sends; Shift+Enter breaks the line. The Arabic keyboard has no
@@ -394,6 +506,30 @@ function Composer({ draft, onDraft, onSend, thinking, showPresets, ref }) {
 
   return (
     <div className="border-t border-accent-subtle p-4 sm:p-5">
+      {/*
+        DOCUMENT ACTIONS APPEAR ONLY WHEN THERE IS A DOCUMENT, and stay visible
+        after the first message — unlike the generic presets, which are an
+        opening prompt. These are tools a learner returns to mid-session: ask a
+        question, then generate a quiz, then ask another.
+      */}
+      {hasDocument ? (
+        <ul className="mb-3 flex flex-wrap gap-1.5">
+          {DOC_ACTIONS.map((action) => (
+            <li key={action.id}>
+              <button
+                type="button"
+                onClick={() => onDocAction(action)}
+                disabled={thinking}
+                className="inline-flex items-center gap-1.5 rounded-full bg-primary-light px-3 py-1.5 text-[11px] font-medium text-primary transition-colors duration-200 hover:bg-primary hover:text-on-primary disabled:pointer-events-none disabled:opacity-40"
+              >
+                <FileText className="h-3 w-3" aria-hidden="true" />
+                <span>{action.label}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
       {showPresets ? (
         <ul className="mb-3 flex flex-wrap gap-1.5">
           {PRESETS.map((preset) => (

@@ -116,16 +116,13 @@ export default function EmailStep({ email, onEmailChange, onSubmit, error, onErr
               'h-12 w-full rounded-full border bg-surface ps-12 pe-4 text-sm text-text-main',
               'placeholder:text-text-muted/70 transition-colors duration-200',
               'disabled:opacity-60',
-              // The palette has no danger token yet, so this is Tailwind's
-              // default red. It should become `border-danger` the moment the
-              // token task lands — flagged rather than quietly invented here.
-              error ? 'border-red-400' : 'border-accent-subtle focus:border-primary',
+              error ? 'border-danger-border' : 'border-accent-subtle focus:border-primary',
             ].join(' ')}
           />
         </div>
 
         {error ? (
-          <p id="auth-email-error" role="alert" className="mt-2 text-xs text-red-600">
+          <p id="auth-email-error" role="alert" className="mt-2 text-xs text-danger">
             {error}
           </p>
         ) : null}

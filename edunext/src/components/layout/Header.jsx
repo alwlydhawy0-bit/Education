@@ -45,14 +45,29 @@ export default function Header() {
 
       <MobileMenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} />
 
-      {/* الهوية: حساب أو زائرة */}
-      {isAuthenticated ? <MemberIdentity user={user} /> : <GuestIdentity />}
+      {/*
+        الهوية: حساب أو زائرة
+
+        `flex-1 min-w-0` IS WHAT KEEPS THE ACTIONS ON THE TOP ROW.
+
+        The header wraps, and this block used to size to its content: on a
+        390px phone the greeting alone was wider than the space left after the
+        menu button, so the actions had nowhere to go and fell to a second row
+        — which is how "تسجيل الدخول" ended up on a line of its own, below the
+        name it belongs beside.
+
+        Allowed to shrink, the greeting truncates instead (both lines already
+        carry `truncate`), and the row stays a row.
+      */}
+      <div className="flex min-w-0 flex-1 items-center">
+        {isAuthenticated ? <MemberIdentity user={user} /> : <GuestIdentity />}
+      </div>
 
       {/* البحث */}
       <SearchField />
 
       {/* الإجراءات */}
-      <div className="flex items-center gap-1 sm:gap-2">
+      <div className="flex shrink-0 items-center gap-1 sm:gap-2">
         {/*
           THE BELL AND THE SETTINGS DOOR ARE MEMBERS-ONLY, and not because a
           guest must be kept out of them — a guest simply has no notifications
@@ -156,12 +171,26 @@ function SignInButton() {
   const navigate = useNavigate();
   const location = useLocation();
   return (
+    /*
+     * ICON-ONLY ON A PHONE, LABELLED FROM `sm` UP.
+     *
+     * The full pill is ~130px, which is most of what a 390px header has left
+     * once the menu button, the avatar and the theme toggle have taken theirs.
+     * Shrinking it to a 40px circle is what lets it sit on the top row beside
+     * the greeting instead of wrapping underneath it.
+     *
+     * `aria-label` is present in BOTH states, so the accessible name is
+     * "تسجيل الدخول" whether or not the text is visible — an icon-only button
+     * with no name is a button a screen reader calls "button".
+     */
     <button
       type="button"
       onClick={() => navigate('/login', { state: { from: location } })}
-      className="inline-flex h-10 shrink-0 items-center gap-2 rounded-full bg-primary px-4 text-sm font-medium text-on-primary shadow-soft transition-colors duration-200 hover:bg-primary-hover"
+      aria-label="تسجيل الدخول"
+      title="تسجيل الدخول"
+      className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-on-primary shadow-soft transition-colors duration-200 hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 sm:w-auto sm:gap-2 sm:px-4"
     >
-      <span>تسجيل الدخول</span>
+      <span className="hidden text-sm font-medium sm:inline">تسجيل الدخول</span>
       <LogIn className="h-4 w-4" aria-hidden="true" />
     </button>
   );

@@ -78,13 +78,17 @@
      * ERROR RED IS A TOKEN BECAUSE IT HAS TO FLIP WITH THE THEME.
      *
      * Tailwind's `red-600` (#DC2626) is the obvious choice and it is correct
-     * exactly once: on a light page it clears AA at 4.83:1. On the dark canvas
-     * it measures 3.53:1 — under the 4.5:1 floor, which means every validation
-     * message in the app was failing for dark-theme readers. A fixed red cannot
-     * satisfy both grounds, so the red became a variable like every other
-     * colour here, and the dark theme lightens it to #F87171 (6.07:1).
+     * exactly once: on a WHITE light page it clears AA at 4.83:1. On the dark
+     * canvas it measures 3.53:1, and on the warm tinted surfaces this palette
+     * is built from it measures 4.25:1 — both under the 4.5:1 floor, which
+     * meant validation messages were failing for dark-theme readers and on
+     * every tinted chip. A fixed red cannot satisfy all three grounds.
+     *
+     * So the red is a variable like every other colour here: `red-700`
+     * (#B91C1C) by day, which holds 5.70:1 on `surface-alt` and 6.47:1 on
+     * white, and #F87171 by night (6.07:1 on the dark canvas).
      */
-    --color-danger: 220 38 38;
+    --color-danger: 185 28 28;
     --color-danger-border: 248 113 113;
 
     --shadow-soft: 0 4px 20px -2px rgb(30 27 75 / 0.04);

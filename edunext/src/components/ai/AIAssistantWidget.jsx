@@ -1,8 +1,23 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { BookMarked, FileText, Info, RotateCcw, Send, Sparkles, X } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import {
+  ArrowUp,
+  BookMarked,
+  FileText,
+  Image as ImageIcon,
+  Info,
+  Loader2,
+  Mic,
+  Plus,
+  RotateCcw,
+  Sparkles,
+  X,
+} from 'lucide-react';
 import { renderMarkdown } from '../tools/markdown.jsx';
-import { loadDocument } from '../tools/document-store.js';
+import { formatSize, loadDocument } from '../tools/document-store.js';
+import { classify, extractText } from '../tools/extract-text.js';
 import QuizCard from './QuizCard.jsx';
+import { useVoiceInput } from './useVoiceInput.js';
 import { PRESETS, askAssistant } from './assistant.js';
 import { generateQuiz, predictedQuestions, summarise } from './quiz.js';
 
@@ -58,17 +73,40 @@ export default function AIAssistantWidget({ course }) {
         course as its grounding context, so switching courses must start a new
         conversation rather than carry the previous one's answers across — the
         same remount-over-effect reasoning as the notebook.
+
+        ---------------------------------------------------------------------
+        THE PANEL IS PORTALLED, AND THAT IS A BUG FIX, NOT A FLOURISH
+        ---------------------------------------------------------------------
+
+        This widget is mounted inside the course page's floating tool stack —
+        a `fixed … z-40` column. A positioned ancestor with a z-index CREATES A
+        STACKING CONTEXT, so the panel's own `z-50` only ever ranked it inside
+        that column. Against the page's mobile bottom navigation, also `z-40`
+        and later in the document, the column tied and lost.
+
+        The visible result was that on a phone the entire composer sat under
+        the navigation bar: measured with `elementFromPoint`, the send button's
+        centre belonged to the "الملف الشخصي" link, so the assistant could be
+        opened and typed into but never sent from. It had been that way since
+        the panel shipped.
+
+        Rendering into `document.body` takes the panel out of that context
+        entirely, which is what a modal needs anyway — it also stops the
+        section's `transform` from redefining what `fixed` is relative to.
       */}
-      {open ? (
-        <AssistantPanel
-          key={course.id}
-          course={course}
-          onClose={() => {
-            setOpen(false);
-            triggerRef.current?.focus();
-          }}
-        />
-      ) : null}
+      {open
+        ? createPortal(
+            <AssistantPanel
+              key={course.id}
+              course={course}
+              onClose={() => {
+                setOpen(false);
+                triggerRef.current?.focus();
+              }}
+            />,
+            document.body,
+          )
+        : null}
     </>
   );
 }
@@ -127,6 +165,7 @@ function AssistantPanel({ course, onClose }) {
   const [studyDoc] = useState(() => loadDocument(course.id));
   const [messages, setMessages] = useState([]);
   const [draft, setDraft] = useState('');
+  const [attachments, setAttachments] = useState([]);
   const [thinking, setThinking] = useState(false);
 
   const panelRef = useRef(null);
@@ -210,23 +249,101 @@ function AssistantPanel({ course, onClose }) {
     [studyDoc, thinking],
   );
 
+  /*
+   * A CHAT ATTACHMENT IS READ ON ARRIVAL, NOT ON SEND.
+   *
+   * Extraction of a large PDF takes long enough to notice, and doing it when
+   * the learner presses send would put that wait between them and their
+   * question with nothing to show for it. Reading on attach spends the same
+   * time while they are still typing, and the chip reports the result — so by
+   * the time send is pressed the payload is already known-good, or visibly not.
+   *
+   * The extracted text is held in component state and never written to
+   * storage: unlike the notebook document, a file dropped into one question is
+   * not study material the learner asked us to keep.
+   */
+  const attachFile = useCallback(async (file) => {
+    const id = `f-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const kind = classify(file);
+
+    if (kind === null) {
+      setAttachments((current) => [
+        ...current,
+        {
+          id,
+          name: file.name,
+          kind: 'txt',
+          size: file.size,
+          text: '',
+          status: 'error',
+          error: 'نوع غير مدعوم',
+        },
+      ]);
+      return;
+    }
+
+    setAttachments((current) => [
+      ...current,
+      { id, name: file.name, kind, size: file.size, text: '', status: 'reading' },
+    ]);
+
+    try {
+      const { text } = await extractText(file);
+      setAttachments((current) =>
+        current.map((item) => (item.id === id ? { ...item, text, status: 'ready' } : item)),
+      );
+    } catch (cause) {
+      // The cause is logged rather than swallowed: the one time this failed in
+      // development, the message named the real bug in seconds.
+      console.error('[edunext] chat attachment extraction failed', cause);
+      setAttachments((current) =>
+        current.map((item) =>
+          item.id === id
+            ? {
+                ...item,
+                status: 'error',
+                error: cause?.message === 'too-large' ? 'أكبر من الحد المسموح' : 'تعذّرت القراءة',
+              }
+            : item,
+        ),
+      );
+    }
+  }, []);
+
+  const removeAttachment = useCallback((id) => {
+    setAttachments((current) => current.filter((item) => item.id !== id));
+  }, []);
+
   const ask = useCallback(
-    async (question) => {
-      const trimmed = question.trim();
-      if (trimmed === '' || thinking) return;
+    async ({ text, attachments: sent = [] }) => {
+      const trimmed = text.trim();
+      // A question can be attachments alone — "read this" is a question.
+      const usable = sent.filter((item) => item.status === 'ready');
+      if ((trimmed === '' && usable.length === 0) || thinking) return;
 
       const controller = new AbortController();
       abortRef.current = controller;
 
       setMessages((current) => [
         ...current,
-        { id: `u-${Date.now()}`, role: 'user', text: trimmed },
+        {
+          id: `u-${Date.now()}`,
+          role: 'user',
+          text: trimmed,
+          attachments: usable.map(({ id, name, kind, size }) => ({ id, name, kind, size })),
+        },
       ]);
       setDraft('');
+      setAttachments([]);
       setThinking(true);
 
       try {
-        const answer = await askAssistant({ course, question: trimmed, signal: controller.signal });
+        const answer = await askAssistant({
+          course,
+          question: trimmed === '' ? 'اقرئي المرفق' : trimmed,
+          attachments: usable,
+          signal: controller.signal,
+        });
         setMessages((current) => [
           ...current,
           { id: `a-${Date.now()}`, role: 'assistant', ...answer },
@@ -353,6 +470,9 @@ function AssistantPanel({ course, onClose }) {
           ref={inputRef}
           draft={draft}
           onDraft={setDraft}
+          attachments={attachments}
+          onAttach={attachFile}
+          onRemoveAttachment={removeAttachment}
           onSend={ask}
           onDocAction={runDocAction}
           hasDocument={studyDoc !== null}
@@ -392,6 +512,29 @@ function Message({ message }) {
       <div className="ms-auto max-w-[85%]">
         <span className="sr-only">أنتِ:</span>
         <div className="rounded-2xl rounded-se-md bg-primary px-4 py-2.5 text-sm leading-relaxed text-on-primary">
+          {/*
+            THE SENT ATTACHMENTS STAY IN THE MESSAGE.
+            The composer's chips are cleared on send, so without this the log
+            would show a bare question and the learner would have no record of
+            which file they asked about three questions ago.
+          */}
+          {message.attachments?.length ? (
+            <ul className="mb-2 flex flex-wrap gap-1.5">
+              {message.attachments.map((file) => (
+                <li
+                  key={file.id}
+                  className="flex max-w-full items-center gap-1.5 rounded-lg bg-on-primary/15 px-2 py-1"
+                >
+                  {file.kind === 'image' ? (
+                    <ImageIcon className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <FileText className="h-3 w-3 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="truncate text-[11px]">{file.name}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
           {message.text}
         </div>
       </div>
@@ -482,9 +625,40 @@ function TypingIndicator() {
   );
 }
 
+/** What the chat composer will take. Mirrors what `classify` can actually read. */
+const CHAT_ACCEPT =
+  '.pdf,.txt,.md,.png,.jpg,.jpeg,.webp,.gif,application/pdf,text/plain,image/png,image/jpeg';
+
+/** Enough for a question's supporting material; more is a notebook upload. */
+const MAX_CHAT_ATTACHMENTS = 3;
+
+/**
+ * The composer: a pill holding attachments, the question, and the controls.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT EACH CONTROL IS ALLOWED TO CLAIM
+ * ---------------------------------------------------------------------------
+ *
+ * Three of these controls can lie, and each is built so it cannot.
+ *
+ * ATTACH reads the file immediately and shows the extracted size on the chip.
+ * A chip that appeared instantly and said nothing would imply the file was
+ * understood; the reading state is visible, and a file that yields no text
+ * says so on the chip rather than travelling as an empty payload.
+ *
+ * MIC renders disabled, with the reason in its tooltip, where the browser has
+ * no `SpeechRecognition`. Firefox has none at all. A mic that looks live and
+ * does nothing teaches the learner to distrust their own microphone.
+ *
+ * SEND is disabled while an attachment is still being read. Sending then would
+ * drop that file silently from a payload the learner watched themselves build.
+ */
 function Composer({
   draft,
   onDraft,
+  attachments,
+  onAttach,
+  onRemoveAttachment,
   onSend,
   onDocAction,
   hasDocument,
@@ -492,6 +666,76 @@ function Composer({
   showPresets,
   ref,
 }) {
+  const fileRef = useRef(null);
+  const textareaRef = useRef(null);
+  const [notice, setNotice] = useState(null);
+
+  /*
+   * The textarea carries two refs: the panel's, so closing a question restores
+   * focus here, and a local one for auto-sizing. A single forwarded ref cannot
+   * serve both without assuming the parent passed an object rather than a
+   * callback.
+   */
+  const attachTextarea = useCallback(
+    (node) => {
+      textareaRef.current = node;
+      if (typeof ref === 'function') ref(node);
+      else if (ref) ref.current = node;
+    },
+    [ref],
+  );
+
+  /*
+   * GROW WITH THE TEXT, UP TO A CEILING.
+   *
+   * Height is reset to `auto` before reading `scrollHeight`, because
+   * `scrollHeight` on an element with an explicit height reports that height
+   * and the box then only ever grows. The ceiling keeps the log visible: a
+   * composer that can eat the conversation is not a composer.
+   */
+  useEffect(() => {
+    const node = textareaRef.current;
+    if (!node) return;
+    node.style.height = 'auto';
+    node.style.height = `${Math.min(node.scrollHeight, 132)}px`;
+  }, [draft]);
+
+  const voice = useVoiceInput({
+    lang: 'ar',
+    onTranscript: useCallback(
+      (text, final) => {
+        // Only a FINAL segment is committed. Appending interim results would
+        // write, rewrite and duplicate the same words as the engine revises.
+        if (!final) return;
+        onDraft((current) =>
+          (current === '' ? text : `${current} ${text}`).slice(0, MAX_QUESTION_LENGTH),
+        );
+      },
+      [onDraft],
+    ),
+  });
+
+  const reading = attachments.some((item) => item.status === 'reading');
+  const sendable = !thinking && !reading && (draft.trim() !== '' || attachments.length > 0);
+
+  const pickFiles = async (event) => {
+    const chosen = [...event.target.files];
+    // Reset immediately: without this, re-picking the SAME file fires no change
+    // event and the attach silently does nothing.
+    event.target.value = '';
+    if (chosen.length === 0) return;
+
+    const room = MAX_CHAT_ATTACHMENTS - attachments.length;
+    if (room <= 0) {
+      setNotice(`الحد ${MAX_CHAT_ATTACHMENTS} مرفقات لكل سؤال.`);
+      return;
+    }
+    setNotice(
+      chosen.length > room ? `أُضيف أول ${room} فقط — الحد ${MAX_CHAT_ATTACHMENTS}.` : null,
+    );
+    for (const file of chosen.slice(0, room)) await onAttach(file);
+  };
+
   const onKeyDown = (event) => {
     /*
      * Enter sends; Shift+Enter breaks the line. The Arabic keyboard has no
@@ -500,12 +744,12 @@ function Composer({
      */
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      onSend(draft);
+      if (sendable) onSend({ text: draft, attachments });
     }
   };
 
   return (
-    <div className="border-t border-accent-subtle p-4 sm:p-5">
+    <div className="border-t border-accent-subtle p-3 sm:p-4">
       {/*
         DOCUMENT ACTIONS APPEAR ONLY WHEN THERE IS A DOCUMENT, and stay visible
         after the first message — unlike the generic presets, which are an
@@ -513,7 +757,7 @@ function Composer({
         question, then generate a quiz, then ask another.
       */}
       {hasDocument ? (
-        <ul className="mb-3 flex flex-wrap gap-1.5">
+        <ul className="mb-2.5 flex flex-wrap gap-1.5">
           {DOC_ACTIONS.map((action) => (
             <li key={action.id}>
               <button
@@ -531,12 +775,12 @@ function Composer({
       ) : null}
 
       {showPresets ? (
-        <ul className="mb-3 flex flex-wrap gap-1.5">
+        <ul className="mb-2.5 flex flex-wrap gap-1.5">
           {PRESETS.map((preset) => (
             <li key={preset.id}>
               <button
                 type="button"
-                onClick={() => onSend(preset.label)}
+                onClick={() => onSend({ text: preset.label, attachments: [] })}
                 disabled={thinking}
                 className="rounded-full border border-accent-subtle px-3 py-1.5 text-[11px] font-medium text-text-muted transition-colors duration-200 hover:border-primary hover:bg-primary-light hover:text-primary disabled:pointer-events-none disabled:opacity-40"
               >
@@ -547,36 +791,186 @@ function Composer({
         </ul>
       ) : null}
 
-      <div className="flex items-end gap-2">
-        <textarea
-          ref={ref}
-          rows={1}
-          value={draft}
-          maxLength={MAX_QUESTION_LENGTH}
-          onChange={(event) => onDraft(event.target.value)}
-          onKeyDown={onKeyDown}
-          disabled={thinking}
-          aria-label="اكتبي سؤالك"
-          placeholder={thinking ? 'جارٍ الإجابة…' : 'اكتبي سؤالك هنا…'}
-          className="max-h-28 min-h-[2.75rem] flex-1 resize-none rounded-2xl border border-accent-subtle bg-canvas px-4 py-3 text-sm leading-relaxed text-text-main placeholder:text-text-muted/70 focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 disabled:opacity-60"
-        />
-        <button
-          type="button"
-          onClick={() => onSend(draft)}
-          disabled={thinking || draft.trim() === ''}
-          aria-label="إرسال السؤال"
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-primary text-on-primary transition-colors duration-200 hover:bg-primary-hover disabled:pointer-events-none disabled:opacity-40"
-        >
-          {/*
-            `-scale-x-100` mirrors the send arrow. This is the rare case where a
-            physical flip IS correct: the glyph depicts motion, and in RTL the
-            direction of "away from me" reverses. Contrast the ArrowLeft used
-            elsewhere, which already points the right way and must NOT be
-            flipped.
-          */}
-          <Send className="h-4 w-4 -scale-x-100" aria-hidden="true" />
-        </button>
+      {voice.error ? (
+        <p role="alert" className="mb-2 px-1 text-[11px] leading-relaxed text-danger">
+          {voice.error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p role="status" className="mb-2 px-1 text-[11px] leading-relaxed text-text-muted">
+          {notice}
+        </p>
+      ) : null}
+
+      {/*
+        THE PILL. `rounded-3xl` rather than `rounded-full`: a full pill is only
+        correct while the box is one line tall, and turns into a lozenge with
+        enormous side gutters the moment it grows or carries a chip row.
+      */}
+      <div className="rounded-3xl border border-accent-subtle bg-canvas p-1.5 transition-colors duration-200 focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20">
+        {attachments.length > 0 ? (
+          <ul aria-label="المرفقات" className="flex flex-wrap gap-1.5 px-1.5 pb-1.5 pt-1">
+            {attachments.map((item) => (
+              <AttachmentChip
+                key={item.id}
+                attachment={item}
+                onRemove={() => onRemoveAttachment(item.id)}
+              />
+            ))}
+          </ul>
+        ) : null}
+
+        <div className="flex items-end gap-1">
+          <input
+            ref={fileRef}
+            type="file"
+            multiple
+            accept={CHAT_ACCEPT}
+            onChange={pickFiles}
+            className="hidden"
+            tabIndex={-1}
+            aria-hidden="true"
+          />
+          <button
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            disabled={thinking || attachments.length >= MAX_CHAT_ATTACHMENTS}
+            aria-label="إرفاق ملف أو صورة"
+            title="إرفاق ملف أو صورة"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors duration-200 hover:bg-surface-alt hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-40"
+          >
+            <Plus className="h-[18px] w-[18px]" aria-hidden="true" />
+          </button>
+
+          <textarea
+            ref={attachTextarea}
+            rows={1}
+            value={draft}
+            maxLength={MAX_QUESTION_LENGTH}
+            onChange={(event) => onDraft(event.target.value)}
+            onKeyDown={onKeyDown}
+            disabled={thinking}
+            aria-label="اكتبي سؤالك"
+            placeholder={thinking ? 'جارٍ الإجابة…' : 'اسأل المساعد الذكي أو ارفع ملفًا...'}
+            /*
+              `bg-transparent` and no border: the PILL owns the focus ring, so
+              the textarea drawing its own would nest two rounded outlines.
+            */
+            className="max-h-[132px] min-h-[2.25rem] flex-1 resize-none self-center border-0 bg-transparent px-1 py-2 text-sm leading-relaxed text-text-main placeholder:text-text-muted/70 focus:outline-none focus:ring-0 disabled:opacity-60"
+          />
+
+          <button
+            type="button"
+            onClick={voice.toggle}
+            disabled={thinking || !voice.supported}
+            aria-label={voice.listening ? 'إيقاف الإدخال الصوتي' : 'إدخال صوتي'}
+            aria-pressed={voice.listening}
+            title={
+              voice.supported
+                ? voice.listening
+                  ? 'إيقاف الإدخال الصوتي'
+                  : 'إدخال صوتي'
+                : 'الإدخال الصوتي غير مدعوم في هذا المتصفح'
+            }
+            className={[
+              'flex h-9 w-9 shrink-0 items-center justify-center rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-40',
+              voice.listening
+                ? 'bg-danger text-on-primary'
+                : 'text-text-muted hover:bg-surface-alt hover:text-text-main',
+            ].join(' ')}
+          >
+            <Mic className="h-[18px] w-[18px]" aria-hidden="true" />
+            {/*
+              A pulsing dot is decoration a screen reader cannot see, so the
+              listening state is also spoken.
+            */}
+            {voice.listening ? <span className="sr-only">يستمع الآن</span> : null}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onSend({ text: draft, attachments })}
+            disabled={!sendable}
+            aria-label={reading ? 'جارٍ قراءة المرفق' : 'إرسال السؤال'}
+            title={reading ? 'جارٍ قراءة المرفق…' : 'إرسال'}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-on-primary transition-colors duration-200 hover:bg-primary-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 disabled:pointer-events-none disabled:opacity-40"
+          >
+            {thinking || reading ? (
+              <Loader2 className="h-[18px] w-[18px] motion-safe:animate-spin" aria-hidden="true" />
+            ) : (
+              /*
+                ArrowUp needs NO mirroring: it points along the block axis,
+                which RTL does not reverse. That is exactly why it survives the
+                switch better than the horizontal send glyph it replaces.
+              */
+              <ArrowUp className="h-[18px] w-[18px]" aria-hidden="true" />
+            )}
+          </button>
+        </div>
       </div>
+
+      <p className="mt-1.5 px-2 text-[10px] text-text-muted">
+        Enter للإرسال · Shift+Enter لسطر جديد
+      </p>
     </div>
+  );
+}
+
+/** One attached file, with its reading state legible rather than implied. */
+function AttachmentChip({ attachment, onRemove }) {
+  const Icon = attachment.kind === 'image' ? ImageIcon : FileText;
+  const detail =
+    attachment.status === 'reading'
+      ? 'جارٍ القراءة…'
+      : attachment.status === 'error'
+        ? attachment.error
+        : attachment.kind === 'image'
+          ? formatSize(attachment.size)
+          : attachment.text.trim() === ''
+            ? 'لا نص قابل للقراءة'
+            : `${attachment.text.length.toLocaleString('en-US')} حرفًا`;
+
+  return (
+    <li
+      className={[
+        'flex max-w-[14rem] items-center gap-1.5 rounded-xl border px-2 py-1',
+        attachment.status === 'error'
+          ? 'border-danger-border bg-surface-alt'
+          : 'border-accent-subtle bg-surface-alt/60',
+      ].join(' ')}
+    >
+      {attachment.status === 'reading' ? (
+        <Loader2
+          className="h-3 w-3 shrink-0 text-text-muted motion-safe:animate-spin"
+          aria-hidden="true"
+        />
+      ) : (
+        <Icon
+          className={`h-3 w-3 shrink-0 ${attachment.status === 'error' ? 'text-danger' : 'text-primary'}`}
+          aria-hidden="true"
+        />
+      )}
+      <span className="min-w-0 flex-1">
+        <span
+          className="block truncate text-[11px] font-medium text-text-main"
+          title={attachment.name}
+        >
+          {attachment.name}
+        </span>
+        <span
+          className={`block truncate text-[10px] ${attachment.status === 'error' ? 'text-danger' : 'text-text-muted'}`}
+        >
+          {detail}
+        </span>
+      </span>
+      <button
+        type="button"
+        onClick={onRemove}
+        aria-label={`إزالة ${attachment.name}`}
+        className="shrink-0 rounded-full p-0.5 text-text-muted transition-colors duration-200 hover:bg-surface-alt hover:text-text-main focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <X className="h-3 w-3" aria-hidden="true" />
+      </button>
+    </li>
   );
 }

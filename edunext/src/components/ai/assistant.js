@@ -129,22 +129,63 @@ print(f"تعذّر تحويل {len(unparsed)} صفًا")
 };
 
 /**
+ * Describe the files that arrived with the question.
+ *
+ * ---------------------------------------------------------------------------
+ * AN ATTACHMENT THE ANSWER NEVER MENTIONS IS A LIE THE UI TELLS
+ * ---------------------------------------------------------------------------
+ *
+ * The composer lets a learner attach a file to a question, and the obvious
+ * cheap version renders a chip, drops the bytes, and answers as if nothing had
+ * been sent. The learner cannot tell the difference — the chip is right there
+ * in their message — so they believe the answer took their file into account.
+ *
+ * So the reply quotes the opening of the text that was actually extracted.
+ * That proves the file was read, and where nothing could be read it says so
+ * plainly rather than staying silent: an image has no text layer, and this
+ * assistant does not look at pixels.
+ */
+function attachmentNote(attachments) {
+  if (!attachments || attachments.length === 0) return '';
+
+  const lines = attachments.map((file) => {
+    if (file.kind === 'image') {
+      return `- **${file.name}** — صورة، ولا يُستخرج منها نص.`;
+    }
+    if (!file.text || file.text.trim() === '') {
+      return `- **${file.name}** — لا يحتوي على نص قابل للقراءة.`;
+    }
+    const opening = file.text.trim().replace(/\s+/g, ' ').slice(0, 140);
+    const count = file.text.length.toLocaleString('en-US');
+    return `- **${file.name}** — قرأتُ منه ${count} حرفًا، يبدأ بـ: «${opening}…»`;
+  });
+
+  return `\n\n**المرفقات مع سؤالك:**\n\n${lines.join('\n')}\n\n> يقرأ هذا المساعد النصّ المستخرج فقط ولا يحلّل الصور.`;
+}
+
+/**
  * Ask the assistant.
  *
  * @param {object} params
  * @param {object} params.course   The course being read — the grounding context.
  * @param {string} params.question The learner's question.
+ * @param {Array}  [params.attachments] Files sent with the question, already
+ *   extracted: `{ name, kind, text }`. Reflected in the answer so the learner
+ *   can see what was actually read.
  * @param {AbortSignal} [params.signal] Cancels a pending answer.
  * @returns {Promise<{ text: string, citations: Array }>}
  */
-export function askAssistant({ course, question, signal }) {
+export function askAssistant({ course, question, attachments, signal }) {
   return new Promise((resolve, reject) => {
     const preset = PRESETS.find((item) => item.label === question)?.id;
     const build = ANSWERS[preset] ?? ANSWERS.fallback;
 
     const timer = setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);
-      resolve({ text: build(course, question), citations: citationsFor(course, question) });
+      resolve({
+        text: build(course, question) + attachmentNote(attachments),
+        citations: citationsFor(course, question),
+      });
     }, THINK_MS);
 
     /*

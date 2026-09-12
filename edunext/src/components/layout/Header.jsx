@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Bell, LogIn, Moon, Search, Settings, Sun } from 'lucide-react';
+import { Bell, LogIn, Menu, Moon, Search, Settings, Sun } from 'lucide-react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../auth/useAuth.js';
 import { academicSummary } from '../../data/academic.js';
+import MobileMenuDrawer from './MobileMenuDrawer.jsx';
 
 /**
  * The top bar: who you are, what you are looking for, and what you can change.
@@ -17,9 +18,33 @@ import { academicSummary } from '../../data/academic.js';
  */
 export default function Header() {
   const { user, isAuthenticated } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   return (
     <header className="flex h-auto shrink-0 flex-wrap items-center gap-3 px-4 py-3 sm:flex-nowrap sm:gap-4 sm:px-6">
+      {/*
+        THE MENU BUTTON IS ON EVERY VIEWPORT, not just below `md`.
+
+        The obvious call is `md:hidden`, since a desktop already has the
+        sidebar. But the sidebar carries four destinations and the drawer
+        carries nine — the tools and the account rows exist nowhere else — so
+        hiding it on a wide screen would make three features reachable only by
+        narrowing the window.
+      */}
+      <button
+        type="button"
+        onClick={() => setMenuOpen(true)}
+        aria-haspopup="dialog"
+        aria-expanded={menuOpen}
+        aria-label="القائمة"
+        title="القائمة"
+        className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-text-muted transition-colors duration-200 hover:bg-primary-light hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40"
+      >
+        <Menu className="h-[18px] w-[18px]" aria-hidden="true" />
+      </button>
+
+      <MobileMenuDrawer open={menuOpen} onClose={() => setMenuOpen(false)} />
+
       {/* الهوية: حساب أو زائرة */}
       {isAuthenticated ? <MemberIdentity user={user} /> : <GuestIdentity />}
 

@@ -1,6 +1,5 @@
-import { useState } from 'react';
 import { ArrowLeft, Check, Clock, Lock, NotebookPen, Play, Star, Users } from 'lucide-react';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import AIAssistantWidget from '../components/ai/AIAssistantWidget.jsx';
 import NotePadModal from '../components/tools/NotePadModal.jsx';
 import { useGuardedAction } from '../auth/useGuardedAction.js';
@@ -43,7 +42,31 @@ export default function CourseDetails() {
   const course = getCourse(courseId);
   const { isAuthenticated } = useAuth();
   const guard = useGuardedAction();
-  const [notesOpen, setNotesOpen] = useState(false);
+
+  /*
+   * WHICH TOOL IS OPEN LIVES IN THE URL, not in a `useState`.
+   *
+   * These two modals now have two ways in: the floating buttons on this page,
+   * and the navigation drawer in the header — which cannot reach a `useState`
+   * declared here, and should not have to. A search parameter is the one place
+   * both can address without either knowing about the other.
+   *
+   * It buys two things beyond that. `/courses/data-analysis?tool=notes` is a
+   * link someone can send, and a reload reopens what the learner had open
+   * rather than dumping them back on the page behind it.
+   *
+   * `replace: true` keeps it out of the history stack: opening and closing a
+   * modal four times should not mean pressing Back four times to leave.
+   */
+  const [searchParams, setSearchParams] = useSearchParams();
+  const tool = searchParams.get('tool');
+
+  const setTool = (next) => {
+    const params = new URLSearchParams(searchParams);
+    if (next) params.set('tool', next);
+    else params.delete('tool');
+    setSearchParams(params, { replace: true });
+  };
 
   if (!course) return <CourseNotFound id={courseId} />;
 
@@ -179,13 +202,17 @@ export default function CourseDetails() {
         what a guest evaluating the course wants to do while reading it.
       */}
       <div className="fixed bottom-24 end-4 z-40 flex flex-col items-end gap-2 md:bottom-6 md:end-6">
-        <AIAssistantWidget course={course} />
+        <AIAssistantWidget
+          course={course}
+          open={tool === 'assistant'}
+          onOpenChange={(next) => setTool(next ? 'assistant' : null)}
+        />
 
         <button
           type="button"
-          onClick={() => setNotesOpen(true)}
+          onClick={() => setTool('notes')}
           aria-haspopup="dialog"
-          aria-expanded={notesOpen}
+          aria-expanded={tool === 'notes'}
           className="inline-flex h-12 items-center gap-2 rounded-full bg-primary px-5 text-sm font-medium text-on-primary shadow-lift transition-colors duration-200 hover:bg-primary-hover"
         >
           <NotebookPen className="h-4 w-4" aria-hidden="true" />
@@ -196,8 +223,8 @@ export default function CourseDetails() {
       <NotePadModal
         courseId={courseId}
         courseTitle={title}
-        open={notesOpen}
-        onClose={() => setNotesOpen(false)}
+        open={tool === 'notes'}
+        onClose={() => setTool(null)}
       />
     </div>
   );

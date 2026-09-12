@@ -50,8 +50,32 @@ import { generateQuiz, predictedQuestions, summarise } from './quiz.js';
 
 const MAX_QUESTION_LENGTH = 500;
 
-export default function AIAssistantWidget({ course }) {
-  const [open, setOpen] = useState(false);
+/**
+ * @param {object} props
+ * @param {object} props.course
+ * @param {boolean} [props.open] Controlled open state. Omit to let the widget
+ *   own it, which is what the page's own trigger button does.
+ * @param {(next: boolean) => void} [props.onOpenChange] Told about every open
+ *   and close, controlled or not.
+ */
+export default function AIAssistantWidget({ course, open: controlledOpen, onOpenChange }) {
+  /*
+   * CONTROLLED OR UNCONTROLLED, because the panel now has two ways in.
+   *
+   * The floating button opens it locally and needs no owner. The navigation
+   * drawer opens it from a header that cannot reach into this component, so
+   * the course page drives it from the URL instead and passes `open` down.
+   * Supporting both keeps the page's own trigger working without the drawer
+   * having to exist, and means neither path is a special case of the other.
+   */
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = controlledOpen !== undefined;
+  const open = isControlled ? controlledOpen : uncontrolledOpen;
+  const setOpen = (next) => {
+    if (!isControlled) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
+
   const triggerRef = useRef(null);
 
   return (

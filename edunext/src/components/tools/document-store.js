@@ -52,9 +52,22 @@ export function loadDocument(courseId) {
       text: typeof parsed.text === 'string' ? parsed.text : '',
       truncated: parsed.truncated === true,
       annotations: Array.isArray(parsed.annotations)
-        ? parsed.annotations.filter(
-            (item) => typeof item?.id === 'string' && typeof item?.quote === 'string',
-          )
+        ? parsed.annotations
+            .filter((item) => typeof item?.id === 'string' && typeof item?.quote === 'string')
+            /*
+             * Normalised on the way OUT, not trusted as stored. These fields
+             * were added after the first learners had already saved documents,
+             * so every annotation written before then has neither — and a
+             * component reading `annotation.ink` would get `undefined` and
+             * render an unstyled highlight. Defaulting here means the old
+             * records simply become amber, non-exam, which is what they were.
+             */
+            .map((item) => ({
+              ...item,
+              note: typeof item.note === 'string' ? item.note : '',
+              ink: typeof item.ink === 'string' ? item.ink : 'amber',
+              exam: item.exam === true,
+            }))
         : [],
       uploadedAt: typeof parsed.uploadedAt === 'string' ? parsed.uploadedAt : null,
     };

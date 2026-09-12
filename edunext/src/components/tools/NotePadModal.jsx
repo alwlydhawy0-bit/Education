@@ -15,7 +15,7 @@ import {
   X,
 } from 'lucide-react';
 import { renderMarkdown } from './markdown.jsx';
-import DocumentTab from './DocumentTab.jsx';
+import DocAnnotator from './DocAnnotator.jsx';
 import { loadDocument } from './document-store.js';
 import SketchPad from './SketchPad.jsx';
 import { downloadFile, loadNote, safeFilename, saveNote } from './notes-storage.js';
@@ -91,7 +91,7 @@ export default function NotePadModal({ courseId, courseTitle, open, onClose }) {
 function NotePad({ courseId, courseTitle, onClose }) {
   const [stored] = useState(() => loadNote(courseId));
   /*
-   * The document is loaded once on mount, same as the note. `DocumentTab` owns
+   * The document is loaded once on mount, same as the note. `DocAnnotator` owns
    * writing it and hands the new value back up, so this component holds the one
    * copy the export and the tab label both read — two sources would drift the
    * moment one of them forgot to refresh.
@@ -279,7 +279,14 @@ function NotePad({ courseId, courseTitle, onClose }) {
     const highlights =
       studyDoc?.annotations?.length > 0
         ? `\n\n## تظليلات من: ${studyDoc.name}\n\n${studyDoc.annotations
-            .map((a) => `> ${a.quote}${a.note ? `\n\n${a.note}` : ''}`)
+            .map(
+              (a) =>
+                // The exam flag travels with the quote. A learner revising from
+                // this file needs to know which passages they themselves marked
+                // as likely to be asked — that is the whole point of the flag,
+                // and an export that drops it keeps only the easy half.
+                `> ${a.quote}${a.exam ? ' ⭐' : ''}${a.note ? `\n\n${a.note}` : ''}`,
+            )
             .join('\n\n')}\n`
         : '';
     const blob = new Blob([header + markdown + highlights], {
@@ -391,7 +398,7 @@ function NotePad({ courseId, courseTitle, onClose }) {
               }}
             />
           ) : (
-            <DocumentTab courseId={courseId} document={studyDoc} onChange={setStudyDoc} />
+            <DocAnnotator courseId={courseId} document={studyDoc} onChange={setStudyDoc} />
           )}
         </div>
 
@@ -412,7 +419,7 @@ function NotePad({ courseId, courseTitle, onClose }) {
 }
 
 /**
- * The two tabs.
+ * The three tabs.
  *
  * `role="tablist"` with arrow-key movement is the pattern a screen-reader user
  * expects; two buttons that merely look like tabs announce as two buttons and

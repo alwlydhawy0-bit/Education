@@ -91,6 +91,23 @@
     --color-danger: 185 28 28;
     --color-danger-border: 248 113 113;
 
+    /*
+     * HIGHLIGHTER INKS.
+     *
+     * Four, not more: a learner who has to choose between nine shades spends
+     * the session choosing. Each is a BACKGROUND that `text-main` sits on, so
+     * the light set is a pale tint and the dark set is a deep one — the same
+     * ink inverted would be a glowing yellow block behind pale text at night.
+     *
+     * These are the only place in the palette where hue carries meaning the
+     * learner assigns, so they are also the only place a name matters: the
+     * picker labels them, and the export writes the name rather than the hex.
+     */
+    --color-mark-amber: 253 230 138;
+    --color-mark-green: 167 243 208;
+    --color-mark-sky: 186 230 253;
+    --color-mark-rose: 254 205 211;
+
     --shadow-soft: 0 4px 20px -2px rgb(30 27 75 / 0.04);
     --shadow-lift: 0 8px 28px -4px rgb(30 27 75 / 0.08);
 
@@ -121,6 +138,11 @@
 
     --color-danger: 248 113 113;
     --color-danger-border: 248 113 113;
+
+    --color-mark-amber: 120 53 15;
+    --color-mark-green: 6 78 59;
+    --color-mark-sky: 12 74 110;
+    --color-mark-rose: 136 19 55;
 
     /*
      * A 4% shadow over a dark page is nothing at all. Depth in a dark theme

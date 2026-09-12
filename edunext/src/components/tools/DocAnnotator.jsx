@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Download, FileText, Highlighter, Image as ImageIcon, Trash2, Upload } from 'lucide-react';
+import {
+  Check,
+  Download,
+  FileText,
+  Highlighter,
+  Image as ImageIcon,
+  Star,
+  Trash2,
+  Upload,
+} from 'lucide-react';
 import { MAX_FILE_BYTES, classify, extractText } from './extract-text.js';
 import { clearDocument, formatSize, saveDocument } from './document-store.js';
 import { downloadFile, safeFilename } from './notes-storage.js';
+import { DEFAULT_INK, INKS, inkOf, segmentText } from './annotations.js';
 
 /**
  * Upload a study document, read it, and mark it up.
@@ -26,12 +36,14 @@ import { downloadFile, safeFilename } from './notes-storage.js';
  * `window.getSelection()` sidesteps all of it — the browser already knows what
  * the learner selected, in logical order, whatever the direction.
  */
-export default function DocumentTab({ courseId, document: stored, onChange }) {
+export default function DocAnnotator({ courseId, document: stored, onChange }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [selection, setSelection] = useState('');
   const [noteDraft, setNoteDraft] = useState('');
+  const [ink, setInk] = useState(DEFAULT_INK);
+  const [exam, setExam] = useState(false);
   const inputRef = useRef(null);
   const textRef = useRef(null);
 
@@ -121,13 +133,24 @@ export default function DocumentTab({ courseId, document: stored, onChange }) {
       ...stored,
       annotations: [
         ...stored.annotations,
-        { id: `a-${Date.now()}`, quote: selection, note: noteDraft.trim() },
+        {
+          id: `a-${Date.now()}`,
+          quote: selection,
+          note: noteDraft.trim(),
+          ink,
+          exam,
+        },
       ],
     };
     saveDocument(courseId, next);
     onChange(next);
     setSelection('');
     setNoteDraft('');
+    // The ink is STICKY across highlights — a learner colour-coding a chapter
+    // is making the same choice repeatedly — but the exam flag is not. That one
+    // is a claim about one passage, and carrying it forward would quietly mark
+    // everything afterwards as exam-critical.
+    setExam(false);
   };
 
   const removeAnnotation = (id) => {
@@ -174,7 +197,12 @@ export default function DocumentTab({ courseId, document: stored, onChange }) {
     if (stored.annotations.length > 0) {
       lines.push(`## التظليلات (${stored.annotations.length})`, '');
       for (const annotation of stored.annotations) {
-        lines.push(`> ${annotation.quote}`, '');
+        // The ink is written by NAME. A learner who colour-coded by topic has
+        // encoded meaning in those colours, and an export that drops them
+        // hands back a flat list where their own scheme used to be.
+        const marks = [`لون: ${inkOf(annotation.ink).label}`];
+        if (annotation.exam) marks.push('نقطة مهمة للاختبار');
+        lines.push(`> ${annotation.quote}`, '', `\`${marks.join(' · ')}\``, '');
         if (annotation.note) lines.push(annotation.note, '');
       }
     }
@@ -278,13 +306,43 @@ export default function DocumentTab({ courseId, document: stored, onChange }) {
         {stored.kind === 'image' && previewUrl ? (
           <img src={previewUrl} alt={`معاينة ${stored.name}`} className="w-full" />
         ) : stored.text ? (
+          /*
+            THE HIGHLIGHTS ARE DRAWN ON THE DOCUMENT, not merely listed under
+            it. A colour picker whose colour appears nowhere on the text it
+            marked is a setting, not a highlighter — the learner picks green,
+            looks at the page, and sees the same undifferentiated wall.
+
+            `<mark>` rather than a styled span: it carries the meaning natively,
+            and screen readers can be told what each one is via the title.
+          */
           <p
             ref={textRef}
             onMouseUp={captureSelection}
             onKeyUp={captureSelection}
             className="whitespace-pre-wrap p-4 text-xs leading-loose text-text-main selection:bg-accent-lavender selection:text-text-main"
           >
-            {stored.text}
+            {segmentText(stored.text, stored.annotations).map((segment, index) =>
+              segment.annotation ? (
+                <mark
+                  key={`${segment.annotation.id}-${index}`}
+                  title={
+                    segment.annotation.note
+                      ? `${segment.annotation.note}${segment.annotation.exam ? ' — نقطة مهمة للاختبار' : ''}`
+                      : segment.annotation.exam
+                        ? 'نقطة مهمة للاختبار'
+                        : 'تظليل'
+                  }
+                  className={`rounded px-0.5 text-text-main ${inkOf(segment.annotation.ink).mark} ${
+                    segment.annotation.exam ? 'ring-1 ring-primary' : ''
+                  }`}
+                >
+                  {segment.text}
+                </mark>
+              ) : (
+                // eslint-disable-next-line react/no-array-index-key -- plain runs have no identity of their own
+                <span key={`t-${index}`}>{segment.text}</span>
+              ),
+            )}
           </p>
         ) : (
           <p className="p-4 text-xs leading-relaxed text-text-muted">
@@ -297,6 +355,59 @@ export default function DocumentTab({ courseId, document: stored, onChange }) {
       {selection ? (
         <div className="rounded-2xl border border-primary/30 bg-primary-light/50 p-3">
           <p className="line-clamp-2 text-[11px] leading-relaxed text-text-main">«{selection}»</p>
+
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            {/*
+              THE INK PICKER IS A RADIOGROUP, not four buttons that happen to
+              look exclusive. A screen reader then announces "أصفر، ١ من ٤"
+              rather than four unrelated controls, and arrow keys work.
+
+              Each swatch carries a CHECK when chosen, because "which colour is
+              selected" signalled only by a ring around a coloured circle is
+              exactly the distinction a colour-blind learner cannot make.
+            */}
+            <div role="radiogroup" aria-label="لون التظليل" className="flex items-center gap-1">
+              {INKS.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={ink === option.id}
+                  aria-label={option.label}
+                  title={option.label}
+                  onClick={() => setInk(option.id)}
+                  className={`flex h-7 w-7 items-center justify-center rounded-full ${option.swatch} transition-all duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                    ink === option.id
+                      ? 'ring-2 ring-primary ring-offset-1 ring-offset-canvas'
+                      : 'ring-1 ring-accent-subtle'
+                  }`}
+                >
+                  {ink === option.id ? (
+                    <Check className="h-3.5 w-3.5 text-text-main" aria-hidden="true" />
+                  ) : null}
+                </button>
+              ))}
+            </div>
+
+            {/*
+              The exam flag is a TOGGLE, so `aria-pressed` says whether it is on.
+              A plain button would announce identically in both states.
+            */}
+            <button
+              type="button"
+              onClick={() => setExam((current) => !current)}
+              aria-pressed={exam}
+              className={`inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[11px] font-medium transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 ${
+                exam
+                  ? 'bg-primary text-on-primary'
+                  : 'border border-accent-subtle text-text-muted hover:border-primary hover:text-primary'
+              }`}
+            >
+              <Star className={`h-3 w-3 ${exam ? 'fill-current' : ''}`} aria-hidden="true" />
+              <span>تعليق كنقطة مهمة للاختبار</span>
+            </button>
+          </div>
+
           <div className="mt-2 flex items-center gap-2">
             <input
               type="text"
@@ -334,6 +445,10 @@ export default function DocumentTab({ courseId, document: stored, onChange }) {
                 key={annotation.id}
                 className="flex items-start gap-2 rounded-xl border-s-2 border-accent-lavender bg-surface-alt/60 px-3 py-2"
               >
+                <span
+                  className={`mt-0.5 h-3 w-3 shrink-0 rounded-full ${inkOf(annotation.ink).swatch} ring-1 ring-accent-subtle`}
+                  aria-hidden="true"
+                />
                 <span className="min-w-0 flex-1">
                   <span className="line-clamp-2 block text-[11px] leading-relaxed text-text-main">
                     {annotation.quote}
@@ -343,6 +458,14 @@ export default function DocumentTab({ courseId, document: stored, onChange }) {
                       {annotation.note}
                     </span>
                   ) : null}
+                  {annotation.exam ? (
+                    <span className="mt-1 inline-flex items-center gap-1 text-[10px] font-medium text-primary">
+                      <Star className="h-2.5 w-2.5 fill-current" aria-hidden="true" />
+                      <span>نقطة مهمة للاختبار</span>
+                    </span>
+                  ) : null}
+                  {/* The ink is decorative; its NAME is not, so it is spoken. */}
+                  <span className="sr-only">لون التظليل: {inkOf(annotation.ink).label}</span>
                 </span>
                 <button
                   type="button"

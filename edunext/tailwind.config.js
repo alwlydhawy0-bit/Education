@@ -115,6 +115,15 @@ export default {
           DEFAULT: 'rgb(var(--color-danger) / <alpha-value>)',
           border: 'rgb(var(--color-danger-border) / <alpha-value>)',
         },
+
+        // Highlighter inks for the document annotator. Backgrounds only —
+        // `text-main` is what sits on them, in both themes.
+        mark: {
+          amber: 'rgb(var(--color-mark-amber) / <alpha-value>)',
+          green: 'rgb(var(--color-mark-green) / <alpha-value>)',
+          sky: 'rgb(var(--color-mark-sky) / <alpha-value>)',
+          rose: 'rgb(var(--color-mark-rose) / <alpha-value>)',
+        },
       },
 
       borderRadius: {

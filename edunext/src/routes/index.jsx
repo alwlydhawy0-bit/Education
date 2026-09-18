@@ -6,6 +6,7 @@ import CourseDetails from '../pages/CourseDetails.jsx';
 import Courses from '../pages/Courses.jsx';
 import Dashboard from '../pages/Dashboard.jsx';
 import Profile from '../pages/Profile.jsx';
+import ToolLauncher from '../pages/ToolLauncher.jsx';
 
 /**
  * Every destination in the product, in one readable table.
@@ -57,6 +58,19 @@ export default function AppRoutes() {
         <Route path="/courses/:courseId" element={<CourseDetails />} />
         <Route path="/about" element={<About />} />
         <Route path="/profile" element={<Profile />} />
+
+        {/*
+          THE TWO TOOLS HAVE THEIR OWN DOORS.
+
+          Both are scoped to a course, so neither can open without one — but
+          the navigation drawer is on every page, and sending a learner who
+          tapped "المساعد الذكي" to the bare catalogue threw their intent away.
+          These routes keep it: they name the tool, let the learner pick the
+          course, and hand off to `/courses/:id?tool=…`, which is the same URL
+          the course page's own buttons produce.
+        */}
+        <Route path="/assistant" element={<ToolLauncher tool="assistant" />} />
+        <Route path="/notebook" element={<ToolLauncher tool="notes" />} />
       </Route>
 
       <Route path="*" element={<Navigate to="/" replace />} />

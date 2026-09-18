@@ -133,9 +133,15 @@ export default function MobileMenuDrawer({ open, onClose }) {
     navigate(to);
   };
 
+  /*
+   * On a course page the tool opens against THAT course — the learner is
+   * already reading it, and making them choose it again would be absurd.
+   * Everywhere else the tool's own route asks which course, rather than
+   * dumping them on the catalogue with nothing to say why they are there.
+   */
   const openTool = (tool) => {
     if (courseId) go(`/courses/${courseId}?tool=${tool}`);
-    else go('/courses');
+    else go(tool === 'assistant' ? '/assistant' : '/notebook');
   };
 
   return createPortal(
@@ -184,16 +190,25 @@ export default function MobileMenuDrawer({ open, onClose }) {
           </Section>
 
           <Section title="الأدوات التفاعلية">
+            {/*
+              `active` comes from the pathname, so a row highlights while its
+              own launcher is the page being shown — the same way the
+              destination rows do. The hint only appears where it is TRUE:
+              on a course page the tool opens immediately and promising a
+              course chooser would be a lie.
+            */}
             <RowButton
               Icon={Sparkles}
               label="المساعد الذكي"
-              hint={courseId ? null : 'اختاري دورة أولًا'}
+              hint={courseId ? null : 'اختاري الدورة'}
+              active={location.pathname === '/assistant'}
               onClick={() => openTool('assistant')}
             />
             <RowButton
               Icon={NotebookPen}
               label="دفتر الملاحظات والرسومات"
-              hint={courseId ? null : 'اختاري دورة أولًا'}
+              hint={courseId ? null : 'اختاري الدورة'}
+              active={location.pathname === '/notebook'}
               onClick={() => openTool('notes')}
             />
           </Section>
@@ -273,18 +288,24 @@ function RowLink({ to, Icon, label, onNavigate }) {
   );
 }
 
-function RowButton({ Icon, label, hint, onClick, tone = 'plain' }) {
+function RowButton({ Icon, label, hint, onClick, tone = 'plain', active = false }) {
   return (
     <li>
       <button
         type="button"
         onClick={onClick}
+        // `aria-current="page"` and not `aria-pressed`: this row is a link to a
+        // destination that happens to be rendered as a button, so the state
+        // worth announcing is "you are here", not "this is switched on".
+        aria-current={active ? 'page' : undefined}
         className={`${ROW} ${
-          tone === 'danger'
-            ? 'text-danger hover:bg-surface-alt'
-            : tone === 'primary'
-              ? 'font-medium text-primary hover:bg-primary-light'
-              : 'text-text-main hover:bg-surface-alt'
+          active
+            ? 'bg-primary-light font-medium text-primary'
+            : tone === 'danger'
+              ? 'text-danger hover:bg-surface-alt'
+              : tone === 'primary'
+                ? 'font-medium text-primary hover:bg-primary-light'
+                : 'text-text-main hover:bg-surface-alt'
         }`}
       >
         <Icon className="h-4 w-4 shrink-0" aria-hidden="true" />
